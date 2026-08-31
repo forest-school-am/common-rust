@@ -1,15 +1,25 @@
 [package]
 name = "common-oidc"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Shared in-app OIDC for stand apps: BFF sessions, per-request userinfo, server-side refresh (session ruling v5)"
 license = "MIT"
+# Publishes the served-template directory to dependents' build scripts as
+# DEP_COMMON_OIDC_ASSETS (cargo derives that name from THIS `links` value, not
+# from the package name: `links = "common-oidc"` + `cargo:assets=` =>
+# DEP_COMMON_OIDC_ASSETS). It is how adopters copy the shim template without a
+# `../common-oidc` sibling path, so it works for git deps too (§9.8).
+links = "common-oidc"
 
 [dependencies]
-# Stand shared crates (CODESTYLE.md §8 logging, §9 asset rendering). Plain
-# path deps until the repos are pushed (see README consumption note).
-common-logging = { path = "../common-logging" }
-common-templating = { path = "../common-templating" }
+# Stand shared crates (CODESTYLE.md §8 logging, §9 asset rendering). These MUST
+# be git deps, not path deps: a git dependency is checked out standalone, so a
+# `../sibling` path in this manifest resolves to nothing and every consumer
+# fails at resolution. https, never git@ — dependency fetches happen inside
+# Docker builds and nix fixed-output derivations, neither of which has an SSH
+# key or known_hosts.
+common-logging = { git = "https://github.com/forest-school-am/common-rust-logging.git", tag = "v0.1.1" }
+common-templating = { git = "https://github.com/forest-school-am/common-rust-templating.git", tag = "v0.1.2" }
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
 # default-features off + explicit rustls-tls is intentional: guarantees the

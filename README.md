@@ -7,18 +7,18 @@ re-login, a downward-closure group gate, and a served browser shim for the
 401→re-auth contract. No app login/logout buttons — logout lives only at
 authentik.
 
-- **Version:** `0.2.0`
+- **Version:** `0.2.1`
 - **Toolchain:** Rust 1.98.0 (workspace standard).
 - **Depends on** the stand crates `common-logging` (§8 logging) and `common-templating`
   (§9 asset rendering).
 
-> ## ⚠️ Upgrading to 0.2.0 is a BREAKING change with a REQUIRED build step
-> 0.2.0 no longer embeds its JS shim — it renders an on-disk template that it
-> **hash-verifies at boot**. If you bump to 0.2.0 without doing the assets step
+> ## ⚠️ Upgrading to 0.2.x is a BREAKING change with a REQUIRED build step
+> 0.2.x no longer embeds its JS shim — it renders an on-disk template that it
+> **hash-verifies at boot**. If you bump to 0.2.x without doing the assets step
 > below, your service **crash-loops on startup** with an integrity-pin error —
 > this is a hard **boot failure, not a warning**. You MUST, in the SAME change:
-> 1. add the `just assets` copy step and run it (copies the crate's template
->    into your `assets/` — see [the recipe](#serving-the-shim-the-template-copy-recipe-98--required));
+> 1. add the build-script copy step (copies the crate's template into your
+>    `assets/` — see [the recipe](#serving-the-shim-the-template-copy-recipe-98--required));
 > 2. `.gitignore` the copied `assets/common-oidc.js.jinja` so a stale hand-copy
 >    can never be committed — the copy is a build artifact, always re-derived;
 > 3. set `OidcConfig.assets_dir` and a `deployment` class (`OidcConfig` gained
@@ -28,35 +28,49 @@ authentik.
 
 ## Depend on it
 
-Until the repo is pushed, use a **plain path dep** with a NOTE naming the
-canonical future remote:
-
 ```toml
 [dependencies]
-# NOTE: canonical remote is https://github.com/rebenkoy/common-oidc — switch to
-# a git dep once it is pushed. Path dep until then.
-common-oidc = { path = "../common-oidc" }
+common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.1" }
 ```
 
-Do **not** use the stub-remote + `[patch]` form before the push: cargo 1.98
-contacts the patched-away nonexistent git source whenever the resolver
-actually runs (any dependency change), fails on credentials, and poisons the
-cached git db (`--offline` then breaks too) — reproduced during R5 dep
-removals. The `[patch]` redirect is only viable *after* the remote exists (and
-is then unnecessary — just depend on the real git source).
+**Use the `https` URL, never `git@github.com:`.** Dependency fetches happen in
+places that have no SSH key, no agent and no `known_hosts`: Docker build
+containers and nix fixed-output derivations. Measured on the stand — an https
+clone of a tag inside `docker build` succeeds, the `git@` form fails with
+"Host key verification failed". The repos are public, so https needs no
+credentials at all. (Pushing to `origin` from a dev machine still uses the
+`git@` remote; that is a different URL and is unaffected.)
 
-Once pushed, switch to:
+This crate's own two dependencies (`common-logging`, `common-templating`) are
+declared the same way, and **must** be: a git dependency is checked out
+standalone, so a `../sibling` path dep inside a published crate resolves to
+nothing and every consumer fails at *resolution* with `no matching package
+named ...`. That is what v0.2.0 shipped with; v0.2.1 is the packaging fix and
+is otherwise identical.
 
-```toml
-common-oidc = { git = "https://github.com/rebenkoy/common-oidc", tag = "v0.1.1" }
+Do **not** use the stub-remote + `[patch]` form: cargo 1.98 contacts the
+patched-away nonexistent git source whenever the resolver actually runs (any
+dependency change), fails on credentials, and poisons the cached git db
+(`--offline` then breaks too) — reproduced during R5 dep removals. It is also
+simply unnecessary now that the remote exists.
+
+**nix build:** `buildRustPackage` fetches git deps itself, but each one needs
+an entry in `cargoLock.outputHashes`, keyed by `<name>-<version>` as it
+appears in your `Cargo.lock`. Consuming this crate means adding three entries,
+not one — this crate plus the two it pulls in transitively:
+
+```nix
+cargoLock = {
+  lockFile = ./Cargo.lock;
+  outputHashes = {
+    "common-oidc-0.2.1" = "sha256-…";
+    "common-logging-0.1.1" = "sha256-…";
+    "common-templating-0.1.2" = "sha256-…";
+  };
+};
 ```
 
-**nix-build caveat:** a path dep is outside the consumer's flake source tree,
-so `nix build` (buildRustPackage) can't see it — dev-shell and docker builds
-are unaffected (that's why deployments work). `nix build` starts working once
-the real remote exists and you use the git dep (buildRustPackage fetches it;
-add its hash to `cargoLock.outputHashes` — `nix build` prints the expected
-hash on first failure).
+`nix build` prints the expected hash on first failure; paste it in and rebuild.
 
 ## 1. Backends with browser users (BFF)
 
@@ -151,15 +165,51 @@ on-disk copy's hash matches the version this crate was built against (a pin
 derived in `build.rs`, so it can never go stale — that `rerun-if-changed` line
 is load-bearing).
 
+**This binds every adopter that builds an `OidcState`, even one that never
+serves the shim.** The pin is checked inside `OidcState::discover` — at boot,
+not on first request to `/common-oidc.js` — so a fully server-rendered app with
+no browser fetch calls still refuses to start without the template on disk.
+Fail-fast is deliberate: a missing shim should surface at deploy, not at
+whoever's first 401. The one exemption is a bearer-only API service using
+[`BearerValidator`](#2-bearer-api-services-the-mint-pattern) — it takes neither
+discovery nor an assets dir, so it needs no copy step at all.
+
 So each adopter MUST mechanically copy the template into a conventional
 `assets/` dir — **never a hand-copy** (a stale hand-copy is exactly the skew
-this prevents). Add this to your `justfile`/`Makefile`:
+this prevents). Since 0.2.1 the crate tells you where to copy FROM, so the
+recipe no longer needs a `../common-oidc` sibling path and works identically
+whether you took this crate as a path dep or a git dep.
 
-```make
-# copy common-oidc's served template into our assets dir (run before build)
-assets:
-	mkdir -p assets && cp ../common-oidc/templates/common-oidc.js.jinja assets/
+`Cargo.toml` — a build script and this crate as a build-dependency-free
+regular dependency is enough; `links` metadata reaches your build script
+automatically:
+
+```toml
+[dependencies]
+common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.1" }
 ```
+
+`build.rs` — copy the template next to your other assets:
+
+```rust
+fn main() {
+    // Published by common-oidc's build script via its `links = "common-oidc"`
+    // key. Absolute, and valid whether the crate came from a sibling directory
+    // or from ~/.cargo/git/checkouts/.
+    let src = std::path::PathBuf::from(std::env::var("DEP_COMMON_OIDC_ASSETS").unwrap())
+        .join("common-oidc.js.jinja");
+    println!("cargo:rerun-if-changed={}", src.display());
+    std::fs::create_dir_all("assets").unwrap();
+    std::fs::copy(&src, "assets/common-oidc.js.jinja").unwrap();
+}
+```
+
+`DEP_COMMON_OIDC_ASSETS` is derived from the `links` VALUE, not the package
+name — `links = "common-oidc"` plus `cargo:assets=` gives exactly that name.
+(`links = "common-oidc-assets"` would give `DEP_COMMON_OIDC_ASSETS_ASSETS`;
+this is a common misreading of the cargo docs.) The variable is set only for
+**direct** dependents: a crate that gets common-oidc transitively does not see
+it.
 
 **`.gitignore` the copied file** (`assets/common-oidc.js.jinja`) — it is a build
 artifact re-derived from the crate every time, never edited in place. Committing
@@ -173,24 +223,25 @@ let mut config = OidcConfig::new(issuer, client_id, redirect_url);
 config.assets_dir = "assets".into();
 ```
 
-For Docker: run `just assets` before `docker build` so the template lands in
-your build context, then `COPY assets/ /app/assets/` in your Dockerfile.
+For Docker: because the copy now happens in `build.rs` during the build itself,
+there is no pre-build step to remember and nothing extra to stage into the
+build context — `cargo build` produces `assets/` inside the container. Just
+make sure your final image carries that directory next to the binary and points
+`assets_dir` at it.
 
-**When you bump the common-oidc dependency, re-run `just assets` in the same
-breath.** If you forget, the boot pin fails LOUD and EARLY — the app refuses to
+**When you bump the common-oidc dependency the copy re-runs by itself**, since
+the `rerun-if-changed` above tracks the crate's own template path. If a copy
+ever does go stale, the boot pin fails LOUD and EARLY — the app refuses to
 start with an integrity-pin error — rather than silently serving a stale shim
 that disagrees with the backend's 401 contract. That loud failure is the
 feature, not a bug: it's what makes drift structurally impossible.
 
-> **Forward flag (post-push migration, not yet needed):** the `../common-oidc`
-> path only resolves while this crate is a sibling path dep. Once it's pushed
-> and adopters switch to a git dep, the crate source lives under
-> `~/.cargo/git/checkouts/` and the relative copy path breaks for everyone. The
-> cargo-native fix is `links` + `DEP_COMMON_OIDC_ASSETS`: this crate's build
-> script emits the template's absolute path, and dependents' build scripts read
-> `DEP_COMMON_OIDC_ASSETS` to copy from it — working for path AND git deps. Not
-> implemented now (adds build-script complexity, the push hasn't happened); it
-> is the known next migration so no one is surprised a second time.
+> **History:** through 0.2.0 this recipe was a `just assets` target running
+> `cp ../common-oidc/templates/common-oidc.js.jinja assets/`. That relative path
+> only resolves while the crate is a sibling path dep; a git dep lives under
+> `~/.cargo/git/checkouts/` and the copy breaks for everyone. 0.2.1 replaces it
+> with the cargo-native `links` mechanism above. Delete the `just assets` target
+> when you migrate — leaving it is how a stale copy sneaks back in.
 
 ## 2. Bearer-API services (the mint pattern)
 

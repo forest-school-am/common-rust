@@ -223,6 +223,7 @@ dependencies = [
 [[package]]
 name = "common-logging"
 version = "0.1.1"
+source = "git+https://github.com/forest-school-am/common-rust-logging.git?tag=v0.1.1#18ec0b98c898264766026bc309c21e60d1520faa"
 dependencies = [
  "time",
  "tracing",
@@ -231,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "common-oidc"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "axum-extra",
@@ -254,6 +255,7 @@ dependencies = [
 [[package]]
 name = "common-templating"
 version = "0.1.2"
+source = "git+https://github.com/forest-school-am/common-rust-templating.git?tag=v0.1.2#ee6148149e148ace8a21f33e5bee0780acd9a83e"
 dependencies = [
  "minijinja",
  "serde",
