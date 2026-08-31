@@ -36,12 +36,20 @@ contract. No login/logout UI — logout lives only at authentik.
 to `nix build`. The live canary is env-gated: `STAND_LIVE=1` with the teststand
 up (its `stand-oidc-canary` provider).
 
-## Stand context / open migrations (restructure wave)
-- Logs through `stand-log` (§8.5) — MIGRATION PENDING (currently one raw
-  `tracing::warn`); instrument resolve_session/refresh/userinfo per §8.2 and
-  emit AUTH-designator events for 401/redirect/gate decisions.
-- The served shim will move to a `stand-render` template (§9.2a/§9.7/§9.8):
-  no `include_str!`/`.replace`; template loaded from a validated `assets_dir`
-  with a boot version-assertion against the crate's expected template.
-- §4.4: discover() will take the deployment class and refuse
-  `danger_accept_invalid_certs` under prod.
+## Canon compliance (restructure wave — DONE in 0.2.0)
+- Logs through `stand-log` (§8.5): designator macros (AUTH events for
+  code-exchange/redirect/refresh/session-destroy), resolve_session +
+  client.rs async fns instrumented (§8.2).
+- Served shim is a `stand-render` on-disk template (§9.2a/§9.7/§9.8):
+  `templates/stand-oidc.js.jinja`, loaded from `assets_dir`, version-pinned by
+  `STAND_OIDC_JS_SHA256` (derived in build.rs — `rerun-if-changed` is
+  load-bearing) and asserted at discover() boot. NO `include_str!`/`.replace`.
+  Adopters MUST copy the template into their `assets/` (README recipe).
+- §4.4: discover() enforces the deployment class — refuses
+  `danger_accept_invalid_certs` under `Deployment::Prod`. Options classified in
+  the OidcConfig doc.
+
+## Build note
+`build.rs` reads `templates/stand-oidc.js.jinja` and emits its sha256 as
+`STAND_OIDC_JS_SHA256` (build-dep sha2). The `cargo:rerun-if-changed` on the
+template is LOAD-BEARING — without it a template edit wouldn't refresh the pin.

@@ -17,4 +17,8 @@ pub enum Error {
     Userinfo(String),
     #[error("invalid configuration: {0}")]
     Config(String),
+    /// The served-asset directory / template failed boot validation or its
+    /// integrity pin (§9.6/§9.8) — refuse to boot.
+    #[error("asset setup failed: {0}")]
+    Assets(String),
 }

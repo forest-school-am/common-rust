@@ -1,11 +1,15 @@
 [package]
 name = "stand-oidc"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Shared in-app OIDC for stand apps: BFF sessions, per-request userinfo, server-side refresh (session ruling v5)"
 license = "MIT"
 
 [dependencies]
+# Stand shared crates (CODESTYLE.md §8 logging, §9 asset rendering). Plain
+# path deps until the repos are pushed (see README consumption note).
+stand-log = { path = "../stand-log" }
+stand-render = { path = "../stand-render" }
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
 # default-features off + explicit rustls-tls is intentional: guarantees the
@@ -20,6 +24,10 @@ tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+
+[build-dependencies]
+# derive the served shim's integrity-pin hash at build time (§9.8).
+sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }

@@ -7,8 +7,11 @@ re-login, a downward-closure group gate, and a served browser shim for the
 401→re-auth contract. No app login/logout buttons — logout lives only at
 authentik.
 
-- **Version:** `0.1.1`
+- **Version:** `0.2.0` (breaking: `OidcConfig` gained `assets_dir` + `deployment`;
+  the shim is now an on-disk template — see the copy recipe below).
 - **Toolchain:** Rust 1.98.0 (workspace standard).
+- **Depends on** the stand crates `stand-log` (§8 logging) and `stand-render`
+  (§9 asset rendering).
 
 ## Depend on it
 
@@ -125,6 +128,51 @@ Guards built in: single-flight (the first 401 drives the top-level bounce; any
 concurrent 401s see the raw response while the page is already navigating) and
 a loop breaker (a bounce won't re-fire within 10s; the server also escalates
 to interactive exactly once when the SSO session is truly dead).
+
+### Serving the shim: the template copy recipe (§9.8 — REQUIRED)
+
+The shim is no longer embedded in the crate — it's an on-disk template
+(`templates/stand-oidc.js.jinja`) rendered through `stand-render`. Your app
+serves it from its `assets_dir`, and the crate **refuses to boot** unless the
+on-disk copy's hash matches the version this crate was built against (a pin
+derived in `build.rs`, so it can never go stale — that `rerun-if-changed` line
+is load-bearing).
+
+So each adopter MUST mechanically copy the template into a conventional
+`assets/` dir — **never a hand-copy** (a stale hand-copy is exactly the skew
+this prevents). Add this to your `justfile`/`Makefile`:
+
+```make
+# copy stand-oidc's served template into our assets dir (run before build)
+assets:
+	mkdir -p assets && cp ../stand-oidc/templates/stand-oidc.js.jinja assets/
+```
+
+Then point the config at it:
+
+```rust
+let mut config = OidcConfig::new(issuer, client_id, redirect_url);
+config.assets_dir = "assets".into();
+```
+
+For Docker: run `just assets` before `docker build` so the template lands in
+your build context, then `COPY assets/ /app/assets/` in your Dockerfile.
+
+**When you bump the stand-oidc dependency, re-run `just assets` in the same
+breath.** If you forget, the boot pin fails LOUD and EARLY — the app refuses to
+start with an integrity-pin error — rather than silently serving a stale shim
+that disagrees with the backend's 401 contract. That loud failure is the
+feature, not a bug: it's what makes drift structurally impossible.
+
+> **Forward flag (post-push migration, not yet needed):** the `../stand-oidc`
+> path only resolves while this crate is a sibling path dep. Once it's pushed
+> and adopters switch to a git dep, the crate source lives under
+> `~/.cargo/git/checkouts/` and the relative copy path breaks for everyone. The
+> cargo-native fix is `links` + `DEP_STAND_OIDC_ASSETS`: this crate's build
+> script emits the template's absolute path, and dependents' build scripts read
+> `DEP_STAND_OIDC_ASSETS` to copy from it — working for path AND git deps. Not
+> implemented now (adds build-script complexity, the push hasn't happened); it
+> is the known next migration so no one is surprised a second time.
 
 ## 2. Bearer-API services (the mint pattern)
 

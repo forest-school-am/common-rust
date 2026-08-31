@@ -66,6 +66,10 @@ mod principal;
 mod store;
 mod web;
 
+// The served shim's integrity pin, derived from `templates/stand-oidc.js.jinja`
+// at build time (build.rs, §9.8). Never the template content — just its hash.
+include!(concat!(env!("OUT_DIR"), "/shim_hash.rs"));
+
 pub use bearer::{BearerValidator, ValidationError};
 pub use client::{StandClient, TokenBundle};
 pub use config::OidcConfig;

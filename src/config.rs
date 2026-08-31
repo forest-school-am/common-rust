@@ -3,10 +3,21 @@
 //! defaulted, with opt-ins as builder methods (behavior carrying an invariant)
 //! or plain fields (toggles). Refresh is default-OFF (DECISIONS.md R2 Track A).
 
+use std::path::PathBuf;
+
+use stand_log::Deployment;
 use url::Url;
 
 /// Deployment configuration. Everything else (endpoints, keys) comes from
 /// OIDC discovery at [`crate::OidcState::discover`] time.
+///
+/// §4.4 classification of the options: `danger_accept_invalid_certs` is
+/// **dev-only** (discover() refuses it under `Deployment::Prod`); `deployment`
+/// is the declared class itself; everything else (`assets_dir`, `backchannel`,
+/// `cookie_secure`, `login_path`, `cookie_name`, `scopes`) is **neutral** —
+/// valid in both. There are no prod-required options here because the
+/// prod-required inputs (issuer, client id, redirect URL) are constructor
+/// arguments, absent-by-construction impossible.
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
     /// Browser-canonical issuer, e.g.
@@ -41,8 +52,17 @@ pub struct OidcConfig {
     /// disable only for plain-http localhost experiments).
     pub cookie_secure: bool,
     /// Accept untrusted TLS certificates on server→authentik calls (the dev
-    /// stand's self-signed CA). Never enable in prod.
+    /// stand's self-signed CA). **Dev-only (§4.4)**: discover() refuses to boot
+    /// if this is set under `Deployment::Prod`.
     pub danger_accept_invalid_certs: bool,
+    /// Directory holding the served templates (§9). The adopter's build copies
+    /// the crate's `stand-oidc.js.jinja` here (see README); discover()
+    /// validates the dir exists, the template parses, and its hash matches the
+    /// crate version — refusing to boot otherwise (§9.6/§9.8). Default `assets`.
+    pub assets_dir: PathBuf,
+    /// Declared deployment class (§4.4). Presence of options never infers it —
+    /// it is declared. Gates the dev-only refusal above. Default `Dev`.
+    pub deployment: Deployment,
 }
 
 impl OidcConfig {
@@ -59,6 +79,8 @@ impl OidcConfig {
             cookie_name: "stand_session".into(),
             cookie_secure: true,
             danger_accept_invalid_certs: false,
+            assets_dir: PathBuf::from("assets"),
+            deployment: Deployment::Dev,
         }
     }
 

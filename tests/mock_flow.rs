@@ -136,6 +136,9 @@ async fn oidc_state(base: &str, store: MemoryStore) -> OidcState {
     )
     .request_refresh_tokens();
     config.cookie_secure = false;
+    // serve the shim from the crate's own templates dir (its hash matches the
+    // build.rs pin); a bad dir/stale template would refuse discovery.
+    config.assets_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/templates").into();
     OidcState::discover(config, store).await.expect("discovery against mock")
 }
 

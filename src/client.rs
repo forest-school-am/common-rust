@@ -181,6 +181,7 @@ impl StandClient {
     }
 
     /// Redeem the authorization code (PKCE).
+    #[tracing::instrument(skip_all)]
     pub async fn exchange_code(&self, code: String, verifier: String) -> Result<TokenBundle, Error> {
         let resp = self
             .core
@@ -196,6 +197,7 @@ impl StandClient {
     }
 
     /// Server-side refresh (v5: the refresh token never reaches a browser).
+    #[tracing::instrument(skip_all)]
     pub async fn refresh(&self, refresh_token: &str) -> Result<TokenBundle, Error> {
         let rt = RefreshToken::new(refresh_token.to_owned());
         let resp = self
@@ -219,6 +221,7 @@ impl StandClient {
     /// token is; fail closed on anything but a 200. This is the v4 rule —
     /// and the whole integration for bearer-API services (the mint pattern),
     /// which skip the BFF session machinery entirely.
+    #[tracing::instrument(skip_all)]
     pub async fn principal_from_access_token(&self, access_token: &str) -> Result<Principal, Error> {
         let claims: UserInfoClaims<StandClaims, CoreGenderClaim> = self
             .core

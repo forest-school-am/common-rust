@@ -13,7 +13,7 @@
 // Guards: single-flight (N concurrent 401s → one bounce, the rest ride it)
 // and a loop breaker (a bounce won't re-fire within a short window).
 
-const LOGIN_PATH = "__LOGIN_PATH__";
+const LOGIN_PATH = "{{ login_path }}";
 const REAUTH_HEADER = "x-stand-oidc-reauth";
 const LOOP_GUARD_KEY = "stand_oidc_last_bounce";
 const LOOP_GUARD_MS = 10_000;

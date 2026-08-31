@@ -112,12 +112,11 @@ async fn authorization_code(
         let exec = format!("{}/api/v3/flows/executor/{}/?query={}", e.ak, slug, urlenc(query));
         let challenge: Value =
             browser.get(&exec).send().await.unwrap().json().await.expect("authz executor");
-        for _ in 0..8 {
-            match challenge["component"].as_str().unwrap_or_default() {
-                "xak-flow-redirect" => break,
-                other => panic!("unexpected authorize stage {other}: {challenge}"),
-            }
-        }
+        let component = challenge["component"].as_str().unwrap_or_default();
+        assert_eq!(
+            component, "xak-flow-redirect",
+            "unexpected authorize stage {component}: {challenge}"
+        );
         let to = challenge["to"].as_str().expect("redirect target").to_owned();
         if let Some(code) = code_of(&to) {
             return code;

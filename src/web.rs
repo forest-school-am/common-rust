@@ -17,6 +17,9 @@ use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use stand_log::Deployment;
+use stand_render::AssetCache;
+
 use crate::client::StandClient;
 use crate::config::OidcConfig;
 use crate::principal::Principal;
@@ -25,7 +28,9 @@ use crate::store::{Session, SessionStore};
 const FLOW_COOKIE: &str = "so_flow";
 /// Signal header on a 401 telling the served shim to drive silent re-auth.
 const REAUTH_HEADER: &str = "X-Stand-OIDC-Reauth";
-const CLIENT_JS: &str = include_str!("assets/stand-oidc.js");
+/// The served shim template — the adopter's build copies this from the crate's
+/// `templates/` into their `assets_dir` (§9.8; see README recipe).
+const SHIM_TEMPLATE: &str = "stand-oidc.js.jinja";
 
 /// Only same-origin absolute paths are valid post-login redirect targets —
 /// never a scheme, host, or protocol-relative `//evil` (open-redirect guard).
@@ -42,17 +47,36 @@ fn safe_next(raw: Option<&String>) -> String {
 pub struct OidcState {
     pub client: Arc<StandClient>,
     pub store: Arc<dyn SessionStore>,
+    pub assets: Arc<AssetCache>,
 }
 
 impl OidcState {
-    /// Run discovery and assemble the state.
+    /// Run discovery and assemble the state. Validates completely at boot
+    /// (§4.3): the §4.4 dev-only refusal, then the asset cache (dir exists,
+    /// the shim template parses AND its hash matches the crate version —
+    /// §9.6/§9.8), then OIDC discovery (IdP down ⇒ won't start).
     pub async fn discover(
         config: OidcConfig,
         store: impl SessionStore,
     ) -> Result<Self, crate::Error> {
+        // §4.4: a dev-only toggle must never be enabled under prod.
+        if matches!(config.deployment, Deployment::Prod) && config.danger_accept_invalid_certs {
+            return Err(crate::Error::Config(
+                "danger_accept_invalid_certs is dev-only and refused under DEPLOYMENT_TYPE=prod"
+                    .into(),
+            ));
+        }
+        // §9.6/§9.8: build + version-pin the served shim from the adopter's
+        // assets dir. A missing/stale/tampered template refuses to boot here.
+        let assets = stand_render::Builder::new(&config.assets_dir)
+            .pin(SHIM_TEMPLATE, crate::STAND_OIDC_JS_SHA256)
+            .build()
+            .map_err(|e| crate::Error::Assets(e.to_string()))?;
+
         Ok(Self {
             client: Arc::new(StandClient::discover(config).await?),
             store: Arc::new(store),
+            assets: Arc::new(assets),
         })
     }
 
@@ -73,6 +97,7 @@ impl OidcState {
     /// Use this directly when you need `Option<Principal>` rather than the
     /// extractor's auto-redirect (dev-stub modes, custom rejection handling,
     /// or session-by-cookie access to the token).
+    #[tracing::instrument(skip_all)]
     pub async fn resolve_session(&self, jar: &CookieJar) -> Option<(Principal, Session)> {
         let sid = jar.get(self.config().cookie_name.as_str())?.value().to_owned();
         let session = self.store.get(&sid).await?;
@@ -96,12 +121,14 @@ impl OidcState {
                 if let Ok(p) =
                     self.client.principal_from_access_token(&refreshed.access_token).await
                 {
+                    stand_log::debug!(stand_log::AUTH, "access token refreshed server-side");
                     return Some((p, refreshed));
                 }
             }
         }
 
         // both tokens dead -> the SSO session is gone: destroy local state.
+        stand_log::info!(stand_log::AUTH, "session tokens dead — destroying local session");
         self.store.remove(&sid).await;
         None
     }
@@ -136,7 +163,7 @@ fn hex_encode(s: &str) -> String {
 }
 
 fn hex_decode(s: &str) -> Option<String> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     let bytes: Option<Vec<u8>> = (0..s.len())
@@ -202,15 +229,24 @@ async fn login(
 /// Serve the browser shim with the login path baked in (no-cache, like the
 /// searchbase.js precedent — frontends always load the current contract).
 async fn client_js(State(oidc): State<OidcState>) -> Response {
-    let body = CLIENT_JS.replace("__LOGIN_PATH__", &oidc.config().login_path);
-    (
-        [
-            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        body,
-    )
-        .into_response()
+    // Rendered through stand-render (§9): the template is a validated,
+    // version-pinned on-disk file; the cache re-renders only when the file or
+    // params change. Browser gets no-store so it always sees the current one.
+    let login_path = oidc.config().login_path.clone();
+    match oidc.assets.render(SHIM_TEMPLATE, &[("login_path", login_path.as_str())]) {
+        Ok(js) => (
+            [
+                (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            js.to_string(),
+        )
+            .into_response(),
+        Err(e) => {
+            stand_log::error!(stand_log::UPSTREAM, error = %e, "serving stand-oidc.js failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "shim unavailable").into_response()
+        }
+    }
 }
 
 async fn callback(
@@ -266,7 +302,7 @@ async fn callback(
             (jar, Redirect::temporary(&flow.n)).into_response()
         }
         Err(e) => {
-            tracing::warn!("code exchange failed: {e}");
+            stand_log::warn!(stand_log::AUTH, error = %e, "code exchange failed");
             (
                 StatusCode::UNAUTHORIZED,
                 jar.remove(removal_cookie(FLOW_COOKIE)),
@@ -307,6 +343,7 @@ fn unauthenticated(oidc: &OidcState, parts: &Parts, jar: CookieJar) -> AuthRedir
             .unwrap_or_else(|| "/".into());
         // silent first — invisible while the SSO session is alive; the
         // callback escalates to interactive on login_required
+        stand_log::debug!(stand_log::AUTH, path = %next, "no session — silent re-auth redirect");
         AuthRedirect(start_login(oidc, jar, next, true, false))
     } else {
         // XHR/fetch: 401 + the signal header so the served shim drives a
