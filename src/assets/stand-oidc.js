@@ -44,15 +44,18 @@ function bounce() {
   }
   const next = location.pathname + location.search + location.hash;
   location.assign(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+  // The winning single-flight caller gets a promise that never resolves (the
+  // page is navigating away); losers get resolve() above and see the raw 401.
   return new Promise(() => {});
 }
 
-/// Call once at startup: wraps window.fetch so any 401 carrying the re-auth
-/// signal triggers the silent bounce. Returns the original fetch.
+/// Wrap window.fetch so any 401 carrying the re-auth signal triggers the
+/// silent bounce. Idempotent: safe to call more than once (a second call is a
+/// no-op). Call once at startup — it also auto-runs on import.
 export function installReauthGuard() {
-  const original = window.fetch.bind(window);
-  if (window.__standOidcGuarded) return original;
+  if (window.__standOidcGuarded) return;
   window.__standOidcGuarded = true;
+  const original = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const resp = await original(input, init);
     if (resp.status === 401 && resp.headers.get(REAUTH_HEADER)) {
@@ -60,21 +63,7 @@ export function installReauthGuard() {
     }
     return resp;
   };
-  return original;
 }
-
-/// Explicit one-off for callers that don't want global fetch patched:
-/// `const r = await standFetch(url, opts)` bounces on the signal.
-export async function standFetch(input, init) {
-  const resp = await fetch(input, init);
-  if (resp.status === 401 && resp.headers.get(REAUTH_HEADER)) {
-    await bounce();
-  }
-  return resp;
-}
-
-/// authentik user portal — the only place sessions end (no app logout).
-export const logoutIsAtAuthentik = true;
 
 // Auto-install on import: the common case is "just protect my fetches".
 installReauthGuard();

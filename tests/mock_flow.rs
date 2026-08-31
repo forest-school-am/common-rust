@@ -150,20 +150,15 @@ fn app(oidc: OidcState) -> Router {
         .merge(stand_oidc::router(oidc))
 }
 
-fn seed_session(access: &str, refresh: Option<&str>) -> (MemoryStore, &'static str) {
+async fn seed_session(access: &str, refresh: Option<&str>) -> (MemoryStore, &'static str) {
     let store = MemoryStore::default();
     let session = Session {
         access_token: access.into(),
         refresh_token: refresh.map(String::from),
         created: SystemTime::now(),
     };
-    futures_block(store.put("sid1".into(), session));
+    store.put("sid1".into(), session).await;
     (store, "sid1")
-}
-
-/// Tiny block_on for the store's boxed futures inside sync helpers.
-fn futures_block<F: std::future::Future>(f: F) -> F::Output {
-    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(f))
 }
 
 fn get_req(path: &str, cookies: &str, html: bool) -> Request<Body> {
@@ -210,7 +205,7 @@ async fn bearer_validator_fails_closed_when_userinfo_unreachable() {
 async fn valid_access_token_yields_principal() {
     let (base, mock) = spawn_mock().await;
     mock.valid_access.lock().unwrap().insert("at-live".into());
-    let (store, sid) = seed_session("at-live", None);
+    let (store, sid) = seed_session("at-live", None).await;
     let app = app(oidc_state(&base, store).await);
 
     let resp = app
@@ -232,7 +227,7 @@ async fn expired_access_is_refreshed_server_side_exactly_once() {
     let (base, mock) = spawn_mock().await;
     // access token dead, refresh token alive
     mock.valid_refresh.lock().unwrap().insert("rt-live".into());
-    let (store, sid) = seed_session("at-dead", Some("rt-live"));
+    let (store, sid) = seed_session("at-dead", Some("rt-live")).await;
     let app = app(oidc_state(&base, store).await);
 
     let resp = app
@@ -255,7 +250,7 @@ async fn expired_access_is_refreshed_server_side_exactly_once() {
 #[tokio::test(flavor = "multi_thread")]
 async fn dead_tokens_destroy_session_and_start_silent_login() {
     let (base, mock) = spawn_mock().await;
-    let (store, sid) = seed_session("at-dead", Some("rt-dead"));
+    let (store, sid) = seed_session("at-dead", Some("rt-dead")).await;
     let app = app(oidc_state(&base, store).await);
 
     // browser navigation -> redirect into silent authorize
@@ -342,6 +337,7 @@ async fn serves_shim_and_login_route() {
 }
 
 // mirror of web.rs hex_decode for asserting flow-cookie contents in tests
+// mirror of web.rs `hex_decode` (private there) — keep in sync if that changes
 fn hex_decode_test(s: &str) -> String {
     let bytes: Vec<u8> = (0..s.len())
         .step_by(2)

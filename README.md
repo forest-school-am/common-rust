@@ -104,6 +104,12 @@ async fn admin(user: Principal) -> Result<String, stand_oidc::GateDenied> {
 is the downward closure of group **UUIDs** (never names); gate on UUIDs, which
 the stand publishes in `deploy/teststand/state.json`.
 
+`require_group` (above) gates one handler and returns 403 on failure. Most
+apps instead gate once in **middleware** with `principal.in_group(&uuid)` —
+extract the `Principal`, check `in_group`, and reject the whole route group in
+one place rather than per handler. Both read the same downward-closure
+`effective_groups`.
+
 ### Frontend: the 401 shim
 
 Load the served shim; it wraps `fetch` so an expired session triggers a silent
@@ -118,15 +124,22 @@ logic in the app.
 </script>
 ```
 
-Guards built in: single-flight (concurrent 401s → one bounce) and a loop
-breaker (a bounce won't re-fire within 10s; the server also escalates to
-interactive exactly once when the SSO session is truly dead).
+Guards built in: single-flight (the first 401 drives the top-level bounce; any
+concurrent 401s see the raw response while the page is already navigating) and
+a loop breaker (a bounce won't re-fire within 10s; the server also escalates
+to interactive exactly once when the SSO session is truly dead).
 
 ## 2. Bearer-API services (the mint pattern)
 
 Services that validate `Authorization: Bearer` callers (no browser session)
 use `BearerValidator` — userinfo per request, fail closed, **no OIDC
 discovery** (just the userinfo URL), sharing `Principal`'s identity contract:
+
+> **mint is the pending adopter here.** searchbase's mint still has its own
+> hand-written twin of this validator: mint is built in a Docker image whose
+> context is the searchbase repo, and this crate lives in a separate repo
+> outside that context, so mint can't take the dependency until the crate has
+> a real (fetchable) remote or is vendored. Port it then.
 
 ```rust
 use stand_oidc::{BearerValidator, ValidationError};

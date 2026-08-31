@@ -31,13 +31,20 @@
 //! let oidc = OidcState::discover(config, MemoryStore::default()).await?;
 //! let app = Router::new()
 //!     .route("/", get(index))
-//!     .merge(stand_oidc::router(oidc.clone()))
-//!     .with_state(AppState { oidc, .. });
+//!     .route("/admin", get(admin))
+//!     .with_state(AppState { oidc: oidc.clone(), .. })
+//!     .merge(stand_oidc::router(oidc));  // apply app state before merging
 //!
-//! async fn index(p: Principal) -> impl IntoResponse {
+//! // logged-in-as indicator (the extractor also runs userinfo per request)
+//! async fn index(p: Principal) -> String { format!("hello {}", p.username) }
+//!
+//! // a gated handler: `?` on require_group returns 403 (GateDenied)
+//! async fn admin(p: Principal) -> Result<String, GateDenied> {
 //!     p.require_group(&cron_admins_uuid)?;      // downward-closure gate
-//!     format!("hello {}", p.username)           // logged-in-as indicator
+//!     Ok("secret".into())
 //! }
+//! // Or gate in middleware with `p.in_group(&uuid)` — the pattern most apps
+//! // use, checking once at the router layer instead of per handler.
 //! ```
 //!
 //! [`router`] also mounts a login-start route (`/oidc/login`, silent by
@@ -64,5 +71,7 @@ pub use client::{StandClient, TokenBundle};
 pub use config::OidcConfig;
 pub use error::Error;
 pub use principal::{GateDenied, Principal};
-pub use store::{MemoryStore, Session, SessionStore};
-pub use web::{router, user_portal_url, OidcState};
+// BoxFuture is named in the SessionStore trait signature, so external impls
+// need it; AuthRedirect is the Principal extractor's rejection type.
+pub use store::{BoxFuture, MemoryStore, Session, SessionStore};
+pub use web::{router, user_portal_url, AuthRedirect, OidcState};

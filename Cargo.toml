@@ -1,6 +1,6 @@
 [package]
 name = "stand-oidc"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Shared in-app OIDC for stand apps: BFF sessions, per-request userinfo, server-side refresh (session ruling v5)"
 license = "MIT"
@@ -8,6 +8,9 @@ license = "MIT"
 [dependencies]
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
+# default-features off + explicit rustls-tls is intentional: guarantees the
+# openidconnect->reqwest dep is rustls, never openssl, regardless of upstream
+# default changes (supply-chain: this crate is openssl-free).
 openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
@@ -16,10 +19,10 @@ thiserror = "2"
 tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 url = "2"
-uuid = { version = "1", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 # cookies: the live canary drives authentik's flow executor like a browser

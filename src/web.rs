@@ -53,6 +53,52 @@ impl OidcState {
     fn config(&self) -> &OidcConfig {
         self.client.config()
     }
+
+    /// Resolve the caller's session cookie to a live [`Principal`] WITHOUT
+    /// the extractor's redirect/401 policy — the reusable seam the
+    /// [`Principal`] extractor is built on. Runs userinfo per request (v4,
+    /// fail closed); if refresh is enabled and the access token is stale, it
+    /// refreshes server-side and retries userinfo once. Returns the (possibly
+    /// refreshed) [`Session`] alongside the principal so a caller can reach
+    /// the live access token (e.g. a backend proxying mint). Returns `None`
+    /// when there is no live session — no cookie, unknown session, or dead
+    /// tokens (in which case the dead session is removed from the store).
+    ///
+    /// Use this directly when you need `Option<Principal>` rather than the
+    /// extractor's auto-redirect (dev-stub modes, custom rejection handling,
+    /// or session-by-cookie access to the token).
+    pub async fn resolve_session(&self, jar: &CookieJar) -> Option<(Principal, Session)> {
+        let sid = jar.get(self.config().cookie_name.as_str())?.value().to_owned();
+        let session = self.store.get(&sid).await?;
+
+        // v4: userinfo per request, no cache, fail closed.
+        if let Ok(p) = self.client.principal_from_access_token(&session.access_token).await {
+            return Some((p, session));
+        }
+
+        // v5: server-side refresh, then retry userinfo exactly once. A dead
+        // SSO session kills the refresh token too (canary-tested), so logout
+        // stays instant.
+        if let Some(rt) = &session.refresh_token {
+            if let Ok(tokens) = self.client.refresh(rt).await {
+                let refreshed = Session {
+                    access_token: tokens.access_token,
+                    refresh_token: tokens.refresh_token,
+                    created: session.created,
+                };
+                self.store.put(sid.clone(), refreshed.clone()).await;
+                if let Ok(p) =
+                    self.client.principal_from_access_token(&refreshed.access_token).await
+                {
+                    return Some((p, refreshed));
+                }
+            }
+        }
+
+        // both tokens dead -> the SSO session is gone: destroy local state.
+        self.store.remove(&sid).await;
+        None
+    }
 }
 
 /// authentik's user portal — the ONLY place sessions end (house rule: apps
@@ -281,43 +327,9 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let oidc = OidcState::from_ref(state);
         let jar = CookieJar::from_headers(&parts.headers);
-
-        let Some(sid) = jar.get(oidc.config().cookie_name.as_str()).map(|c| c.value().to_owned())
-        else {
-            return Err(unauthenticated(&oidc, parts, jar));
-        };
-        let Some(session) = oidc.store.get(&sid).await else {
-            return Err(unauthenticated(&oidc, parts, jar));
-        };
-
-        // v4: userinfo per request, no cache, fail closed.
-        match oidc.client.principal_from_access_token(&session.access_token).await {
-            Ok(p) => return Ok(p),
-            Err(e) => tracing::debug!("userinfo rejected access token: {e}"),
+        match oidc.resolve_session(&jar).await {
+            Some((principal, _session)) => Ok(principal),
+            None => Err(unauthenticated(&oidc, parts, jar)),
         }
-
-        // v5: server-side refresh, then retry userinfo exactly once. A dead
-        // SSO session kills the refresh token too (canary-tested), so logout
-        // stays instant.
-        if let Some(rt) = &session.refresh_token {
-            if let Ok(tokens) = oidc.client.refresh(rt).await {
-                let refreshed = Session {
-                    access_token: tokens.access_token,
-                    refresh_token: tokens.refresh_token,
-                    created: session.created,
-                };
-                oidc.store.put(sid.clone(), refreshed.clone()).await;
-                if let Ok(p) =
-                    oidc.client.principal_from_access_token(&refreshed.access_token).await
-                {
-                    return Ok(p);
-                }
-            }
-        }
-
-        // both tokens dead -> the SSO session is gone: destroy local state
-        // and (for browsers) try one silent re-auth
-        oidc.store.remove(&sid).await;
-        Err(unauthenticated(&oidc, parts, jar))
     }
 }
