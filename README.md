@@ -1,8 +1,8 @@
-# stand-log
+# common-logging
 
 The Les stand's shared logging crate — the single owner of CODESTYLE.md §8
 mechanics, so nothing drifts per repo. Every Les binary and library depends on
-it, `stand-oidc` included (which logs through here, not raw `tracing`).
+it, `common-oidc` included (which logs through here, not raw `tracing`).
 
 - **Version:** `0.1.0` · **Toolchain:** Rust 1.98.0.
 
@@ -13,9 +13,9 @@ convention until the repo is pushed):
 
 ```toml
 [dependencies]
-# NOTE: canonical remote is https://github.com/rebenkoy/stand-log — switch to
+# NOTE: canonical remote is https://github.com/rebenkoy/common-logging — switch to
 # a git dep once it is pushed. Path dep until then.
-stand-log = { path = "../stand-log" }
+common-logging = { path = "../common-logging" }
 ```
 
 ## Use
@@ -25,7 +25,7 @@ One call at the top of `main` (reads `LOG_FORMAT` + `DEPLOYMENT_TYPE` +
 
 ```rust
 fn main() {
-    stand_log::init();
+    common_logging::init();
     // …
 }
 ```
@@ -34,7 +34,7 @@ Emit with a **designator** (§8.3) as the first argument — it becomes the
 tracing target:
 
 ```rust
-use stand_log::{info, warn, AUTH, UPSTREAM};
+use common_logging::{info, warn, AUTH, UPSTREAM};
 // tracing idiom: structured fields FIRST, then the message string.
 // The human formatter DE-DUPLICATES span-appended fields by name (event
 // wins, then inner-most span) — do not hand-dedupe, but DO reduce
@@ -47,16 +47,16 @@ warn!(UPSTREAM, attempt = n, "retry");
 prints Rust syntax — `exit_code = ?maybe` logs `exit_code=Some(0)`, which reads
 badly in a log viewer. Reduce it to a plain value at the call site:
 `exit_code = maybe.unwrap_or(-1)`, or use `%` (Display) for types that have it.
-stand-log can't intercept tracing's `?`/`%` sigils, so this is on the caller.
+common-logging can't intercept tracing's `?`/`%` sigils, so this is on the caller.
 
 Open the **request root span** (§8.2) in your HTTP middleware; it carries
 `reqid` and `actor` into every event beneath it:
 
 ```rust
-let reqid = stand_log::gen_reqid();
-let span  = stand_log::request_span(&reqid);
+let reqid = common_logging::gen_reqid();
+let span  = common_logging::request_span(&reqid);
 // once identity resolves (the single resolution point, §5.2):
-stand_log::set_actor(&span, &username);
+common_logging::set_actor(&span, &username);
 // then run the handler inside the span (enter it, or `.instrument(span)`).
 ```
 
@@ -81,7 +81,7 @@ A project MAY add its own where the common set genuinely doesn't fit, via the
 `c-` helper (a compile-time `&'static str`):
 
 ```rust
-info!(stand_log::custom!("scheduler"), run_id = %id, "run started");  // target "c-scheduler"
+info!(common_logging::custom!("scheduler"), run_id = %id, "run started");  // target "c-scheduler"
 ```
 
 The `c-` prefix keeps project vocabulary visually distinct from stand
@@ -89,7 +89,7 @@ vocabulary. **Rules (§8.3):** every custom designator MUST be listed and
 explained in its repo's README; one proposed by an LLM/agent MUST be
 operator-confirmed before it lands.
 
-_stand-log itself defines no custom designators. First known customers:
+_common-logging itself defines no custom designators. First known customers:
 cron-viewer (`c-scheduler`, run-lifecycle, pending operator confirmation);
 les-registry maps onto `upstream`+`http` with none needed._
 

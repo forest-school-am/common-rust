@@ -1,14 +1,14 @@
-//! # stand-log — shared logging for the Les stand (CODESTYLE.md §8)
+//! # common-logging — shared logging for the Les stand (CODESTYLE.md §8)
 //!
 //! The single owner of logging mechanics, so nothing drifts per repo. Every
-//! Les binary and library depends on it — including `stand-oidc`, which logs
+//! Les binary and library depends on it — including `common-oidc`, which logs
 //! through here rather than raw `tracing` targets.
 //!
 //! ## A binary sets up logging in one call
 //!
 //! ```ignore
 //! fn main() {
-//!     stand_log::init(); // reads LOG_FORMAT + DEPLOYMENT_TYPE + RUST_LOG
+//!     common_logging::init(); // reads LOG_FORMAT + DEPLOYMENT_TYPE + RUST_LOG
 //!     // …
 //! }
 //! ```
@@ -16,21 +16,21 @@
 //! ## Emit with a designator (§8.3) as the first argument
 //!
 //! ```ignore
-//! use stand_log::{info, warn, AUTH, UPSTREAM};
+//! use common_logging::{info, warn, AUTH, UPSTREAM};
 //! // tracing idiom: structured fields FIRST, then the message.
 //! info!(AUTH, user = %username, "signed in");
 //! warn!(UPSTREAM, attempt = n, "retrying");
 //! // project-specific designator (README-documented + operator-confirmed):
-//! info!(stand_log::custom!("scheduler"), run_id = %id, "run started");
+//! info!(common_logging::custom!("scheduler"), run_id = %id, "run started");
 //! ```
 //!
 //! ## Open the request root span (§8.2) in the HTTP middleware
 //!
 //! ```ignore
-//! let reqid = stand_log::gen_reqid();
-//! let span = stand_log::request_span(&reqid);
+//! let reqid = common_logging::gen_reqid();
+//! let span = common_logging::request_span(&reqid);
 //! // … once identity resolves:
-//! stand_log::set_actor(&span, &username);
+//! common_logging::set_actor(&span, &username);
 //! // run the handler inside the span (enter or .instrument)
 //! ```
 //!

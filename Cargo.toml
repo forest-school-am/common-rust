@@ -1,5 +1,5 @@
 [package]
-name = "stand-log"
+name = "common-logging"
 version = "0.1.1"
 edition = "2021"
 description = "Shared logging for Les stand crates (CODESTYLE.md §8): subscriber setup, designators, emission macros, request-span helper"

@@ -1,9 +1,9 @@
-# AGENTS.md — stand-log
+# AGENTS.md — common-logging
 
 ## Purpose
 The Les stand's shared logging crate (CODESTYLE.md §8.5): the single owner of
 subscriber setup, designators, emission macros, the `c-` custom helper, and
-the request-span helper. Every Les Rust crate depends on it, `stand-oidc`
+the request-span helper. Every Les Rust crate depends on it, `common-oidc`
 included. Change here ripples fleet-wide — treat the output contract as public.
 
 ## Layout
@@ -31,11 +31,11 @@ included. Change here ripples fleet-wide — treat the output contract as public
 
 ## Run / test
 `nix develop --impure -c cargo test` (frozen 1.98.0 toolchain;
-`CARGO_TARGET_DIR=/home/dev/.cache/stand-log-target`). No binary — library
+`CARGO_TARGET_DIR=/home/dev/.cache/common-logging-target`). No binary — library
 only; nothing to `nix build`.
 
 ## Stand context
 Implements DECISIONS.md R6 / CODESTYLE.md §8. Builds are serialized under R4's
 disk regime — coordinate a slot with the manager session before compiling.
 Consumers migrate off raw `tracing` onto this crate as part of the restructure
-wave; `stand-oidc` is first.
+wave; `common-oidc` is first.

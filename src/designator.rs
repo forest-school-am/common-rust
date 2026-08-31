@@ -34,10 +34,10 @@ macro_rules! custom {
 /// the matching `tracing` macro, so message + fields work as usual:
 ///
 /// ```ignore
-/// use stand_log::{info, AUTH};
+/// use common_logging::{info, AUTH};
 /// // tracing idiom: structured fields first, message last.
 /// info!(AUTH, user = %name, "signed in");
-/// info!(stand_log::custom!("scheduler"), n = count, "tick");
+/// info!(common_logging::custom!("scheduler"), n = count, "tick");
 /// ```
 #[macro_export]
 macro_rules! error {
