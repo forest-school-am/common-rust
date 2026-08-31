@@ -7,43 +7,40 @@ re-login, a downward-closure group gate, and a served browser shim for the
 401→re-auth contract. No app login/logout buttons — logout lives only at
 authentik.
 
-- **Version:** `0.1.0`
+- **Version:** `0.1.1`
 - **Toolchain:** Rust 1.98.0 (workspace standard).
 
 ## Depend on it
 
-Declare the **canonical remote** and patch it to the local checkout — so
-manifests are already in their final, pushed form. Dependency block in your
-crate:
+Until the repo is pushed, use a **plain path dep** with a NOTE naming the
+canonical future remote:
 
 ```toml
 [dependencies]
-stand-oidc = { git = "https://github.com/rebenkoy/stand-oidc", branch = "main" }
-```
-
-Patch block at the **workspace ROOT** manifest (cargo never contacts a
-fully-patched git source, so the not-yet-real URL is fine):
-
-```toml
-[patch."https://github.com/rebenkoy/stand-oidc"]
+# NOTE: canonical remote is https://github.com/rebenkoy/stand-oidc — switch to
+# a git dep once it is pushed. Path dep until then.
 stand-oidc = { path = "../stand-oidc" }
 ```
 
-`../stand-oidc` matches the docker build-context layout adopters already
-stage. **When the user pushes the repo, un-stubbing is just deleting the patch
-block — nothing else changes.**
+Do **not** use the stub-remote + `[patch]` form before the push: cargo 1.98
+contacts the patched-away nonexistent git source whenever the resolver
+actually runs (any dependency change), fails on credentials, and poisons the
+cached git db (`--offline` then breaks too) — reproduced during R5 dep
+removals. The `[patch]` redirect is only viable *after* the remote exists (and
+is then unnecessary — just depend on the real git source).
 
-**nix-build caveat:** while patched to a local `path`, the source is still
-outside the consumer's flake tree, so `nix build` (buildRustPackage) can't see
-it — same limitation as a bare path dep. Dev-shell and docker builds are
-unaffected (that's why deployments work), and `nix build` starts working once
-the real remote exists and the patch block is removed (buildRustPackage then
-fetches the git dep; add its hash to `cargoLock.outputHashes` — `nix build`
-prints the expected hash on first failure).
+Once pushed, switch to:
 
-Footnote — a direct local git dep also works if you don't want a patch block
-(`stand-oidc = { git = "file:///mnt/host/workspace/stand-oidc", branch = "main" }`),
-and the same `git+file://` URL works as a flake input.
+```toml
+stand-oidc = { git = "https://github.com/rebenkoy/stand-oidc", tag = "v0.1.1" }
+```
+
+**nix-build caveat:** a path dep is outside the consumer's flake source tree,
+so `nix build` (buildRustPackage) can't see it — dev-shell and docker builds
+are unaffected (that's why deployments work). `nix build` starts working once
+the real remote exists and you use the git dep (buildRustPackage fetches it;
+add its hash to `cargoLock.outputHashes` — `nix build` prints the expected
+hash on first failure).
 
 ## 1. Backends with browser users (BFF)
 
