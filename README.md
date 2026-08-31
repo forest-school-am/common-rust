@@ -12,18 +12,34 @@ authentik.
 
 ## Depend on it
 
-Path dep (same machine, the usual stand case):
+**Use a git dep, not a path dep** — a `path = "../stand-oidc"` points outside
+the consumer's own flake source tree, so `nix build` (buildRustPackage) can't
+see it (dev-shell and docker builds work, which is why deployments still
+function — but `nix build` breaks). A git dep is fetched into the store
+properly. Locally:
 
 ```toml
 [dependencies]
-stand-oidc = { path = "../stand-oidc" }   # adjust to your repo's relative location
+stand-oidc = { git = "file:///mnt/host/workspace/stand-oidc", branch = "main" }
 ```
 
-or git dep once pushed:
+For `nix build`, add the git dep's hash to your flake's `cargoLock`:
 
-```toml
-stand-oidc = { git = "https://github.com/rebenkoy/stand-oidc", tag = "v0.1.0" }
+```nix
+cargoLock = {
+  lockFile = ./Cargo.lock;
+  outputHashes = {
+    # `nix build` prints the expected hash on first failure; paste it here
+    "stand-oidc-0.1.0" = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  };
+};
 ```
+
+The same `git+file:///mnt/host/workspace/stand-oidc` URL also works as a flake
+input. Once the repo is pushed, swap to
+`{ git = "https://github.com/rebenkoy/stand-oidc", tag = "v0.1.0" }`.
+
+A `path` dep is still fine if you only build via the dev shell or docker.
 
 ## 1. Backends with browser users (BFF)
 
