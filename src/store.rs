@@ -1,3 +1,9 @@
+//! Server-side session storage for the BFF pattern: the browser holds only an
+//! opaque cookie id; tokens live here, never in the browser. `SessionStore` is
+//! pluggable; `MemoryStore` is the single-instance default — acceptable as a
+//! default only because identity is re-validated per request, so a lost store
+//! is a re-login, never a security hole.
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;

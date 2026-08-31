@@ -1,3 +1,8 @@
+//! The protocol client's error taxonomy — one variant per distinct failure so
+//! a caller maps each to the right response and severity (§3.2, one enum per
+//! handling contract). Separate from the bearer validator's `ValidationError`
+//! and the extractor's rejection types, which answer to different contracts.
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("OIDC discovery failed: {0}")]

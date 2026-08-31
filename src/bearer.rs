@@ -1,3 +1,9 @@
+//! Bearer-token validation for API services (the mint pattern): userinfo per
+//! request, fail closed, no OIDC discovery. Kept separate from the BFF client
+//! so a service that only checks `Authorization: Bearer` callers takes neither
+//! a session store nor discovery — just a userinfo URL — while still sharing
+//! `Principal`'s identity contract.
+
 use reqwest::header;
 use serde::Deserialize;
 

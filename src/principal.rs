@@ -1,3 +1,9 @@
+//! The authenticated caller as userinfo reported it THIS request (nothing here
+//! is cached — per-request validation). `Principal::from_userinfo` is the
+//! single place the stand's identity contract is enforced (UUID `sub`, UUID
+//! `effective_groups`, fail-closed), shared by the BFF client and the bearer
+//! validator so every service agrees on what identity means.
+
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use uuid::Uuid;

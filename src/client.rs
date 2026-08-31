@@ -1,3 +1,10 @@
+//! The OIDC protocol client: discovery, PKCE authorization-code exchange,
+//! refresh, and userinfo — all via the `openidconnect` crate (§11.1, buy the
+//! protocol). Nothing about the wire is hand-written here; this module adds
+//! only the stand conventions (browser/backchannel issuer split, public-client
+//! PKCE, userinfo → Principal). The verbose typestate aliases exist solely to
+//! carry our additional-claims type through openidconnect's generics.
+
 use openidconnect::core::{
     CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim,
     CoreJsonWebKey, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm, CoreRevocableToken,

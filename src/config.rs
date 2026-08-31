@@ -1,3 +1,8 @@
+//! Deployment configuration for the BFF client. `OidcConfig::new` takes the
+//! three required inputs (issuer, client id, redirect URL); everything else is
+//! defaulted, with opt-ins as builder methods (behavior carrying an invariant)
+//! or plain fields (toggles). Refresh is default-OFF (DECISIONS.md R2 Track A).
+
 use url::Url;
 
 /// Deployment configuration. Everything else (endpoints, keys) comes from

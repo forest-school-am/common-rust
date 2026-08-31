@@ -1,3 +1,9 @@
+//! The axum policy layer over the protocol client: the router (OIDC callback +
+//! login-start + the served shim), the `Principal` extractor, and the
+//! `resolve_session` seam it is built on (mechanism vs policy — §5.2), plus the
+//! silent-relogin redirect / 401-with-reauth-header decisions. The only module
+//! that speaks HTTP; client.rs speaks only OIDC.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
