@@ -6,16 +6,16 @@
 //! guarantee of ruling v5 rests on it. **Run this against any authentik
 //! upgrade — the 2026.8 migration in particular — before trusting it.**
 //!
-//! Gated: only runs with STAND_LIVE=1 (needs the teststand up and
-//! setup.py's `stand-oidc-canary` provider). Overridable env:
-//!   STAND_AK        base URL          (default http://127.0.0.1:8000)
-//!   STAND_AK_TOKEN  admin API token   (default teststand-api-token)
-//!   STAND_USER / STAND_PASSWORD       (default alice / 123456)
+//! Gated: only runs with COMMON_OIDC_LIVE=1 (needs the teststand up and
+//! setup.py's `common-oidc-canary` provider). Overridable env:
+//!   COMMON_OIDC_AK        base URL          (default http://127.0.0.1:8000)
+//!   COMMON_OIDC_AK_TOKEN  admin API token   (default teststand-api-token)
+//!   COMMON_OIDC_USER / COMMON_OIDC_PASSWORD       (default alice / 123456)
 
 use serde_json::{json, Value};
 use url::Url;
 
-use stand_oidc::{OidcConfig, StandClient};
+use common_oidc::{OidcConfig, OidcClient};
 
 struct Env {
     ak: String,
@@ -25,16 +25,16 @@ struct Env {
 }
 
 fn env() -> Option<Env> {
-    if std::env::var("STAND_LIVE").as_deref() != Ok("1") {
-        eprintln!("live canary skipped: set STAND_LIVE=1 with the teststand running");
+    if std::env::var("COMMON_OIDC_LIVE").as_deref() != Ok("1") {
+        eprintln!("live canary skipped: set COMMON_OIDC_LIVE=1 with the teststand running");
         return None;
     }
     let get = |k: &str, d: &str| std::env::var(k).unwrap_or_else(|_| d.to_owned());
     Some(Env {
-        ak: get("STAND_AK", "http://127.0.0.1:8000"),
-        token: get("STAND_AK_TOKEN", "teststand-api-token"),
-        user: get("STAND_USER", "alice"),
-        password: get("STAND_PASSWORD", "123456"),
+        ak: get("COMMON_OIDC_AK", "http://127.0.0.1:8000"),
+        token: get("COMMON_OIDC_AK_TOKEN", "teststand-api-token"),
+        user: get("COMMON_OIDC_USER", "alice"),
+        password: get("COMMON_OIDC_PASSWORD", "123456"),
     })
 }
 
@@ -149,12 +149,12 @@ async fn instant_logout_kills_access_and_refresh_tokens() {
 
     // the crate under test does discovery, PKCE, exchange, refresh, userinfo
     let config = OidcConfig::new(
-        Url::parse(&format!("{}/application/o/stand-oidc-canary/", e.ak)).unwrap(),
-        "stand-oidc-canary",
+        Url::parse(&format!("{}/application/o/common-oidc-canary/", e.ak)).unwrap(),
+        "common-oidc-canary",
         Url::parse("http://127.0.0.1:18999/cb").unwrap(),
     )
     .request_refresh_tokens(); // the whole point is to test refresh revocation
-    let client = StandClient::discover(config).await.expect("discovery against live stand");
+    let client = OidcClient::discover(config).await.expect("discovery against live stand");
     let (auth_url, _state, verifier) = client.authorize_url(false);
     let code = authorization_code(&http, &browser, &e, &auth_url).await;
     let tokens = client.exchange_code(code, verifier).await.expect("code exchange");

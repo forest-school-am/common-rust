@@ -28,7 +28,7 @@
             (import "${dev-shells-src}/shells/rust-stable.nix" { inherit pkgs; })
           ];
           env = {
-            CARGO_TARGET_DIR = "/home/dev/.cache/stand-oidc-target";
+            CARGO_TARGET_DIR = "/home/dev/.cache/common-oidc-target";
           };
         };
     };

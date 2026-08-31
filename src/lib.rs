@@ -1,4 +1,4 @@
-//! # stand-oidc — the stand's one way to do in-app OIDC (session ruling v5)
+//! # common-oidc — the stand's one way to do in-app OIDC (session ruling v5)
 //!
 //! Every stand app authenticates the same way: in-app OIDC against the shared
 //! authentik, browser-facing state limited to ONE HttpOnly session cookie
@@ -33,7 +33,7 @@
 //!     .route("/", get(index))
 //!     .route("/admin", get(admin))
 //!     .with_state(AppState { oidc: oidc.clone(), .. })
-//!     .merge(stand_oidc::router(oidc));  // apply app state before merging
+//!     .merge(common_oidc::router(oidc));  // apply app state before merging
 //!
 //! // logged-in-as indicator (the extractor also runs userinfo per request)
 //! async fn index(p: Principal) -> String { format!("hello {}", p.username) }
@@ -48,9 +48,9 @@
 //! ```
 //!
 //! [`router`] also mounts a login-start route (`/oidc/login`, silent by
-//! default) and serves the framework-free browser shim at `/stand-oidc.js`,
+//! default) and serves the framework-free browser shim at `/common-oidc.js`,
 //! which implements the client side of the 401 contract (wrap `fetch`; on a
-//! 401 carrying `X-Stand-OIDC-Reauth`, bounce top-level through silent
+//! 401 carrying `X-Common-OIDC-Reauth`, bounce top-level through silent
 //! re-auth — single-flight + loop-guarded). Frontends load it from the same
 //! backend that speaks the contract, so they can never version-skew.
 //!
@@ -66,12 +66,12 @@ mod principal;
 mod store;
 mod web;
 
-// The served shim's integrity pin, derived from `templates/stand-oidc.js.jinja`
+// The served shim's integrity pin, derived from `templates/common-oidc.js.jinja`
 // at build time (build.rs, §9.8). Never the template content — just its hash.
 include!(concat!(env!("OUT_DIR"), "/shim_hash.rs"));
 
 pub use bearer::{BearerValidator, ValidationError};
-pub use client::{StandClient, TokenBundle};
+pub use client::{OidcClient, TokenBundle};
 pub use config::OidcConfig;
 pub use error::Error;
 pub use principal::{GateDenied, Principal};

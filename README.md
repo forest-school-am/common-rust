@@ -1,4 +1,4 @@
-# stand-oidc
+# common-oidc
 
 One in-app OIDC implementation for every stand backend (DECISIONS.md R1/R2).
 Protocol from the [`openidconnect`] crate; this crate adds the stand's policy:
@@ -9,7 +9,7 @@ authentik.
 
 - **Version:** `0.2.0`
 - **Toolchain:** Rust 1.98.0 (workspace standard).
-- **Depends on** the stand crates `stand-log` (§8 logging) and `stand-render`
+- **Depends on** the stand crates `common-logging` (§8 logging) and `common-templating`
   (§9 asset rendering).
 
 > ## ⚠️ Upgrading to 0.2.0 is a BREAKING change with a REQUIRED build step
@@ -19,7 +19,7 @@ authentik.
 > this is a hard **boot failure, not a warning**. You MUST, in the SAME change:
 > 1. add the `just assets` copy step and run it (copies the crate's template
 >    into your `assets/` — see [the recipe](#serving-the-shim-the-template-copy-recipe-98--required));
-> 2. `.gitignore` the copied `assets/stand-oidc.js.jinja` so a stale hand-copy
+> 2. `.gitignore` the copied `assets/common-oidc.js.jinja` so a stale hand-copy
 >    can never be committed — the copy is a build artifact, always re-derived;
 > 3. set `OidcConfig.assets_dir` and a `deployment` class (`OidcConfig` gained
 >    both fields).
@@ -33,9 +33,9 @@ canonical future remote:
 
 ```toml
 [dependencies]
-# NOTE: canonical remote is https://github.com/rebenkoy/stand-oidc — switch to
+# NOTE: canonical remote is https://github.com/rebenkoy/common-oidc — switch to
 # a git dep once it is pushed. Path dep until then.
-stand-oidc = { path = "../stand-oidc" }
+common-oidc = { path = "../common-oidc" }
 ```
 
 Do **not** use the stub-remote + `[patch]` form before the push: cargo 1.98
@@ -48,7 +48,7 @@ is then unnecessary — just depend on the real git source).
 Once pushed, switch to:
 
 ```toml
-stand-oidc = { git = "https://github.com/rebenkoy/stand-oidc", tag = "v0.1.1" }
+common-oidc = { git = "https://github.com/rebenkoy/common-oidc", tag = "v0.1.1" }
 ```
 
 **nix-build caveat:** a path dep is outside the consumer's flake source tree,
@@ -61,7 +61,7 @@ hash on first failure).
 ## 1. Backends with browser users (BFF)
 
 ```rust
-use stand_oidc::{OidcConfig, OidcState, MemoryStore, Principal};
+use common_oidc::{OidcConfig, OidcState, MemoryStore, Principal};
 use url::Url;
 
 #[derive(Clone)]
@@ -82,23 +82,23 @@ let config = OidcConfig::new(
 let oidc = OidcState::discover(config, MemoryStore::default()).await?;
 let app = axum::Router::new()
     .route("/", axum::routing::get(index))
-    .merge(stand_oidc::router(oidc.clone())) // callback + /oidc/login + /stand-oidc.js
+    .merge(common_oidc::router(oidc.clone())) // callback + /oidc/login + /common-oidc.js
     .with_state(AppState { oidc });
 ```
 
-`stand_oidc::router` mounts three routes: the OIDC **callback** (the path of
+`common_oidc::router` mounts three routes: the OIDC **callback** (the path of
 your `redirect_url`), the **login-start** route (`/oidc/login`, silent by
-default), and the served **`/stand-oidc.js`** shim.
+default), and the served **`/common-oidc.js`** shim.
 
 ### The Principal extractor
 
 Add `Principal` to any handler; it runs userinfo **per request** (no cache,
 fail closed) and, if the access token has expired, drives a silent re-auth
-(browser nav → redirect; XHR/fetch → 401 + `X-Stand-OIDC-Reauth`). If refresh
+(browser nav → redirect; XHR/fetch → 401 + `X-Common-OIDC-Reauth`). If refresh
 is enabled (Track B) it first tries a server-side refresh, once.
 
 ```rust
-use stand_oidc::Principal;
+use common_oidc::Principal;
 use uuid::Uuid;
 
 async fn index(user: Principal) -> String {
@@ -106,7 +106,7 @@ async fn index(user: Principal) -> String {
 }
 
 // downward-closure gate (parents inherit children): 403 on failure
-async fn admin(user: Principal) -> Result<String, stand_oidc::GateDenied> {
+async fn admin(user: Principal) -> Result<String, common_oidc::GateDenied> {
     let cron_admins: Uuid = "d427f013-3bef-45e7-96aa-32545b58f845".parse().unwrap();
     user.require_group(&cron_admins)?;
     Ok("secret".into())
@@ -131,7 +131,7 @@ logic in the app.
 
 ```html
 <script type="module">
-  import { installReauthGuard } from "https://my-app.dev.local/stand-oidc.js";
+  import { installReauthGuard } from "https://my-app.dev.local/common-oidc.js";
   installReauthGuard(); // auto-runs on import too; call is idempotent
   // now just fetch("/api/…") — 401s with the re-auth signal self-heal
 </script>
@@ -145,7 +145,7 @@ to interactive exactly once when the SSO session is truly dead).
 ### Serving the shim: the template copy recipe (§9.8 — REQUIRED)
 
 The shim is no longer embedded in the crate — it's an on-disk template
-(`templates/stand-oidc.js.jinja`) rendered through `stand-render`. Your app
+(`templates/common-oidc.js.jinja`) rendered through `common-templating`. Your app
 serves it from its `assets_dir`, and the crate **refuses to boot** unless the
 on-disk copy's hash matches the version this crate was built against (a pin
 derived in `build.rs`, so it can never go stale — that `rerun-if-changed` line
@@ -156,12 +156,12 @@ So each adopter MUST mechanically copy the template into a conventional
 this prevents). Add this to your `justfile`/`Makefile`:
 
 ```make
-# copy stand-oidc's served template into our assets dir (run before build)
+# copy common-oidc's served template into our assets dir (run before build)
 assets:
-	mkdir -p assets && cp ../stand-oidc/templates/stand-oidc.js.jinja assets/
+	mkdir -p assets && cp ../common-oidc/templates/common-oidc.js.jinja assets/
 ```
 
-**`.gitignore` the copied file** (`assets/stand-oidc.js.jinja`) — it is a build
+**`.gitignore` the copied file** (`assets/common-oidc.js.jinja`) — it is a build
 artifact re-derived from the crate every time, never edited in place. Committing
 it invites exactly the stale hand-copy the boot pin exists to catch. The recipe
 copies fresh; git never tracks it.
@@ -176,19 +176,19 @@ config.assets_dir = "assets".into();
 For Docker: run `just assets` before `docker build` so the template lands in
 your build context, then `COPY assets/ /app/assets/` in your Dockerfile.
 
-**When you bump the stand-oidc dependency, re-run `just assets` in the same
+**When you bump the common-oidc dependency, re-run `just assets` in the same
 breath.** If you forget, the boot pin fails LOUD and EARLY — the app refuses to
 start with an integrity-pin error — rather than silently serving a stale shim
 that disagrees with the backend's 401 contract. That loud failure is the
 feature, not a bug: it's what makes drift structurally impossible.
 
-> **Forward flag (post-push migration, not yet needed):** the `../stand-oidc`
+> **Forward flag (post-push migration, not yet needed):** the `../common-oidc`
 > path only resolves while this crate is a sibling path dep. Once it's pushed
 > and adopters switch to a git dep, the crate source lives under
 > `~/.cargo/git/checkouts/` and the relative copy path breaks for everyone. The
-> cargo-native fix is `links` + `DEP_STAND_OIDC_ASSETS`: this crate's build
+> cargo-native fix is `links` + `DEP_COMMON_OIDC_ASSETS`: this crate's build
 > script emits the template's absolute path, and dependents' build scripts read
-> `DEP_STAND_OIDC_ASSETS` to copy from it — working for path AND git deps. Not
+> `DEP_COMMON_OIDC_ASSETS` to copy from it — working for path AND git deps. Not
 > implemented now (adds build-script complexity, the push hasn't happened); it
 > is the known next migration so no one is surprised a second time.
 
@@ -205,7 +205,7 @@ discovery** (just the userinfo URL), sharing `Principal`'s identity contract:
 > a real (fetchable) remote or is vendored. Port it then.
 
 ```rust
-use stand_oidc::{BearerValidator, ValidationError};
+use common_oidc::{BearerValidator, ValidationError};
 
 let validator = BearerValidator::new(reqwest::Client::new(), userinfo_url);
 let principal = match validator.validate(bearer).await {
@@ -237,8 +237,8 @@ the live canary guards, and why it currently fails on stock authentik).
 ## Tests
 
 `cargo test` runs unit + mock-authentik integration tests offline. The live
-canary (`tests/live_canary.rs`) is gated behind `STAND_LIVE=1` and needs the
-teststand up (its `stand-oidc-canary` provider); it is the acceptance test for
+canary (`tests/live_canary.rs`) is gated behind `COMMON_OIDC_LIVE=1` and needs the
+teststand up (its `common-oidc-canary` provider); it is the acceptance test for
 Track B — green means refresh tokens die with their session.
 
 See `DESIGN_NOTES.md` for parked (not-yet-built) ideas.

@@ -26,19 +26,19 @@ use crate::principal::Principal;
 /// The stand's custom claim, served by the shared `effective_groups` scope
 /// mapping (downward closure of group UUIDs).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct StandClaims {
+struct OidcClaims {
     // kept as strings so Principal::from_userinfo is the single UUID-parsing
     // / fail-closed point shared with the bearer validator
     #[serde(default)]
     effective_groups: Vec<String>,
 }
-impl AdditionalClaims for StandClaims {}
+impl AdditionalClaims for OidcClaims {}
 
 /// `CoreTokenResponse` with our additional claims (the client's token
 /// response type must match its claims type).
-type StandTokenResponse = StandardTokenResponse<
+type OidcTokenResponse = StandardTokenResponse<
     IdTokenFields<
-        StandClaims,
+        OidcClaims,
         EmptyExtraTokenFields,
         CoreGenderClaim,
         CoreJweContentEncryptionAlgorithm,
@@ -50,15 +50,15 @@ type StandTokenResponse = StandardTokenResponse<
 /// A `CoreClient` carrying our additional claims (the claims type of
 /// `user_info` responses is fixed by the client type), with the three
 /// endpoints we use statically set.
-type StandCore = Client<
-    StandClaims,
+type OidcCore = Client<
+    OidcClaims,
     CoreAuthDisplay,
     CoreGenderClaim,
     CoreJweContentEncryptionAlgorithm,
     CoreJsonWebKey,
     CoreAuthPrompt,
     StandardErrorResponse<CoreErrorResponseType>,
-    StandTokenResponse,
+    OidcTokenResponse,
     CoreTokenIntrospectionResponse,
     CoreRevocableToken,
     CoreRevocationErrorResponse,
@@ -80,13 +80,13 @@ pub struct TokenBundle {
 /// Discovery-configured OIDC protocol client. All hand-shaking goes through
 /// the `openidconnect` crate; this wrapper only pins the stand conventions
 /// (issuer/backchannel origin split, PKCE public client, userinfo → Principal).
-pub struct StandClient {
-    core: StandCore,
+pub struct OidcClient {
+    core: OidcCore,
     http: reqwest::Client,
     config: OidcConfig,
 }
 
-impl StandClient {
+impl OidcClient {
     /// Fetch the provider's discovery document and build the client.
     ///
     /// Origin policy: the document is fetched via the backchannel origin;
@@ -136,7 +136,7 @@ impl StandClient {
 
         // ID tokens are never verified (identity comes from userinfo, per
         // request) — issuer and jwks are only structural here.
-        let core: StandCore = Client::new(
+        let core: OidcCore = Client::new(
             ClientId::new(config.client_id.clone()),
             IssuerUrl::from_url(config.issuer.clone()),
             JsonWebKeySet::new(vec![]),
@@ -223,7 +223,7 @@ impl StandClient {
     /// which skip the BFF session machinery entirely.
     #[tracing::instrument(skip_all)]
     pub async fn principal_from_access_token(&self, access_token: &str) -> Result<Principal, Error> {
-        let claims: UserInfoClaims<StandClaims, CoreGenderClaim> = self
+        let claims: UserInfoClaims<OidcClaims, CoreGenderClaim> = self
             .core
             .user_info(AccessToken::new(access_token.to_owned()), None)
             .request_async(&self.http)

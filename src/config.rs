@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use stand_log::Deployment;
+use common_logging::Deployment;
 use url::Url;
 
 /// Deployment configuration. Everything else (endpoints, keys) comes from
@@ -43,7 +43,7 @@ pub struct OidcConfig {
     /// opt-in via [`OidcConfig::request_refresh_tokens`] pending that fix.
     pub scopes: Vec<String>,
     /// Path of the login-start route mounted by [`crate::router`] and baked
-    /// into the served `/stand-oidc.js` shim (default `/oidc/login`). A
+    /// into the served `/common-oidc.js` shim (default `/oidc/login`). A
     /// browser hits it to (re)establish a session via silent `prompt=none`.
     pub login_path: String,
     /// Session cookie name (default `stand_session`).
@@ -56,7 +56,7 @@ pub struct OidcConfig {
     /// if this is set under `Deployment::Prod`.
     pub danger_accept_invalid_certs: bool,
     /// Directory holding the served templates (§9). The adopter's build copies
-    /// the crate's `stand-oidc.js.jinja` here (see README); discover()
+    /// the crate's `common-oidc.js.jinja` here (see README); discover()
     /// validates the dir exists, the template parses, and its hash matches the
     /// crate version — refusing to boot otherwise (§9.6/§9.8). Default `assets`.
     pub assets_dir: PathBuf,

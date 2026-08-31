@@ -1,11 +1,11 @@
-// stand-oidc browser shim — served by the app's own backend at
-// GET /stand-oidc.js with the login path baked in, so a frontend can never
+// common-oidc browser shim — served by the app's own backend at
+// GET /common-oidc.js with the login path baked in, so a frontend can never
 // version-skew against the backend's 401 contract (the searchbase.js
 // precedent). Framework-free; import as a module.
 //
 // The contract (DECISIONS.md R2, Track A): the backend protects APIs with
 // per-request userinfo. When the access token has expired it answers an
-// XHR/fetch call with HTTP 401 and the header `X-Stand-OIDC-Reauth`. This
+// XHR/fetch call with HTTP 401 and the header `X-Common-OIDC-Reauth`. This
 // shim wraps fetch: it passes every request through untouched until it sees
 // that signal, then drives a silent `prompt=none` re-auth by navigating
 // top-level to the login path (invisible while the SSO session is alive;
@@ -14,8 +14,8 @@
 // and a loop breaker (a bounce won't re-fire within a short window).
 
 const LOGIN_PATH = "{{ login_path }}";
-const REAUTH_HEADER = "x-stand-oidc-reauth";
-const LOOP_GUARD_KEY = "stand_oidc_last_bounce";
+const REAUTH_HEADER = "x-common-oidc-reauth";
+const LOOP_GUARD_KEY = "common_oidc_last_bounce";
 const LOOP_GUARD_MS = 10_000;
 
 let bouncing = false; // single-flight within this document
@@ -53,8 +53,8 @@ function bounce() {
 /// silent bounce. Idempotent: safe to call more than once (a second call is a
 /// no-op). Call once at startup — it also auto-runs on import.
 export function installReauthGuard() {
-  if (window.__standOidcGuarded) return;
-  window.__standOidcGuarded = true;
+  if (window.__commonOidcGuarded) return;
+  window.__commonOidcGuarded = true;
   const original = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const resp = await original(input, init);

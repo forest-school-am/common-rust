@@ -17,7 +17,7 @@ use serde_json::json;
 use tower::util::ServiceExt;
 use url::Url;
 
-use stand_oidc::{
+use common_oidc::{
     BearerValidator, MemoryStore, OidcConfig, OidcState, Principal, Session, SessionStore,
     ValidationError,
 };
@@ -150,7 +150,7 @@ fn app(oidc: OidcState) -> Router {
     Router::new()
         .route("/me", get(me))
         .with_state(oidc.clone())
-        .merge(stand_oidc::router(oidc))
+        .merge(common_oidc::router(oidc))
 }
 
 async fn seed_session(access: &str, refresh: Option<&str>) -> (MemoryStore, &'static str) {
@@ -281,7 +281,7 @@ async fn dead_tokens_destroy_session_and_start_silent_login() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
-        resp.headers().get("x-stand-oidc-reauth").unwrap().to_str().unwrap(),
+        resp.headers().get("x-common-oidc-reauth").unwrap().to_str().unwrap(),
         "/oidc/login",
         "the shim's 401 contract needs the re-auth signal header"
     );
@@ -295,7 +295,7 @@ async fn serves_shim_and_login_route() {
     // the served shim: baked login path, framework-free module
     let resp = app
         .clone()
-        .oneshot(Request::builder().uri("/stand-oidc.js").body(Body::empty()).unwrap())
+        .oneshot(Request::builder().uri("/common-oidc.js").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
