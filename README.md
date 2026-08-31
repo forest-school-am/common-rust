@@ -12,34 +12,38 @@ authentik.
 
 ## Depend on it
 
-**Use a git dep, not a path dep** — a `path = "../stand-oidc"` points outside
-the consumer's own flake source tree, so `nix build` (buildRustPackage) can't
-see it (dev-shell and docker builds work, which is why deployments still
-function — but `nix build` breaks). A git dep is fetched into the store
-properly. Locally:
+Declare the **canonical remote** and patch it to the local checkout — so
+manifests are already in their final, pushed form. Dependency block in your
+crate:
 
 ```toml
 [dependencies]
-stand-oidc = { git = "file:///mnt/host/workspace/stand-oidc", branch = "main" }
+stand-oidc = { git = "https://github.com/rebenkoy/stand-oidc", branch = "main" }
 ```
 
-For `nix build`, add the git dep's hash to your flake's `cargoLock`:
+Patch block at the **workspace ROOT** manifest (cargo never contacts a
+fully-patched git source, so the not-yet-real URL is fine):
 
-```nix
-cargoLock = {
-  lockFile = ./Cargo.lock;
-  outputHashes = {
-    # `nix build` prints the expected hash on first failure; paste it here
-    "stand-oidc-0.1.0" = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-  };
-};
+```toml
+[patch."https://github.com/rebenkoy/stand-oidc"]
+stand-oidc = { path = "../stand-oidc" }
 ```
 
-The same `git+file:///mnt/host/workspace/stand-oidc` URL also works as a flake
-input. Once the repo is pushed, swap to
-`{ git = "https://github.com/rebenkoy/stand-oidc", tag = "v0.1.0" }`.
+`../stand-oidc` matches the docker build-context layout adopters already
+stage. **When the user pushes the repo, un-stubbing is just deleting the patch
+block — nothing else changes.**
 
-A `path` dep is still fine if you only build via the dev shell or docker.
+**nix-build caveat:** while patched to a local `path`, the source is still
+outside the consumer's flake tree, so `nix build` (buildRustPackage) can't see
+it — same limitation as a bare path dep. Dev-shell and docker builds are
+unaffected (that's why deployments work), and `nix build` starts working once
+the real remote exists and the patch block is removed (buildRustPackage then
+fetches the git dep; add its hash to `cargoLock.outputHashes` — `nix build`
+prints the expected hash on first failure).
+
+Footnote — a direct local git dep also works if you don't want a patch block
+(`stand-oidc = { git = "file:///mnt/host/workspace/stand-oidc", branch = "main" }`),
+and the same `git+file://` URL works as a flake input.
 
 ## 1. Backends with browser users (BFF)
 
