@@ -36,9 +36,18 @@ tracing target:
 ```rust
 use stand_log::{info, warn, AUTH, UPSTREAM};
 // tracing idiom: structured fields FIRST, then the message string.
+// The human formatter DE-DUPLICATES span-appended fields by name (event
+// wins, then inner-most span) — do not hand-dedupe, but DO reduce
+// Option/Result before capture: `?opt` prints Rust syntax like Some(0).
 info!(AUTH, user = %username, "signed in");
 warn!(UPSTREAM, attempt = n, "retry");
 ```
+
+**Map `Option`/`Result` before capturing them.** A `?`-captured (Debug) value
+prints Rust syntax — `exit_code = ?maybe` logs `exit_code=Some(0)`, which reads
+badly in a log viewer. Reduce it to a plain value at the call site:
+`exit_code = maybe.unwrap_or(-1)`, or use `%` (Display) for types that have it.
+stand-log can't intercept tracing's `?`/`%` sigils, so this is on the caller.
 
 Open the **request root span** (§8.2) in your HTTP middleware; it carries
 `reqid` and `actor` into every event beneath it:

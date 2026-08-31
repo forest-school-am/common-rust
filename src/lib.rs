@@ -208,6 +208,37 @@ mod tests {
     }
 
     #[test]
+    fn human_span_fields_dedupe_by_name() {
+        let buf = Buf::new();
+        tracing::subscriber::with_default(human(buf.clone()), || {
+            // the real-world stutter: outer span, instrumented inner span and
+            // the event all carrying `task` printed it three times pre-fix
+            let outer = tracing::info_span!("cron_run", task = "hello");
+            let _o = outer.enter();
+            let inner = tracing::info_span!("execute", task = "hello");
+            let _i = inner.enter();
+            crate::info!(custom!("scheduler"), task = "hello", run_id = 1, "run started");
+        });
+        let line1 = buf.string();
+        let line1 = line1.trim_end();
+        assert_eq!(line1.matches("task=").count(), 1, "task must print once: {line1}");
+        assert!(line1.contains("run_id=1"), "event fields intact: {line1}");
+
+        // and a span-only field still appends (once) when the event lacks it
+        let buf = Buf::new();
+        tracing::subscriber::with_default(human(buf.clone()), || {
+            let outer = tracing::info_span!("cron_run", task = "hello");
+            let _o = outer.enter();
+            let inner = tracing::info_span!("execute", task = "hello");
+            let _i = inner.enter();
+            crate::info!(custom!("scheduler"), run_id = 2, "run finished");
+        });
+        let line2 = buf.string();
+        let line2 = line2.trim_end();
+        assert_eq!(line2.matches("task=").count(), 1, "span field appended once: {line2}");
+    }
+
+    #[test]
     fn custom_designator_prefixes_c_and_sets_target() {
         assert_eq!(custom!("scheduler"), "c-scheduler");
         let buf = Buf::new();
