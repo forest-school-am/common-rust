@@ -7,11 +7,24 @@ re-login, a downward-closure group gate, and a served browser shim for the
 401→re-auth contract. No app login/logout buttons — logout lives only at
 authentik.
 
-- **Version:** `0.2.0` (breaking: `OidcConfig` gained `assets_dir` + `deployment`;
-  the shim is now an on-disk template — see the copy recipe below).
+- **Version:** `0.2.0`
 - **Toolchain:** Rust 1.98.0 (workspace standard).
 - **Depends on** the stand crates `stand-log` (§8 logging) and `stand-render`
   (§9 asset rendering).
+
+> ## ⚠️ Upgrading to 0.2.0 is a BREAKING change with a REQUIRED build step
+> 0.2.0 no longer embeds its JS shim — it renders an on-disk template that it
+> **hash-verifies at boot**. If you bump to 0.2.0 without doing the assets step
+> below, your service **crash-loops on startup** with an integrity-pin error —
+> this is a hard **boot failure, not a warning**. You MUST, in the SAME change:
+> 1. add the `just assets` copy step and run it (copies the crate's template
+>    into your `assets/` — see [the recipe](#serving-the-shim-the-template-copy-recipe-98--required));
+> 2. `.gitignore` the copied `assets/stand-oidc.js.jinja` so a stale hand-copy
+>    can never be committed — the copy is a build artifact, always re-derived;
+> 3. set `OidcConfig.assets_dir` and a `deployment` class (`OidcConfig` gained
+>    both fields).
+> The loud crash is deliberate: it makes a stale shim impossible rather than
+> silently serving one that disagrees with the backend's 401 contract.
 
 ## Depend on it
 
@@ -147,6 +160,11 @@ this prevents). Add this to your `justfile`/`Makefile`:
 assets:
 	mkdir -p assets && cp ../stand-oidc/templates/stand-oidc.js.jinja assets/
 ```
+
+**`.gitignore` the copied file** (`assets/stand-oidc.js.jinja`) — it is a build
+artifact re-derived from the crate every time, never edited in place. Committing
+it invites exactly the stale hand-copy the boot pin exists to catch. The recipe
+copies fresh; git never tracks it.
 
 Then point the config at it:
 
