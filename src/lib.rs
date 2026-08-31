@@ -1,0 +1,68 @@
+//! # stand-oidc — the stand's one way to do in-app OIDC (session ruling v5)
+//!
+//! Every stand app authenticates the same way: in-app OIDC against the shared
+//! authentik, browser-facing state limited to ONE HttpOnly session cookie
+//! (BFF — tokens never reach the browser), and per-request enforcement.
+//!
+//! The **protocol** (discovery, PKCE S256 authorization code, token exchange,
+//! refresh, userinfo) comes from the `openidconnect` crate — nothing
+//! hand-rolled. This crate hand-writes only the **policy**:
+//!
+//! - **No login/logout buttons.** An unauthenticated browser request is sent
+//!   through `prompt=none` silent login automatically; interactive login is
+//!   the automatic fallback, exactly once (loop-breaker). There is no logout
+//!   route — logout lives solely at authentik (`/if/user/`, see
+//!   [`user_portal_url`]); apps observe SSO death via the next request.
+//! - **userinfo per request, no cache, fail closed** (ruling v4, unchanged).
+//!   The [`Principal`] extractor hits userinfo on every request.
+//! - **Instant logout.** authentik revokes access AND refresh tokens when the
+//!   SSO session ends, so the very next userinfo fails and the local session
+//!   is destroyed. (Version-dependent behavior — the live canary test in
+//!   `tests/live_canary.rs` pins it; run it against any new authentik.)
+//! - **Frictionless refresh, server-side only.** When userinfo rejects the
+//!   access token the backend redeems the refresh token and retries userinfo
+//!   ONCE — no browser round-trip. Refresh tokens live in the server-side
+//!   session store only.
+//!
+//! ## Wiring (axum)
+//!
+//! ```ignore
+//! let config = OidcConfig::new(issuer, "my-app", redirect_url);
+//! let oidc = OidcState::discover(config, MemoryStore::default()).await?;
+//! let app = Router::new()
+//!     .route("/", get(index))
+//!     .merge(stand_oidc::router(oidc.clone()))
+//!     .with_state(AppState { oidc, .. });
+//!
+//! async fn index(p: Principal) -> impl IntoResponse {
+//!     p.require_group(&cron_admins_uuid)?;      // downward-closure gate
+//!     format!("hello {}", p.username)           // logged-in-as indicator
+//! }
+//! ```
+//!
+//! [`router`] also mounts a login-start route (`/oidc/login`, silent by
+//! default) and serves the framework-free browser shim at `/stand-oidc.js`,
+//! which implements the client side of the 401 contract (wrap `fetch`; on a
+//! 401 carrying `X-Stand-OIDC-Reauth`, bounce top-level through silent
+//! re-auth — single-flight + loop-guarded). Frontends load it from the same
+//! backend that speaks the contract, so they can never version-skew.
+//!
+//! Pure API services validating `Authorization: Bearer` callers (the mint
+//! pattern) skip the BFF machinery and use [`BearerValidator`] (userinfo per
+//! request, fail closed, no discovery).
+
+mod bearer;
+mod client;
+mod config;
+mod error;
+mod principal;
+mod store;
+mod web;
+
+pub use bearer::{BearerValidator, ValidationError};
+pub use client::{StandClient, TokenBundle};
+pub use config::OidcConfig;
+pub use error::Error;
+pub use principal::{GateDenied, Principal};
+pub use store::{MemoryStore, Session, SessionStore};
+pub use web::{router, user_portal_url, OidcState};
