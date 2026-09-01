@@ -1,33 +1,3 @@
-//! # common-templating — shared template + static-asset rendering (CODESTYLE.md §9)
-//!
-//! The stand's one substitution engine (minijinja) plus a cache over a
-//! validated asset directory. Deliberately SEPARATE from `common-logging` (§9.7):
-//! logging is dependency-light and used everywhere; rendering pulls minijinja
-//! and is used only by services that actually serve assets.
-//!
-//! Two cache modes, both invalidating on the next request after their key
-//! changes (no stale serve after an edit — §9.5/§9.5a):
-//! - [`AssetCache::render`] — a minijinja template, keyed by (file mtime,
-//!   parameters).
-//! - [`AssetCache::static_file`] — a static file, keyed by (file mtime) alone.
-//!
-//! Boot validation (§9.6): the directory must exist, and every required
-//! template must be present and parse — checked in [`Builder::build`], which
-//! refuses otherwise.
-//!
-//! Integrity pins (§9.7b, §9.8): a file may be pinned to an expected sha256,
-//! checked at boot AND on every cache reload, refusing to serve on mismatch —
-//! for logic the server enforces (dual-use assets) and for library-shipped
-//! templates that must not drift from the crate version.
-//!
-//! ```ignore
-//! let cache = common_templating::Builder::new(assets_dir)
-//!     .require_template("common-oidc.js.jinja")
-//!     .pin("common-oidc.js.jinja", STAND_OIDC_JS_SHA256) // §9.8 no-skew
-//!     .build()?;                                          // §9.6 boot refusal
-//! let js = cache.render("common-oidc.js.jinja", &[("login_path", "/oidc/login")])?;
-//! ```
-
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -51,10 +21,6 @@ pub enum RenderError {
     Io(String, String),
     #[error("render of {0} failed: {1}")]
     Render(String, String),
-    /// The asset name is not a safe relative path under the asset root — an
-    /// absolute path, a `..` segment, or a symlink escaping the root (§9.5b).
-    /// Asset names from requests are untrusted; this rejection lives here so no
-    /// adopter can forget it.
     #[error("unsafe asset name (path traversal / escape rejected): {0}")]
     UnsafeName(String),
 }
@@ -64,7 +30,6 @@ enum Entry {
     Static { mtime: SystemTime, bytes: Arc<[u8]> },
 }
 
-/// §9.3 autoescape policy by extension: HTML contexts on, JS/text off.
 fn autoescape(name: &str) -> AutoEscape {
     if name.ends_with(".html") || name.ends_with(".htm") {
         AutoEscape::Html
@@ -73,39 +38,21 @@ fn autoescape(name: &str) -> AutoEscape {
     }
 }
 
-/// A long-lived minijinja `Environment` for `render_ctx` (loader-backed, so
-/// `{% extends %}`/`{% include %}` resolve) plus the mtimes of the templates it
-/// has loaded. The steady state re-parses NOTHING; an edit to the entry OR any
-/// loaded parent is detected by stat-vs-recorded-mtime and drops the whole
-/// compiled set via `clear_templates()`, so §9.2a edit-without-restart holds
-/// for partials too (which the old per-call `Environment::new()` achieved only
-/// by brute-force re-parsing every call).
 struct CtxEnv {
     env: Environment<'static>,
     mtimes: HashMap<String, SystemTime>,
-    /// Slow-path (load/reload) count — steady-state renders must NOT bump it.
-    /// Observability, and the anchor the no-re-parse test asserts against.
     loads: u64,
 }
 
-/// Rendering cache over a validated asset directory. Cheap to clone-share
-/// (wrap in `Arc` in your `AppState`).
 pub struct AssetCache {
     root: PathBuf,
-    /// The asset root with symlinks resolved — the containment boundary every
-    /// resolved asset path must stay under (§9.5b).
     canonical_root: PathBuf,
     env: Environment<'static>,
-    /// Long-lived loader env for `render_ctx`, with mtime-driven invalidation.
-    /// Write-locked only on (re)load, so steady-state renders don't serialize.
     ctx_env: RwLock<CtxEnv>,
     pins: HashMap<String, [u8; 32]>,
     entries: RwLock<HashMap<String, Entry>>,
 }
 
-/// Builds an [`AssetCache`], performing all boot validation (§9.6) up front so
-/// a bad asset dir / missing template / failed pin refuses to boot rather than
-/// surfacing at render time.
 pub struct Builder {
     root: PathBuf,
     required: Vec<String>,
@@ -117,14 +64,11 @@ impl Builder {
         Self { root: root.into(), required: Vec::new(), pins: HashMap::new() }
     }
 
-    /// Require a template to exist and parse at boot (§9.6).
     pub fn require_template(mut self, name: impl Into<String>) -> Self {
         self.required.push(name.into());
         self
     }
 
-    /// Pin a file's sha256, verified at boot and on every reload (§9.7b/§9.8).
-    /// A pinned file is also implicitly required.
     pub fn pin(mut self, name: impl Into<String>, expected_sha256: [u8; 32]) -> Self {
         let name = name.into();
         self.pins.insert(name.clone(), expected_sha256);
@@ -136,18 +80,13 @@ impl Builder {
         if !self.root.is_dir() {
             return Err(RenderError::BadDir(self.root));
         }
-        // Resolve the root once — the containment boundary for §9.5b.
         let canonical_root = self
             .root
             .canonicalize()
             .map_err(|e| RenderError::Io(self.root.display().to_string(), e.to_string()))?;
-        // `env` serves render()'s ad-hoc `template_from_named_str` (no loader);
-        // its own entries cache handles invalidation.
         let mut env = Environment::new();
         env.set_auto_escape_callback(autoescape);
 
-        // `ctx_env` is the long-lived loader env for render_ctx (§9.4). Loader
-        // + autoescape installed ONCE here, not per call.
         let mut ctx_env = Environment::new();
         ctx_env.set_auto_escape_callback(autoescape);
         ctx_env.set_loader(minijinja::path_loader(&canonical_root));
@@ -161,7 +100,6 @@ impl Builder {
             entries: RwLock::new(HashMap::new()),
         };
 
-        // pins first (also reads the bytes), then parse-check required templates
         for (name, expected) in &cache.pins {
             let path = cache.safe_path(name)?;
             cache.read_verified(&path, name, Some(expected))?;
@@ -224,9 +162,6 @@ impl AssetCache {
             })
     }
 
-    /// Read a pre-validated (`safe_path`) file's bytes, verifying its pin if one
-    /// is expected (§9.7b/§9.8). Takes the resolved path so it can never be
-    /// handed a raw untrusted name.
     fn read_verified(
         &self,
         path: &Path,
@@ -249,8 +184,6 @@ impl AssetCache {
         Ok(bytes)
     }
 
-    /// §9.5 template mode: render `name` with `params`, cached by (mtime,
-    /// params). Re-renders on the next call after either changes.
     pub fn render(&self, name: &str, params: &[(&str, &str)]) -> Result<Arc<str>, RenderError> {
         let path = self.safe_path(name)?; // §9.5b: reject traversal before any FS/cache touch
         let mtime = self.mtime(&path, name)?;
@@ -280,35 +213,14 @@ impl AssetCache {
         Ok(out)
     }
 
-    /// §9.4 data-driven mode: render `name` with a full serializable context,
-    /// UNCACHED by definition — data-driven pages change per request, so a
-    /// cache keyed on the context would only ever miss (see the cron-viewer
-    /// exemption that motivated this entry point). Guarantees preserved from
-    /// the cached paths:
-    ///
-    /// - the entry template's integrity pin is verified on EVERY call via
-    ///   `read_verified` — an uncached path must not become a pin-bypass path;
-    /// - the template is re-read from disk each call (a fresh per-call
-    ///   `Environment`, so minijinja's internal parse cache cannot serve a
-    ///   stale template) — §9.2a's edit-without-restart holds here too;
-    /// - the same autoescape policy applies (§9.3).
-    ///
-    /// `{% extends %}`/`{% include %}` resolve through a path loader rooted at
-    /// the validated asset dir. Note: pins are verified for the ENTRY template;
-    /// a pinned file pulled in only via extends/include is verified when it is
-    /// itself rendered or served, not transitively.
     pub fn render_ctx<S: serde::Serialize>(
         &self,
         name: &str,
         ctx: &S,
     ) -> Result<String, RenderError> {
-        // §9.5b: reject traversal, then pin + existence check on the safe path.
         let path = self.safe_path(name)?;
         let _ = self.read_verified(&path, name, self.pins.get(name))?;
 
-        // Fast path (steady state): entry already loaded and no loaded template
-        // (entry OR parent) changed on disk — a READ lock, no re-parse, no
-        // serialization against concurrent renders.
         {
             let g = self.ctx_env.read().unwrap_or_else(|e| e.into_inner());
             if g.mtimes.contains_key(name) && !self.loaded_stale(&g) {
@@ -316,11 +228,6 @@ impl AssetCache {
             }
         }
 
-        // Slow path: (re)load under the WRITE lock. If any loaded template
-        // changed, drop the whole compiled set (clear_templates is
-        // all-or-nothing — fine at this scale) so the edit is picked up (§9.2a
-        // for partials); then render (loading the entry + its extends/include
-        // parents via the loader) and record every loaded template's mtime.
         let mut g = self.ctx_env.write().unwrap_or_else(|e| e.into_inner());
         g.loads += 1;
         if self.loaded_stale(&g) {
@@ -337,7 +244,6 @@ impl AssetCache {
         Ok(out)
     }
 
-    /// get_template (loader-backed) + render, mapping minijinja errors.
     fn ctx_render<S: serde::Serialize>(
         &self,
         env: &Environment<'static>,
@@ -355,8 +261,6 @@ impl AssetCache {
             .map_err(|e| RenderError::Render(name.to_owned(), e.to_string()))
     }
 
-    /// Has any template the ctx env has loaded changed (or vanished) on disk
-    /// since it was recorded? Checks the entry AND every extends/include parent.
     fn loaded_stale(&self, g: &CtxEnv) -> bool {
         g.mtimes.iter().any(|(tname, recorded)| {
             match self.canonical_root.join(tname).metadata().and_then(|m| m.modified()) {
@@ -366,8 +270,6 @@ impl AssetCache {
         })
     }
 
-    /// §9.5a static mode: serve `name`'s bytes, cached by (mtime) alone.
-    /// Re-reads on the next call after the file's mtime changes.
     pub fn static_file(&self, name: &str) -> Result<Arc<[u8]>, RenderError> {
         let path = self.safe_path(name)?; // §9.5b: reject traversal before any FS/cache touch
         let mtime = self.mtime(&path, name)?;
@@ -388,14 +290,11 @@ impl AssetCache {
     }
 }
 
-/// Compute the sha256 of some bytes — for producing the constant a caller
-/// pins against (`Builder::pin`).
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
 fn params_key(params: &[(&str, &str)]) -> u64 {
-    // deterministic regardless of caller order
     let sorted: BTreeMap<&str, &str> = params.iter().copied().collect();
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for (k, v) in sorted {
@@ -440,7 +339,6 @@ mod tests {
         assert_eq!(&*a, "const P = \"/oidc/login\";");
         let b = c.render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")]).unwrap();
         assert!(Arc::ptr_eq(&a, &b), "same params+mtime must be a cache hit");
-        // different params -> re-render
         let e = c.render("shim.js.jinja", &[("login_path", "\"/x\"")]).unwrap();
         assert_eq!(&*e, "const P = \"/x\";");
         assert!(!Arc::ptr_eq(&a, &e));
@@ -453,8 +351,6 @@ mod tests {
         let c = Builder::new(&d).build().unwrap();
         let first = c.render("a.txt.jinja", &[("x", "!")]).unwrap();
         assert_eq!(&*first, "one !");
-        // edit the file AND move its mtime forward (same-second writes wouldn't
-        // change mtime on coarse clocks)
         std::thread::sleep(Duration::from_millis(5));
         write(&d, "a.txt.jinja", "two {{ x }}");
         bump_mtime(&d, "a.txt.jinja");
@@ -500,18 +396,15 @@ mod tests {
         let d = tmpdir();
         write(&d, "logic.js", "authored();");
         let good = sha256(b"authored();");
-        // correct pin builds
         let c = Builder::new(&d).pin("logic.js", good).build().unwrap();
         assert_eq!(&*c.static_file("logic.js").unwrap(), b"authored();");
 
-        // wrong pin refuses to boot
         let wrong = sha256(b"different");
         assert!(matches!(
             Builder::new(&d).pin("logic.js", wrong).build(),
             Err(RenderError::PinMismatch(_))
         ));
 
-        // drift after boot -> refuses to serve on reload
         std::thread::sleep(Duration::from_millis(5));
         write(&d, "logic.js", "tampered();");
         bump_mtime(&d, "logic.js");
@@ -551,7 +444,6 @@ mod tests {
             n: u32,
         }
         assert_eq!(c.render_ctx("page.html", &Ctx { n: 1 }).unwrap(), "[1]");
-        // edit the base template: must take effect on the very next render
         std::thread::sleep(Duration::from_millis(5));
         write(&d, "base.html", "({% block body %}{% endblock %})");
         bump_mtime(&d, "base.html");
@@ -573,7 +465,6 @@ mod tests {
             x: u32,
         }
         assert_eq!(c.render_ctx("pinned.html", &Ctx { x: 7 }).unwrap(), "ok 7");
-        // drift -> the uncached path must also refuse (no pin bypass)
         std::thread::sleep(Duration::from_millis(5));
         write(&d, "pinned.html", "tampered {{ x }}");
         bump_mtime(&d, "pinned.html");
@@ -597,14 +488,12 @@ mod tests {
         assert_eq!(&*c.render("p.js.jinja", &[("v", "<x>")]).unwrap(), "x = <x>");
     }
 
-    // §9.5b negative-space (§7.1): untrusted names must not escape the root.
     #[test]
     fn traversal_names_rejected_on_every_entry_point() {
         let d = tmpdir();
         write(&d, "ok.txt", "ok");
         write(&d, "t.js.jinja", "x = {{ v }}");
         let c = Builder::new(&d).build().unwrap();
-        // sanity: a legitimate name still works
         assert_eq!(&*c.static_file("ok.txt").unwrap(), b"ok");
 
         for bad in ["../../etc/passwd", "../secret", "/etc/passwd", "a/../../b", "./../x"] {
@@ -625,9 +514,6 @@ mod tests {
 
     #[test]
     fn symlink_escaping_root_is_rejected() {
-        // root/ holds inside.txt; its PARENT holds outside.txt; a symlink inside
-        // the root points at the parent — reading through it must be rejected,
-        // not served (the `..`-component check alone wouldn't catch this).
         let parent = tmpdir();
         fs::write(parent.join("outside.txt"), "SECRET").unwrap();
         let root = parent.join("assets");
@@ -637,14 +523,10 @@ mod tests {
 
         let c = Builder::new(&root).build().unwrap();
         assert_eq!(&*c.static_file("inside.txt").unwrap(), b"ok");
-        // "up" resolves (via symlink) to the parent, escaping the root
         assert!(matches!(
             c.static_file("up/outside.txt"),
             Err(RenderError::UnsafeName(_))
         ));
-        // intermediate symlink escapes but the final target is absent: Missing,
-        // NOT an unvalidated path a later read would follow out (the NotFound-arm
-        // hardening — §9.5b).
         assert!(matches!(
             c.static_file("up/does-not-exist.txt"),
             Err(RenderError::Missing(_))
@@ -656,8 +538,6 @@ mod tests {
         let d = tmpdir();
         write(&d, "real.txt", "x");
         let c = Builder::new(&d).build().unwrap();
-        // a structurally-safe name that simply does not exist resolves to
-        // Missing at safe_path — never Ok(unvalidated path), never UnsafeName.
         assert!(matches!(c.static_file("absent.txt"), Err(RenderError::Missing(_))));
         assert!(matches!(c.render("absent.js.jinja", &[]), Err(RenderError::Missing(_))));
     }
@@ -675,22 +555,18 @@ mod tests {
         let c = Builder::new(&d).build().unwrap();
         let loads = || c.ctx_env.read().unwrap().loads;
 
-        // first render: loads the entry AND its parent via the loader (slow path)
         assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 1)])).unwrap(), "<html>v1</html>");
         assert_eq!(loads(), 1);
 
-        // steady state: unchanged tree -> FAST path, no reload/re-parse
         assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 2)])).unwrap(), "<html>v2</html>");
         assert_eq!(loads(), 1, "steady-state render must not reload");
 
-        // edit the PARTIAL (base.html, a parent — NOT the entry): §9.2a must hold
         std::thread::sleep(Duration::from_millis(5));
         write(&d, "base.html", "<div>{% block body %}{% endblock %}</div>");
         bump_mtime(&d, "base.html");
         assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 3)])).unwrap(), "<div>v3</div>");
         assert_eq!(loads(), 2, "a parent-partial edit must trigger exactly one reload");
 
-        // and back to steady state after the reload
         assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 4)])).unwrap(), "<div>v4</div>");
         assert_eq!(loads(), 2);
     }
