@@ -1,3 +1,7 @@
+//! Rendering templates from a validated directory, with caching and path
+//! safety. Everything here is about turning a template plus parameters into
+//! bytes; nothing here decides what to serve or when.
+
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
