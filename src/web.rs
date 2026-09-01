@@ -143,10 +143,14 @@ pub fn user_portal_url(config: &OidcConfig) -> String {
 
 #[derive(Serialize, Deserialize)]
 struct Flow {
-    s: String,
-    v: String,
-    n: String,
-    i: bool,
+    #[serde(rename = "s")]
+    state: String,
+    #[serde(rename = "v")]
+    verifier: String,
+    #[serde(rename = "n")]
+    next: String,
+    #[serde(rename = "i")]
+    interactive_tried: bool,
 }
 
 fn hex_encode(s: &str) -> String {
@@ -192,7 +196,7 @@ fn removal_cookie(name: &str) -> Cookie<'static> {
 
 fn start_login(oidc: &OidcState, jar: CookieJar, next: String, silent: bool, interactive_tried: bool) -> Response {
     let (url, state, verifier) = oidc.client.authorize_url(silent);
-    let flow = Flow { s: state, v: verifier, n: next, i: interactive_tried };
+    let flow = Flow { state, verifier, next, interactive_tried };
     let jar = jar.add(base_cookie(
         FLOW_COOKIE,
         hex_encode(&serde_json::to_string(&flow).expect("flow serializes")),
@@ -256,8 +260,8 @@ async fn callback(
         let jar = jar.remove(removal_cookie(FLOW_COOKIE));
         let needs_interaction =
             matches!(error.as_str(), "login_required" | "interaction_required" | "consent_required");
-        if needs_interaction && !flow.i {
-            return start_login(&oidc, jar, flow.n, false, true);
+        if needs_interaction && !flow.interactive_tried {
+            return start_login(&oidc, jar, flow.next, false, true);
         }
         return (StatusCode::UNAUTHORIZED, jar, format!("authentication failed: {error}"))
             .into_response();
@@ -266,11 +270,11 @@ async fn callback(
     let (Some(code), Some(state)) = (params.get("code"), params.get("state")) else {
         return (StatusCode::BAD_REQUEST, "missing code/state").into_response();
     };
-    if *state != flow.s {
+    if *state != flow.state {
         return (StatusCode::BAD_REQUEST, "state mismatch").into_response();
     }
 
-    match oidc.client.exchange_code(code.clone(), flow.v).await {
+    match oidc.client.exchange_code(code.clone(), flow.verifier).await {
         Ok(tokens) => {
             let sid = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
             oidc.store
@@ -286,7 +290,7 @@ async fn callback(
             let jar = jar
                 .remove(removal_cookie(FLOW_COOKIE))
                 .add(base_cookie(oidc.config().cookie_name.as_str(), sid, oidc.config()).into_owned());
-            (jar, Redirect::temporary(&flow.n)).into_response()
+            (jar, Redirect::temporary(&flow.next)).into_response()
         }
         Err(e) => {
             common_logging::warn!(common_logging::AUTH, error = %e, "code exchange failed");
@@ -363,5 +367,27 @@ mod source_state_tests {
     fn clean_and_unknown_both_boot_but_mean_different_things() {
         assert!(dirty_source_refusal(Deployment::Prod, "Clean").is_none());
         assert!(dirty_source_refusal(Deployment::Prod, "Unknown").is_none());
+    }
+}
+
+#[cfg(test)]
+mod flow_wire {
+    use super::Flow;
+
+    #[test]
+    fn cookie_keys_stay_single_letter() {
+        let json = serde_json::to_string(&Flow {
+            state: "s".into(),
+            verifier: "v".into(),
+            next: "/".into(),
+            interactive_tried: false,
+        })
+        .unwrap();
+        for k in ["\"s\":", "\"v\":", "\"n\":", "\"i\":"] {
+            assert!(json.contains(k), "flow cookie key {k} missing — wire form changed: {json}");
+        }
+        for k in ["state", "verifier", "interactive_tried"] {
+            assert!(!json.contains(k), "field name {k} leaked into the cookie: {json}");
+        }
     }
 }
