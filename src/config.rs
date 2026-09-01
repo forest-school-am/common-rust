@@ -51,6 +51,26 @@ impl Deployment {
     pub fn from_env() -> Result<Self, String> {
         Self::parse(std::env::var("DEPLOYMENT_TYPE").ok().as_deref())
     }
+
+    /// The env-var spelling — `"prod"` / `"dev"`, round-tripping [`parse`].
+    ///
+    /// `Debug` yields `Prod`/`Dev`, which do NOT match the values the var
+    /// accepts, so logging the class via `{:?}` prints something a reader
+    /// cannot paste back into `DEPLOYMENT_TYPE`.
+    ///
+    /// [`parse`]: Deployment::parse
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Deployment::Prod => "prod",
+            Deployment::Dev => "dev",
+        }
+    }
+}
+
+impl std::fmt::Display for Deployment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Fully-resolved logging configuration.
@@ -165,5 +185,21 @@ mod deployment_tests {
                 "DEPLOYMENT_TYPE={bad:?} must be refused, not treated as dev"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod deployment_str_tests {
+    use super::*;
+
+    #[test]
+    fn as_str_round_trips_through_parse() {
+        // the property that matters: what we PRINT must be what the env var
+        // ACCEPTS. Debug does not satisfy this — "Prod" is not a valid value.
+        for d in [Deployment::Prod, Deployment::Dev] {
+            assert_eq!(Deployment::parse(Some(d.as_str())).unwrap(), d);
+            assert_eq!(d.to_string(), d.as_str());
+        }
+        assert!(Deployment::parse(Some(&format!("{:?}", Deployment::Prod))).is_err());
     }
 }
