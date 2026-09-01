@@ -1,8 +1,8 @@
 //! How the ctx environment decides a loaded template is stale.
 //!
-//! Four strategies, selected by config (§4.4) and parsed strictly, because a
+//! Four strategies, selected by config and parsed strictly, because a
 //! misspelled name that quietly selected a default would produce the RIGHT
-//! page by the wrong mechanism — nothing visible to correct (§4.3).
+//! page by the wrong mechanism — nothing visible to correct.
 //!
 //! What each strategy actually does on this stand is documented in `OPTIONS`
 //! rather than checked at boot. Choosing inotify here yields a stale page,
@@ -12,7 +12,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// §4.4 deployment option: the invalidation strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Invalidation {
     /// Clear the environment on every render.
@@ -55,7 +54,6 @@ is there because it is where inotify silently does nothing.
 ";
 
 impl Invalidation {
-    /// §4.3: absent means the default; set-but-unrecognised refuses.
     pub fn parse(value: Option<&str>) -> Result<Self, String> {
         match value {
             None => Ok(Invalidation::PerRequest),

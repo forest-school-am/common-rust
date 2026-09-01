@@ -2,7 +2,7 @@
 //! pieces live in config.rs, format.rs, designator.rs and span.rs.
 //!
 //! Every emission names a designator as its tracing target, so logs can be
-//! filtered by concern rather than by module path (§8):
+//! filtered by concern rather than by module path:
 //!
 //! ```
 //! let name = "alice";

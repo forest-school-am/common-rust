@@ -7,7 +7,7 @@ pub enum Format {
     Json,
 }
 
-/// Deployment class (§4.4). Presence of options never infers this — it is
+/// Deployment class. Presence of options never infers this — it is
 /// declared. Here it only sets logging defaults (verbosity); services apply
 /// the prod-required / dev-only / neutral option rules themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

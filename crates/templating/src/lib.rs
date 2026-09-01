@@ -5,7 +5,7 @@
 //! An asset cache is built once at boot. `require_template` makes a missing
 //! file a startup failure rather than a 500 on first request; `pin` adds an
 //! integrity hash so a copy that has drifted from the one this binary was
-//! built against is detected (§9.8):
+//! built against is detected:
 //!
 //! ```
 //! use common_templating::Builder;
@@ -112,7 +112,7 @@ impl Builder {
         self
     }
 
-    /// Selects the strategy (§4.4). Unset is `PerRequest`; see
+    /// Selects the strategy. Unset is `PerRequest`; see
     /// `INVALIDATION_OPTIONS` for what each one does on this stand.
     pub fn invalidation(mut self, strategy: Invalidation) -> Self {
         self.invalidation = strategy;
@@ -174,7 +174,7 @@ impl Builder {
 
 impl AssetCache {
     /// Resolve an untrusted asset `name` to a filesystem path that is proven to
-    /// stay under the asset root (§9.5b). Rejects absolute paths and any
+    /// stay under the asset root. Rejects absolute paths and any
     /// non-`Normal`/`CurDir` component (`..`, root, prefix) BEFORE touching the
     /// filesystem, then canonicalizes and requires containment under
     /// `canonical_root` — which catches a symlink INSIDE the root pointing out
@@ -240,7 +240,7 @@ impl AssetCache {
     }
 
     pub fn render(&self, name: &str, params: &[(&str, &str)]) -> Result<Arc<str>, RenderError> {
-        let path = self.safe_path(name)?; // §9.5b: reject traversal before any FS/cache touch
+        let path = self.safe_path(name)?;
         let mtime = self.mtime(&path, name)?;
         let key = params_key(params);
 
@@ -320,7 +320,7 @@ impl AssetCache {
     }
 
     pub fn static_file(&self, name: &str) -> Result<Arc<[u8]>, RenderError> {
-        let path = self.safe_path(name)?; // §9.5b: reject traversal before any FS/cache touch
+        let path = self.safe_path(name)?;
         let mtime = self.mtime(&path, name)?;
 
         if let Ok(entries) = self.entries.read() {
@@ -625,8 +625,6 @@ mod tests {
             let v = Invalidation::parse(Some(s)).expect("valid strategy");
             assert_eq!(v.as_str(), s, "as_str must round-trip the accepted spelling");
         }
-        // §4.3: set-but-invalid refuses rather than falling back, and the
-        // message names the alternatives.
         for bad in ["", "PerRequest", "per_request", "notify", "true"] {
             let e = Invalidation::parse(Some(bad)).expect_err("must refuse");
             assert!(e.contains("per-request") && e.contains("dnotify"), "unhelpful: {e}");

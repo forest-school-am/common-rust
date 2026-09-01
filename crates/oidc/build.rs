@@ -41,7 +41,7 @@ fn main() {
                     "cargo:warning=common-oidc is being built from a DIRTY working tree \
                      ({n} uncommitted file(s)). The served /common-oidc.js and anything else \
                      this crate ships are therefore unreproducible. Refused under \
-                     DEPLOYMENT_TYPE=prod (§9.8b)."
+                     DEPLOYMENT_TYPE=prod."
                 );
                 format!("Dirty({n})")
             }

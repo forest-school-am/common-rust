@@ -47,7 +47,7 @@ pub(crate) fn dirty_source_refusal(deployment: Deployment, state: &str) -> Optio
     if matches!(deployment, Deployment::Prod) && state.starts_with("Dirty") {
         return Some(format!(
             "common-oidc was built from a dirty working tree ({state}); the served shim \
-             is unreproducible and this is refused under DEPLOYMENT_TYPE=prod (§9.8b). \
+             is unreproducible and this is refused under DEPLOYMENT_TYPE=prod. \
              Commit the crate, or build from a clean checkout."
         ));
     }
