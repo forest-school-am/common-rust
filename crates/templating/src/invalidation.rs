@@ -10,16 +10,13 @@
 //! fresh-binary deploy an empty cache cannot carry it anywhere.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// §4.4 deployment option: the invalidation strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Invalidation {
     /// Clear the environment on every render.
     PerRequest,
-    /// Graph the loader's dependencies; stat the requested template's
-    /// upstream set each request and clear everything if any node moved.
-    Dag,
     /// Per-directory kernel events via `fcntl(F_NOTIFY)`.
     Dnotify,
     /// Per-inode kernel events via inotify.
@@ -36,16 +33,6 @@ Unset means per-request. An unrecognised value refuses to start.
   per-request  (default) Clear the environment on every render. Keeps no
                bookkeeping and is the only strategy that cannot silently
                degrade. Costs a reparse per render.
-
-  dag          Build a dependency graph as templates load: every name the
-               loader is asked for, so transitive extends/include and
-               dynamically-named targets alike. Per request, stat the UPSTREAM
-               set of the requested template; if any node changed, clear the
-               whole cache. Cost is one stat per upstream node per request —
-               a page and its base, typically two — not a walk of the asset
-               root. A directory's mtime does NOT move when a file's contents
-               change (measured, ext4 and 9p alike), so watching the root
-               directory is not a cheaper substitute.
 
   dnotify      Per-directory kernel events, raw fcntl(F_NOTIFY). This is the
                kernel option that WORKS on this stand's 9p share. Caveats:
@@ -73,12 +60,11 @@ impl Invalidation {
         match value {
             None => Ok(Invalidation::PerRequest),
             Some("per-request") => Ok(Invalidation::PerRequest),
-            Some("dag") => Ok(Invalidation::Dag),
             Some("dnotify") => Ok(Invalidation::Dnotify),
             Some("inotify") => Ok(Invalidation::Inotify),
             Some(other) => Err(format!(
                 "TEMPLATE_INVALIDATION={other:?} is not valid — expected \"per-request\", \
-                 \"dag\", \"dnotify\" or \"inotify\""
+                 \"dnotify\" or \"inotify\""
             )),
         }
     }
@@ -90,7 +76,6 @@ impl Invalidation {
     pub fn as_str(&self) -> &'static str {
         match self {
             Invalidation::PerRequest => "per-request",
-            Invalidation::Dag => "dag",
             Invalidation::Dnotify => "dnotify",
             Invalidation::Inotify => "inotify",
         }
@@ -103,27 +88,28 @@ impl std::fmt::Display for Invalidation {
     }
 }
 
-/// One flag for the process, not one per watch: dnotify reports through a
-/// signal, and demultiplexing by si_fd inside a handler is not worth it here.
-/// Two caches under dnotify therefore invalidate together — over-invalidation,
-/// which costs a reparse and can never serve something stale.
-static DNOTIFY_FIRED: AtomicBool = AtomicBool::new(false);
+/// A process-wide TICK COUNT, not a flag: dnotify reports through a signal and
+/// demultiplexing by si_fd inside a handler is not worth it, so every watch
+/// sees every directory's events. A counter lets each watch compare against
+/// what IT last saw, so one cache checking cannot consume another cache's
+/// event. The cost is over-invalidation across watches — a reparse — and never
+/// a missed change.
+static DNOTIFY_TICKS: AtomicU64 = AtomicU64::new(0);
 
 extern "C" fn dnotify_handler(_sig: libc::c_int) {
-    DNOTIFY_FIRED.store(true, Ordering::SeqCst);
+    DNOTIFY_TICKS.fetch_add(1, Ordering::SeqCst);
 }
 
 pub(crate) enum Watch {
     PerRequest,
-    Dag,
-    Dnotify { fd: libc::c_int },
+    Dnotify { fd: libc::c_int, seen: AtomicU64 },
     Inotify { fd: libc::c_int },
 }
 
 impl Drop for Watch {
     fn drop(&mut self) {
         match self {
-            Watch::Dnotify { fd } | Watch::Inotify { fd } => unsafe {
+            Watch::Dnotify { fd, .. } | Watch::Inotify { fd } => unsafe {
                 libc::close(*fd);
             },
             _ => {}
@@ -155,7 +141,6 @@ impl Watch {
     pub(crate) fn arm(strategy: Invalidation, root: &Path) -> Result<Watch, String> {
         match strategy {
             Invalidation::PerRequest => Ok(Watch::PerRequest),
-            Invalidation::Dag => Ok(Watch::Dag),
             Invalidation::Dnotify => arm_dnotify(root),
             Invalidation::Inotify => arm_inotify(root),
         }
@@ -163,11 +148,13 @@ impl Watch {
 
     /// Whether the environment must be rebuilt. Called exactly ONCE per
     /// render: the kernel strategies consume what they report.
-    pub(crate) fn stale(&self, by_mtime: impl FnOnce() -> bool) -> bool {
+    pub(crate) fn stale(&self) -> bool {
         match self {
             Watch::PerRequest => true,
-            Watch::Dag => by_mtime(),
-            Watch::Dnotify { .. } => DNOTIFY_FIRED.swap(false, Ordering::SeqCst),
+            Watch::Dnotify { seen, .. } => {
+                let now = DNOTIFY_TICKS.load(Ordering::SeqCst);
+                seen.swap(now, Ordering::SeqCst) != now
+            }
             Watch::Inotify { fd } => drain_inotify(*fd),
         }
     }
@@ -198,7 +185,7 @@ fn arm_dnotify(root: &Path) -> Result<Watch, String> {
                 root.display()
             ));
         }
-        Ok(Watch::Dnotify { fd })
+        Ok(Watch::Dnotify { fd, seen: AtomicU64::new(DNOTIFY_TICKS.load(Ordering::SeqCst)) })
     }
 }
 

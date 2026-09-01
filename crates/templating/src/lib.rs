@@ -42,13 +42,6 @@ mod invalidation;
 pub use invalidation::{Invalidation, OPTIONS as INVALIDATION_OPTIONS};
 use invalidation::Watch;
 
-thread_local! {
-    /// Names the loader is asked for during one render. `None` outside a
-    /// recording render, so nothing accumulates when the graph is not wanted.
-    static RECORDING: std::cell::RefCell<Option<Vec<String>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
     #[error("asset dir does not exist or is not a directory: {0}")]
@@ -84,10 +77,6 @@ fn autoescape(name: &str) -> AutoEscape {
 
 struct CtxEnv {
     env: Environment<'static>,
-    /// Upstream set per template, as the loader reported it: transitive
-    /// extends/include and dynamically-named targets alike.
-    graph: HashMap<String, Vec<String>>,
-    mtimes: HashMap<String, SystemTime>,
     loads: u64,
 }
 
@@ -153,27 +142,14 @@ impl Builder {
 
         let mut ctx_env = Environment::new();
         ctx_env.set_auto_escape_callback(autoescape);
-        let inner = minijinja::path_loader(&canonical_root);
-        ctx_env.set_loader(move |name| {
-            RECORDING.with(|r| {
-                if let Some(v) = r.borrow_mut().as_mut() {
-                    v.push(name.to_owned());
-                }
-            });
-            inner(name)
-        });
+        ctx_env.set_loader(minijinja::path_loader(&canonical_root));
 
         let watch = Watch::arm(self.invalidation, &canonical_root).map_err(RenderError::Invalidation)?;
         let cache = AssetCache {
             root: self.root,
             canonical_root,
             env,
-            ctx_env: RwLock::new(CtxEnv {
-                env: ctx_env,
-                graph: HashMap::new(),
-                mtimes: HashMap::new(),
-                loads: 0,
-            }),
+            ctx_env: RwLock::new(CtxEnv { env: ctx_env, loads: 0 }),
             watch,
             pins: self.pins,
             entries: RwLock::new(HashMap::new()),
@@ -313,54 +289,17 @@ impl AssetCache {
         self.verify_all_pins()?;
 
         // Consulted once per render: a kernel strategy CONSUMES what it reports.
-        let stale;
-
-        {
+        if !self.watch.stale() {
             let g = self.ctx_env.read().unwrap_or_else(|e| e.into_inner());
-            stale = self.watch.stale(|| self.graph_stale(name, &g));
-            if !stale && g.mtimes.contains_key(name) {
-                return self.ctx_render(&g.env, name, ctx);
-            }
+            return self.ctx_render(&g.env, name, ctx);
         }
 
         let mut g = self.ctx_env.write().unwrap_or_else(|e| e.into_inner());
         g.loads += 1;
-        if stale {
-            // Whole cache, not the affected subtree: no partial-invalidation
-            // bookkeeping and no chance of a stale sibling. The graph goes too,
-            // so a removed edge cannot outlive the templates that had it.
-            g.env.clear_templates();
-            g.graph.clear();
-            g.mtimes.clear();
-        } else if !g.graph.contains_key(name) {
-            // minijinja memoizes by name, so the loader is not consulted for a
-            // template a previous render already pulled in. Recording a NEW
-            // template's upstream set against a populated environment would
-            // therefore miss exactly the shared bases. Drop the compiled
-            // templates so this render sees its whole set.
-            g.env.clear_templates();
-        }
-
-        RECORDING.with(|r| *r.borrow_mut() = Some(Vec::new()));
-        let rendered = self.ctx_render(&g.env, name, ctx);
-        let mut upstream = RECORDING.with(|r| r.borrow_mut().take()).unwrap_or_default();
-        let out = rendered?;
-
-        upstream.sort();
-        upstream.dedup();
-        for node in &upstream {
-            if let Ok(mt) = self.canonical_root.join(node).metadata().and_then(|m| m.modified()) {
-                g.mtimes.insert(node.clone(), mt);
-            }
-        }
-        let closure = Self::compose(&upstream, &g.graph);
-        for node in &closure {
-            if let Ok(mt) = self.canonical_root.join(node).metadata().and_then(|m| m.modified()) {
-                g.mtimes.entry(node.clone()).or_insert(mt);
-            }
-        }
-        g.graph.insert(name.to_owned(), closure);
-        Ok(out)
+        // Everything, not a subtree: no partial-invalidation bookkeeping and
+        // no chance of a stale sibling.
+        g.env.clear_templates();
+        self.ctx_render(&g.env, name, ctx)
     }
 
     fn ctx_render<S: serde::Serialize>(
@@ -378,39 +317,6 @@ impl AssetCache {
         })?;
         tmpl.render(minijinja::value::Value::from_serialize(ctx))
             .map_err(|e| RenderError::Render(name.to_owned(), e.to_string()))
-    }
-
-    /// One stat per upstream node of the REQUESTED template — typically the
-    /// page and its base — rather than a stat of everything ever recorded.
-    /// Fold a freshly recorded dependency list into the transitive closure,
-    /// composing whatever the graph already knows (DSU-style: the walk happens
-    /// once, at record time, and the compressed result is what each request
-    /// reads). Safe to compress because a dependency edge can only change if a
-    /// template changed, which moves its mtime, which clears cache and graph
-    /// together — so a stored closure cannot outlive the edges it came from.
-    /// `seen` also makes a cycle terminate rather than recurse.
-    fn compose(direct: &[String], graph: &HashMap<String, Vec<String>>) -> Vec<String> {
-        let mut seen = std::collections::BTreeSet::new();
-        let mut stack: Vec<String> = direct.to_vec();
-        while let Some(node) = stack.pop() {
-            if !seen.insert(node.clone()) {
-                continue;
-            }
-            if let Some(deps) = graph.get(&node) {
-                stack.extend(deps.iter().filter(|d| !seen.contains(*d)).cloned());
-            }
-        }
-        seen.into_iter().collect()
-    }
-
-    fn graph_stale(&self, name: &str, g: &CtxEnv) -> bool {
-        let Some(upstream) = g.graph.get(name) else { return false };
-        upstream.iter().any(|node| {
-            match self.canonical_root.join(node).metadata().and_then(|m| m.modified()) {
-                Ok(now) => g.mtimes.get(node).is_none_or(|rec| now != *rec),
-                Err(_) => true,
-            }
-        })
     }
 
     pub fn static_file(&self, name: &str) -> Result<Arc<[u8]>, RenderError> {
@@ -685,34 +591,6 @@ mod tests {
         assert!(matches!(c.render("absent.js.jinja", &[]), Err(RenderError::Missing(_))));
     }
 
-    #[test]
-    fn render_ctx_steady_state_no_reparse_but_partial_edit_invalidates() {
-        use std::collections::BTreeMap;
-        let d = tmpdir();
-        write(&d, "base.html", "<html>{% block body %}{% endblock %}</html>");
-        write(
-            &d,
-            "page.html",
-            "{% extends \"base.html\" %}{% block body %}v{{ n }}{% endblock %}",
-        );
-        let c = Builder::new(&d).invalidation(Invalidation::Dag).build().unwrap();
-        let loads = || c.ctx_env.read().unwrap().loads;
-
-        assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 1)])).unwrap(), "<html>v1</html>");
-        assert_eq!(loads(), 1);
-
-        assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 2)])).unwrap(), "<html>v2</html>");
-        assert_eq!(loads(), 1, "steady-state render must not reload");
-
-        std::thread::sleep(Duration::from_millis(5));
-        write(&d, "base.html", "<div>{% block body %}{% endblock %}</div>");
-        bump_mtime(&d, "base.html");
-        assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 3)])).unwrap(), "<div>v3</div>");
-        assert_eq!(loads(), 2, "a parent-partial edit must trigger exactly one reload");
-
-        assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 4)])).unwrap(), "<div>v4</div>");
-        assert_eq!(loads(), 2);
-    }
 
     #[test]
     fn pinned_base_template_is_verified_on_every_render_not_just_at_boot() {
@@ -743,13 +621,15 @@ mod tests {
     #[test]
     fn invalidation_parses_strictly_and_round_trips() {
         assert_eq!(Invalidation::parse(None).unwrap(), Invalidation::PerRequest);
-        for s in ["per-request", "dag", "dnotify", "inotify"] {
+        for s in ["per-request", "dnotify", "inotify"] {
             let v = Invalidation::parse(Some(s)).expect("valid strategy");
             assert_eq!(v.as_str(), s, "as_str must round-trip the accepted spelling");
         }
         // §4.3: set-but-invalid refuses rather than falling back, and the
         // message names the alternatives.
-        for bad in ["", "PerRequest", "per_request", "notify", "true"] {
+        // "dag" was a valid value until the strategy was removed: it must now
+        // refuse to boot rather than quietly fall back to the default (§4.3).
+        for bad in ["dag", "", "PerRequest", "per_request", "notify", "true"] {
             let e = Invalidation::parse(Some(bad)).expect_err("must refuse");
             assert!(e.contains("per-request") && e.contains("dnotify"), "unhelpful: {e}");
         }
@@ -757,35 +637,36 @@ mod tests {
 
     #[test]
     fn options_help_states_what_a_chooser_needs() {
-        for s in ["per-request", "dag", "dnotify", "inotify"] {
+        for s in ["per-request", "dnotify", "inotify"] {
             assert!(INVALIDATION_OPTIONS.contains(s), "help omits {s}");
         }
+        assert!(!INVALIDATION_OPTIONS.contains("  dag "), "help still offers the removed dag strategy");
         // The two measured facts that change which option a person picks.
         assert!(
             INVALIDATION_OPTIONS.contains("DOES NOT WORK ON 9p"),
             "help must say plainly that inotify does not work on 9p"
         );
-        assert!(
-            INVALIDATION_OPTIONS.contains("UPSTREAM"),
-            "help must say dag checks the requested template's upstream set"
-        );
     }
 
     #[test]
-    fn per_request_reloads_every_render_and_dag_does_not() {
+    fn per_request_reloads_every_render_and_a_kernel_watch_does_not() {
         let mk = |strategy| {
             let d = tmpdir();
             write(&d, "base.html", "<b>{% block body %}{% endblock %}</b>");
             write(&d, "page.html", "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}");
-            let c = Builder::new(&d).invalidation(strategy).build().unwrap();
+            let c = Builder::new(&d).invalidation(strategy).build().ok()?;
             for i in 0..3 {
                 c.render_ctx("page.html", &BTreeMap::from([("n", i)])).unwrap();
             }
             let n = c.ctx_env.read().unwrap().loads;
-            n
+            Some(n)
         };
-        assert_eq!(mk(Invalidation::PerRequest), 3, "per-request must rebuild on every render");
-        assert_eq!(mk(Invalidation::Dag), 1, "dag must not rebuild while nothing changed");
+        assert_eq!(mk(Invalidation::PerRequest), Some(3), "per-request must rebuild every render");
+        // dnotify may be unavailable on a kernel without CONFIG_DNOTIFY; that
+        // is a property of the host, not of the code under test.
+        if let Some(loads) = mk(Invalidation::Dnotify) {
+            assert!(loads <= 1, "a kernel watch must not rebuild while nothing changed: {loads}");
+        }
     }
 
     #[test]
@@ -816,90 +697,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn dag_records_a_shared_base_for_a_page_first_rendered_after_it_was_loaded() {
-        let d = tmpdir();
-        write(&d, "base.html", "<b>v1 {% block body %}{% endblock %}</b>");
-        for p in ["one.html", "two.html"] {
-            write(&d, p, "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}");
-        }
-        let c = Builder::new(&d).invalidation(Invalidation::Dag).build().unwrap();
-        let ctx = BTreeMap::from([("n", 1)]);
 
-        // one.html loads base.html. two.html is rendered afterwards, when the
-        // loader would be memoized past base.html.
-        assert_eq!(c.render_ctx("one.html", &ctx).unwrap(), "<b>v1 1</b>");
-        assert_eq!(c.render_ctx("two.html", &ctx).unwrap(), "<b>v1 1</b>");
-        {
-            let g = c.ctx_env.read().unwrap();
-            assert!(
-                g.graph["two.html"].contains(&"base.html".to_owned()),
-                "two.html's upstream set must include the shared base, not just itself: {:?}",
-                g.graph["two.html"]
-            );
-        }
 
-        write(&d, "base.html", "<b>v2 {% block body %}{% endblock %}</b>");
-        bump_mtime(&d, "base.html");
-        assert_eq!(
-            c.render_ctx("two.html", &ctx).unwrap(),
-            "<b>v2 1</b>",
-            "editing the shared base must invalidate a page that never loaded it itself"
-        );
-    }
-
-    #[test]
-    fn dag_three_level_chain_catches_a_grandparent_edit_cold_and_warm() {
-        let d = tmpdir();
-        write(&d, "layout.html", "L1[{% block body %}{% endblock %}]");
-        write(
-            &d,
-            "base.html",
-            "{% extends \"layout.html\" %}{% block body %}B[{% block inner %}{% endblock %}]{% endblock %}",
-        );
-        write(&d, "page.html", "{% extends \"base.html\" %}{% block inner %}{{ n }}{% endblock %}");
-        write(&d, "two.html", "{% extends \"base.html\" %}{% block inner %}two{{ n }}{% endblock %}");
-        let c = Builder::new(&d).invalidation(Invalidation::Dag).build().unwrap();
-        let ctx = BTreeMap::from([("n", 1)]);
-
-        assert_eq!(c.render_ctx("page.html", &ctx).unwrap(), "L1[B[1]]");
-        // two.html is rendered while base AND layout are already loaded, so
-        // the loader reports neither of them for it.
-        assert_eq!(c.render_ctx("two.html", &ctx).unwrap(), "L1[B[two1]]");
-        {
-            let g = c.ctx_env.read().unwrap();
-            for node in ["base.html", "layout.html"] {
-                assert!(
-                    g.graph["two.html"].contains(&node.to_owned()),
-                    "two.html's upstream set must reach {node} two levels up: {:?}",
-                    g.graph["two.html"]
-                );
-            }
-        }
-
-        write(&d, "layout.html", "L2[{% block body %}{% endblock %}]");
-        bump_mtime(&d, "layout.html");
-        assert_eq!(
-            c.render_ctx("two.html", &ctx).unwrap(),
-            "L2[B[two1]]",
-            "editing the GRANDPARENT must invalidate a page two levels below it"
-        );
-    }
-
-    #[test]
-    fn compose_flattens_a_chain_and_terminates_on_a_cycle() {
-        let mut g: HashMap<String, Vec<String>> = HashMap::new();
-        g.insert("base".into(), vec!["base".into(), "layout".into()]);
-        let flat = AssetCache::compose(&["page".to_owned(), "base".to_owned()], &g);
-        assert_eq!(flat, vec!["base".to_owned(), "layout".to_owned(), "page".to_owned()]);
-
-        // A cycle is not renderable, but the graph walk must not hang on one.
-        let mut cyc: HashMap<String, Vec<String>> = HashMap::new();
-        cyc.insert("a".into(), vec!["b".into()]);
-        cyc.insert("b".into(), vec!["a".into()]);
-        assert_eq!(
-            AssetCache::compose(&["a".to_owned()], &cyc),
-            vec!["a".to_owned(), "b".to_owned()]
-        );
-    }
 }
