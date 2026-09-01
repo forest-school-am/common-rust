@@ -30,7 +30,7 @@ authentik.
 
 ```toml
 [dependencies]
-common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.1" }
+common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.2" }
 ```
 
 **Use the `https` URL, never `git@github.com:`.** Dependency fetches happen in
@@ -187,7 +187,7 @@ automatically:
 
 ```toml
 [dependencies]
-common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.1" }
+common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.2" }
 ```
 
 `build.rs` — copy the template next to your other assets:
