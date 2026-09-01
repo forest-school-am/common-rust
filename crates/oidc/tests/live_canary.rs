@@ -127,6 +127,7 @@ async fn instant_logout_kills_access_and_refresh_tokens() {
         Url::parse(&format!("{}/application/o/common-oidc-canary/", e.ak)).unwrap(),
         "common-oidc-canary",
         Url::parse("http://127.0.0.1:18999/cb").unwrap(),
+        "test_session",
     )
     .request_refresh_tokens(); // the whole point is to test refresh revocation
     let client = OidcClient::discover(config).await.expect("discovery against live stand");
@@ -253,6 +254,7 @@ async fn groups_of(e: &Env) -> Vec<uuid::Uuid> {
         Url::parse(&format!("{}/application/o/common-oidc-canary/", e.ak)).unwrap(),
         "common-oidc-canary",
         Url::parse("http://127.0.0.1:18999/cb").unwrap(),
+        "test_session",
     );
     let client = OidcClient::discover(config).await.expect("discovery against live stand");
     let auth = client.authorize_url(false);

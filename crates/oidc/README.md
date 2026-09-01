@@ -88,6 +88,7 @@ let config = OidcConfig::new(
     Url::parse("https://auth.dev.local/application/o/my-app/")?, // browser issuer
     "my-app",                                                    // public client id (PKCE)
     Url::parse("https://my-app.dev.local/oidc/callback")?,       // registered redirect
+    "my_app_session",                                            // THIS app's cookie
 );
 // server→authentik calls go here if the browser hostname isn't reachable
 // from the backend (e.g. inside docker): config.backchannel = Some(...);
@@ -220,7 +221,7 @@ copies fresh; git never tracks it.
 Then point the config at it:
 
 ```rust
-let mut config = OidcConfig::new(issuer, client_id, redirect_url);
+let mut config = OidcConfig::new(issuer, client_id, redirect_url, cookie_name);
 config.assets_dir = "assets".into();
 ```
 
@@ -317,7 +318,7 @@ Refresh is opt-in for **Track B**, after the authentik fork revokes refresh
 tokens at session end and `tests/live_canary.rs` goes green:
 
 ```rust
-let config = OidcConfig::new(issuer, client_id, redirect_url)
+let config = OidcConfig::new(issuer, client_id, redirect_url, cookie_name)
     .request_refresh_tokens(); // adds offline_access; server-side refresh only
 ```
 

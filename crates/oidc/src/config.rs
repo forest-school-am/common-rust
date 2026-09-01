@@ -22,7 +22,15 @@ pub struct OidcConfig {
 }
 
 impl OidcConfig {
-    pub fn new(issuer: Url, client_id: impl Into<String>, redirect_url: Url) -> Self {
+    /// `cookie_name` is required rather than defaulted: a session cookie is
+    /// browser-visible and per-application, and a default nobody chose is a
+    /// name nobody re-reads. Pass the owning app's own name.
+    pub fn new(
+        issuer: Url,
+        client_id: impl Into<String>,
+        redirect_url: Url,
+        cookie_name: impl Into<String>,
+    ) -> Self {
         Self {
             issuer,
             backchannel: None,
@@ -32,7 +40,7 @@ impl OidcConfig {
                 .map(String::from)
                 .to_vec(),
             login_path: "/oidc/login".into(),
-            cookie_name: "stand_session".into(),
+            cookie_name: cookie_name.into(),
             cookie_secure: true,
             danger_accept_invalid_certs: false,
             assets_dir: PathBuf::from("assets"),
@@ -80,6 +88,7 @@ mod tests {
             Url::parse("https://auth.dev.local/application/o/x/").unwrap(),
             "x",
             Url::parse("https://x.dev.local/oidc/callback").unwrap(),
+            "test_session",
         );
         assert!(!c.scopes.iter().any(|s| s == "offline_access"));
         assert!(c.scopes.iter().any(|s| s == "effective_groups"));
@@ -93,6 +102,7 @@ mod tests {
             Url::parse("https://auth.dev.local/application/o/x/").unwrap(),
             "x",
             Url::parse("https://x.dev.local/oidc/callback").unwrap(),
+            "test_session",
         )
         .request_refresh_tokens()
         .request_refresh_tokens();

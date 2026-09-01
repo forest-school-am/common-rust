@@ -127,6 +127,7 @@ async fn oidc_state(base: &str, store: MemoryStore) -> OidcState {
         Url::parse(&format!("{base}/application/o/test/")).unwrap(),
         "test-client",
         Url::parse("http://app.example/oidc/callback").unwrap(),
+        "test_session",
     )
     .request_refresh_tokens();
     config.cookie_secure = false;
@@ -202,7 +203,7 @@ async fn valid_access_token_yields_principal() {
     let app = app(oidc_state(&base, store).await);
 
     let resp = app
-        .oneshot(get_req("/me", &format!("stand_session={sid}"), true))
+        .oneshot(get_req("/me", &format!("test_session={sid}"), true))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -224,14 +225,14 @@ async fn expired_access_is_refreshed_server_side_exactly_once() {
 
     let resp = app
         .clone()
-        .oneshot(get_req("/me", &format!("stand_session={sid}"), true))
+        .oneshot(get_req("/me", &format!("test_session={sid}"), true))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK, "refresh must rescue the request");
     assert_eq!(mock.refresh_calls.load(Ordering::SeqCst), 1);
 
     let resp = app
-        .oneshot(get_req("/me", &format!("stand_session={sid}"), true))
+        .oneshot(get_req("/me", &format!("test_session={sid}"), true))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -246,7 +247,7 @@ async fn dead_tokens_destroy_session_and_start_silent_login() {
 
     let resp = app
         .clone()
-        .oneshot(get_req("/me", &format!("stand_session={sid}"), true))
+        .oneshot(get_req("/me", &format!("test_session={sid}"), true))
         .await
         .unwrap();
     assert!(resp.status().is_redirection(), "got {}", resp.status());
@@ -261,7 +262,7 @@ async fn dead_tokens_destroy_session_and_start_silent_login() {
     assert_eq!(mock.refresh_calls.load(Ordering::SeqCst), 1);
 
     let resp = app
-        .oneshot(get_req("/me", &format!("stand_session={sid}"), false))
+        .oneshot(get_req("/me", &format!("test_session={sid}"), false))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -389,7 +390,7 @@ async fn full_login_loop_and_interactive_escalation() {
     assert!(resp.status().is_redirection(), "got {}", resp.status());
     let back = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
     assert_eq!(back, "/me", "must land on the originally requested page");
-    let session_cookie = cookie_from(&resp, "stand_session").expect("session cookie set");
+    let session_cookie = cookie_from(&resp, "test_session").expect("session cookie set");
     assert_eq!(mock.exchange_calls.load(Ordering::SeqCst), 1);
 
     let resp = app.oneshot(get_req("/me", &session_cookie, true)).await.unwrap();
@@ -427,9 +428,9 @@ async fn unauthorized_response_matches_the_extractor_401() {
         .to_str()
         .unwrap()
         .to_owned();
-    assert!(cookie.starts_with("stand_session="), "cleared the wrong cookie: {cookie}");
+    assert!(cookie.starts_with("test_session="), "cleared the wrong cookie: {cookie}");
     assert!(
-        cookie.contains("stand_session=;") || cookie.to_lowercase().contains("max-age=0"),
+        cookie.contains("test_session=;") || cookie.to_lowercase().contains("max-age=0"),
         "session cookie must be cleared, got: {cookie}"
     );
 }
