@@ -1,0 +1,47 @@
+[package]
+name = "common-oidc"
+version = "0.2.2"
+edition = "2021"
+description = "Shared in-app OIDC for stand apps: BFF sessions, per-request userinfo, server-side refresh (session ruling v5)"
+license = "MIT"
+# Publishes the served-template directory to dependents' build scripts as
+# DEP_COMMON_OIDC_ASSETS (cargo derives that name from THIS `links` value, not
+# from the package name: `links = "common-oidc"` + `cargo:assets=` =>
+# DEP_COMMON_OIDC_ASSETS). It is how adopters copy the shim template without a
+# `../common-oidc` sibling path, so it works for git deps too (§9.8).
+links = "common-oidc"
+
+[dependencies]
+# Stand shared crates (CODESTYLE.md §8 logging, §9 asset rendering). These MUST
+# be git deps, not path deps: a git dependency is checked out standalone, so a
+# `../sibling` path in this manifest resolves to nothing and every consumer
+# fails at resolution. https, never git@ — dependency fetches happen inside
+# Docker builds and nix fixed-output derivations, neither of which has an SSH
+# key or known_hosts.
+common-logging = { git = "https://github.com/forest-school-am/common-rust-logging.git", tag = "v0.1.1" }
+common-templating = { git = "https://github.com/forest-school-am/common-rust-templating.git", tag = "v0.1.2" }
+axum = "0.8"
+axum-extra = { version = "0.10", features = ["cookie"] }
+# default-features off + explicit rustls-tls is intentional: guarantees the
+# openidconnect->reqwest dep is rustls, never openssl, regardless of upstream
+# default changes (supply-chain: this crate is openssl-free).
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[build-dependencies]
+# derive the served shim's integrity-pin hash at build time (§9.8).
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+# cookies: the live canary drives authentik's flow executor like a browser
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "cookies"] }

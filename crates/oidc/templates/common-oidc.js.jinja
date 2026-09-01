@@ -1,0 +1,69 @@
+// common-oidc browser shim — served by the app's own backend at
+// GET /common-oidc.js with the login path baked in, so a frontend can never
+// version-skew against the backend's 401 contract (the searchbase.js
+// precedent). Framework-free; import as a module.
+//
+// The contract (DECISIONS.md R2, Track A): the backend protects APIs with
+// per-request userinfo. When the access token has expired it answers an
+// XHR/fetch call with HTTP 401 and the header `X-Common-OIDC-Reauth`. This
+// shim wraps fetch: it passes every request through untouched until it sees
+// that signal, then drives a silent `prompt=none` re-auth by navigating
+// top-level to the login path (invisible while the SSO session is alive;
+// the server escalates to interactive once if the session is truly dead).
+// Guards: single-flight (N concurrent 401s → one bounce, the rest ride it)
+// and a loop breaker (a bounce won't re-fire within a short window).
+
+const LOGIN_PATH = "{{ login_path }}";
+const REAUTH_HEADER = "x-common-oidc-reauth";
+const LOOP_GUARD_KEY = "common_oidc_last_bounce";
+const LOOP_GUARD_MS = 10_000;
+
+let bouncing = false; // single-flight within this document
+
+function recentlyBounced() {
+  try {
+    const t = Number(sessionStorage.getItem(LOOP_GUARD_KEY) || 0);
+    return Date.now() - t < LOOP_GUARD_MS;
+  } catch {
+    return false;
+  }
+}
+
+// Navigate top-level into the silent re-auth. prompt=none needs a real
+// navigation to authentik (the SSO cookie lives on its origin), so this
+// leaves the page; on success the browser lands back on `next` and the app
+// re-fetches naturally. Returns a never-resolving promise so awaiters simply
+// stop while the navigation happens.
+function bounce() {
+  if (bouncing || recentlyBounced()) return Promise.resolve();
+  bouncing = true;
+  try {
+    sessionStorage.setItem(LOOP_GUARD_KEY, String(Date.now()));
+  } catch {
+    /* private mode: rely on the server-side one-shot interactive escalation */
+  }
+  const next = location.pathname + location.search + location.hash;
+  location.assign(`${LOGIN_PATH}?next=${encodeURIComponent(next)}`);
+  // The winning single-flight caller gets a promise that never resolves (the
+  // page is navigating away); losers get resolve() above and see the raw 401.
+  return new Promise(() => {});
+}
+
+/// Wrap window.fetch so any 401 carrying the re-auth signal triggers the
+/// silent bounce. Idempotent: safe to call more than once (a second call is a
+/// no-op). Call once at startup — it also auto-runs on import.
+export function installReauthGuard() {
+  if (window.__commonOidcGuarded) return;
+  window.__commonOidcGuarded = true;
+  const original = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const resp = await original(input, init);
+    if (resp.status === 401 && resp.headers.get(REAUTH_HEADER)) {
+      await bounce();
+    }
+    return resp;
+  };
+}
+
+// Auto-install on import: the common case is "just protect my fetches".
+installReauthGuard();
