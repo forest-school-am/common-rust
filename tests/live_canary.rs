@@ -130,7 +130,8 @@ async fn instant_logout_kills_access_and_refresh_tokens() {
     )
     .request_refresh_tokens(); // the whole point is to test refresh revocation
     let client = OidcClient::discover(config).await.expect("discovery against live stand");
-    let (auth_url, _state, verifier) = client.authorize_url(false);
+    let auth = client.authorize_url(false);
+    let (auth_url, verifier) = (auth.url, auth.pkce_verifier);
     let code = authorization_code(&http, &browser, &e, &auth_url).await;
     let tokens = client.exchange_code(code, verifier).await.expect("code exchange");
     let refresh = tokens.refresh_token.clone().expect(

@@ -195,14 +195,19 @@ fn removal_cookie(name: &str) -> Cookie<'static> {
 }
 
 fn start_login(oidc: &OidcState, jar: CookieJar, next: String, silent: bool, interactive_tried: bool) -> Response {
-    let (url, state, verifier) = oidc.client.authorize_url(silent);
-    let flow = Flow { state, verifier, next, interactive_tried };
+    let auth = oidc.client.authorize_url(silent);
+    let flow = Flow {
+        state: auth.csrf_state,
+        verifier: auth.pkce_verifier,
+        next,
+        interactive_tried,
+    };
     let jar = jar.add(base_cookie(
         FLOW_COOKIE,
         hex_encode(&serde_json::to_string(&flow).expect("flow serializes")),
         oidc.config(),
     ));
-    (jar, Redirect::temporary(url.as_str())).into_response()
+    (jar, Redirect::temporary(auth.url.as_str())).into_response()
 }
 
 pub fn router(state: OidcState) -> Router {

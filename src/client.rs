@@ -66,6 +66,12 @@ pub struct OidcClient {
     config: OidcConfig,
 }
 
+pub struct AuthorizeRequest {
+    pub url: Url,
+    pub csrf_state: String,
+    pub pkce_verifier: String,
+}
+
 impl OidcClient {
     pub async fn discover(config: OidcConfig) -> Result<Self, OidcError> {
         let http = reqwest::Client::builder()
@@ -125,7 +131,7 @@ impl OidcClient {
         &self.config
     }
 
-    pub fn authorize_url(&self, silent: bool) -> (Url, String, String) {
+    pub fn authorize_url(&self, silent: bool) -> AuthorizeRequest {
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
         let mut req = self
             .core
@@ -144,7 +150,11 @@ impl OidcClient {
             req = req.add_prompt(CoreAuthPrompt::None);
         }
         let (url, state, _nonce) = req.url();
-        (url, state.secret().clone(), verifier.secret().clone())
+        AuthorizeRequest {
+            url,
+            csrf_state: state.secret().clone(),
+            pkce_verifier: verifier.secret().clone(),
+        }
     }
 
     #[tracing::instrument(skip_all)]
