@@ -1,6 +1,33 @@
 //! Rendering templates from a validated directory, with caching and path
 //! safety. Everything here is about turning a template plus parameters into
 //! bytes; nothing here decides what to serve or when.
+//!
+//! An asset cache is built once at boot. `require_template` makes a missing
+//! file a startup failure rather than a 500 on first request; `pin` adds an
+//! integrity hash so a copy that has drifted from the one this binary was
+//! built against is detected (§9.8):
+//!
+//! ```
+//! use common_templating::Builder;
+//! use sha2::{Digest, Sha256};
+//!
+//! let dir = std::env::temp_dir().join("common-templating-doc");
+//! std::fs::create_dir_all(&dir)?;
+//! let logic = "console.log('hello');";
+//! std::fs::write(dir.join("logic.js"), logic)?;
+//! let expected: [u8; 32] = Sha256::digest(logic.as_bytes()).into();
+//!
+//! let assets = Builder::new(&dir)
+//!     .require_template("logic.js")
+//!     .pin("logic.js", expected)
+//!     .build()?;
+//!
+//! assert_eq!(&*assets.static_file("logic.js")?, logic.as_bytes());
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! Pins are per-file: pinning a page that `extends` a base does not cover the
+//! base. Pin every file whose content matters.
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};

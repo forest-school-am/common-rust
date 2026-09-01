@@ -1,5 +1,21 @@
 //! Subscriber setup and the crate's public surface. Assembly only — the
 //! pieces live in config.rs, format.rs, designator.rs and span.rs.
+//!
+//! Every emission names a designator as its tracing target, so logs can be
+//! filtered by concern rather than by module path (§8):
+//!
+//! ```
+//! let name = "alice";
+//! common_logging::info!(common_logging::AUTH, user = %name, "signed in");
+//! common_logging::warn!(common_logging::HTTP, status = 400, "unknown audience");
+//! ```
+//!
+//! Structured fields come before the message. A concern outside the shared
+//! vocabulary is declared with `custom!`, never invented inline:
+//!
+//! ```
+//! common_logging::info!(common_logging::custom!("scheduler"), run = 7, "tick");
+//! ```
 
 mod config;
 mod designator;
