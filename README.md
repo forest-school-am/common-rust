@@ -5,16 +5,21 @@ minijinja plus a cache over a validated asset directory. Depended on only by
 services that actually serve assets — deliberately separate from `common-logging`
 (§9.7), which stays dependency-light for every binary.
 
-- **Version:** `0.1.0` · **Toolchain:** Rust 1.98.0.
+- **Version:** `0.1.2` · **Toolchain:** Rust 1.98.0.
 
 ## Depend on it
 
 ```toml
 [dependencies]
-# NOTE: canonical remote is https://github.com/rebenkoy/common-templating — switch to
-# a git dep once it is pushed. Path dep until then.
-common-templating = { path = "../common-templating" }
+common-templating = { git = "https://github.com/forest-school-am/common-rust-templating.git", tag = "v0.1.2" }
 ```
+
+Local work resolves through the shared cargo patch: symlink
+`/mnt/host/workspace/Les/cargo-patch.toml` to `<repo>/.cargo/config.toml`
+(gitignored, opt-in per repo — never at the workspace root, CODESTYLE §11.2a).
+The symlink is REQUIRED SETUP, not a guarded condition: without it a plain
+`cargo build` silently resolves to the published crate and rewrites your
+lockfile to say so.
 
 ## Use
 
