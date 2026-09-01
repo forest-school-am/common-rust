@@ -53,11 +53,14 @@ Unset means per-request. An unrecognised value refuses to start.
                driven, and deprecated since Linux 2.6.13 — the `notify` crate
                does not offer it.
 
-  inotify      Per-inode kernel events. INERT on this stand's 9p share:
-               inotify_add_watch SUCCEEDS and returns a valid watch
-               descriptor, then delivers no events at all (measured, with an
-               ext4 control that passed). Selecting it here means templates
-               never reload. Use dnotify for kernel events on 9p.
+  inotify      Per-inode kernel events. DOES NOT WORK ON 9p — it silently
+               delivers no events. Do not select it for anything served off
+               the 9p share; templates will never reload and nothing will say
+               so. inotify_add_watch SUCCEEDS and returns a valid watch
+               descriptor, then stays silent forever (measured, with an ext4
+               control that passed). Use dnotify for kernel events on 9p.
+               It is offered because it is the right mechanism on a normal
+               local filesystem, where it does work.
 
 None of this depends on the 9p share existing: the strategies are about how a
 running service notices its own assets changing, wherever it runs. The 9p note

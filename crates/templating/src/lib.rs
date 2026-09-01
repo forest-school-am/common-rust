@@ -353,7 +353,13 @@ impl AssetCache {
                 g.mtimes.insert(node.clone(), mt);
             }
         }
-        g.graph.insert(name.to_owned(), upstream);
+        let closure = Self::compose(&upstream, &g.graph);
+        for node in &closure {
+            if let Ok(mt) = self.canonical_root.join(node).metadata().and_then(|m| m.modified()) {
+                g.mtimes.entry(node.clone()).or_insert(mt);
+            }
+        }
+        g.graph.insert(name.to_owned(), closure);
         Ok(out)
     }
 
@@ -376,6 +382,27 @@ impl AssetCache {
 
     /// One stat per upstream node of the REQUESTED template — typically the
     /// page and its base — rather than a stat of everything ever recorded.
+    /// Fold a freshly recorded dependency list into the transitive closure,
+    /// composing whatever the graph already knows (DSU-style: the walk happens
+    /// once, at record time, and the compressed result is what each request
+    /// reads). Safe to compress because a dependency edge can only change if a
+    /// template changed, which moves its mtime, which clears cache and graph
+    /// together — so a stored closure cannot outlive the edges it came from.
+    /// `seen` also makes a cycle terminate rather than recurse.
+    fn compose(direct: &[String], graph: &HashMap<String, Vec<String>>) -> Vec<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut stack: Vec<String> = direct.to_vec();
+        while let Some(node) = stack.pop() {
+            if !seen.insert(node.clone()) {
+                continue;
+            }
+            if let Some(deps) = graph.get(&node) {
+                stack.extend(deps.iter().filter(|d| !seen.contains(*d)).cloned());
+            }
+        }
+        seen.into_iter().collect()
+    }
+
     fn graph_stale(&self, name: &str, g: &CtxEnv) -> bool {
         let Some(upstream) = g.graph.get(name) else { return false };
         upstream.iter().any(|node| {
@@ -734,7 +761,10 @@ mod tests {
             assert!(INVALIDATION_OPTIONS.contains(s), "help omits {s}");
         }
         // The two measured facts that change which option a person picks.
-        assert!(INVALIDATION_OPTIONS.contains("INERT"), "help must say inotify is inert on 9p");
+        assert!(
+            INVALIDATION_OPTIONS.contains("DOES NOT WORK ON 9p"),
+            "help must say plainly that inotify does not work on 9p"
+        );
         assert!(
             INVALIDATION_OPTIONS.contains("UPSTREAM"),
             "help must say dag checks the requested template's upstream set"
@@ -815,6 +845,61 @@ mod tests {
             c.render_ctx("two.html", &ctx).unwrap(),
             "<b>v2 1</b>",
             "editing the shared base must invalidate a page that never loaded it itself"
+        );
+    }
+
+    #[test]
+    fn dag_three_level_chain_catches_a_grandparent_edit_cold_and_warm() {
+        let d = tmpdir();
+        write(&d, "layout.html", "L1[{% block body %}{% endblock %}]");
+        write(
+            &d,
+            "base.html",
+            "{% extends \"layout.html\" %}{% block body %}B[{% block inner %}{% endblock %}]{% endblock %}",
+        );
+        write(&d, "page.html", "{% extends \"base.html\" %}{% block inner %}{{ n }}{% endblock %}");
+        write(&d, "two.html", "{% extends \"base.html\" %}{% block inner %}two{{ n }}{% endblock %}");
+        let c = Builder::new(&d).invalidation(Invalidation::Dag).build().unwrap();
+        let ctx = BTreeMap::from([("n", 1)]);
+
+        assert_eq!(c.render_ctx("page.html", &ctx).unwrap(), "L1[B[1]]");
+        // two.html is rendered while base AND layout are already loaded, so
+        // the loader reports neither of them for it.
+        assert_eq!(c.render_ctx("two.html", &ctx).unwrap(), "L1[B[two1]]");
+        {
+            let g = c.ctx_env.read().unwrap();
+            for node in ["base.html", "layout.html"] {
+                assert!(
+                    g.graph["two.html"].contains(&node.to_owned()),
+                    "two.html's upstream set must reach {node} two levels up: {:?}",
+                    g.graph["two.html"]
+                );
+            }
+        }
+
+        write(&d, "layout.html", "L2[{% block body %}{% endblock %}]");
+        bump_mtime(&d, "layout.html");
+        assert_eq!(
+            c.render_ctx("two.html", &ctx).unwrap(),
+            "L2[B[two1]]",
+            "editing the GRANDPARENT must invalidate a page two levels below it"
+        );
+    }
+
+    #[test]
+    fn compose_flattens_a_chain_and_terminates_on_a_cycle() {
+        let mut g: HashMap<String, Vec<String>> = HashMap::new();
+        g.insert("base".into(), vec!["base".into(), "layout".into()]);
+        let flat = AssetCache::compose(&["page".to_owned(), "base".to_owned()], &g);
+        assert_eq!(flat, vec!["base".to_owned(), "layout".to_owned(), "page".to_owned()]);
+
+        // A cycle is not renderable, but the graph walk must not hang on one.
+        let mut cyc: HashMap<String, Vec<String>> = HashMap::new();
+        cyc.insert("a".into(), vec!["b".into()]);
+        cyc.insert("b".into(), vec!["a".into()]);
+        assert_eq!(
+            AssetCache::compose(&["a".to_owned()], &cyc),
+            vec!["a".to_owned(), "b".to_owned()]
         );
     }
 }
