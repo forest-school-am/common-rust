@@ -438,7 +438,6 @@ mod tests {
 
         let a = c.render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")]).unwrap();
         assert_eq!(&*a, "const P = \"/oidc/login\";");
-        // same params + mtime -> cache hit (same Arc)
         let b = c.render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")]).unwrap();
         assert!(Arc::ptr_eq(&a, &b), "same params+mtime must be a cache hit");
         // different params -> re-render
