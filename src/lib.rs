@@ -63,6 +63,17 @@ use tracing_subscriber::{fmt, EnvFilter};
 /// Initialize the global subscriber from the environment (§8.4/§8.5). Call
 /// once at the top of `main`. Idempotent: a second call is a no-op rather
 /// than a panic (a subscriber is already installed).
+///
+/// INFALLIBLE: it cannot fail or panic, so it is safe as the first statement
+/// of `main` in a service with a no-panics-on-startup invariant.
+///
+/// It resolves `DEPLOYMENT_TYPE` LENIENTLY — anything that is not `"prod"`
+/// becomes `Dev`, because logging must always come up. **That is not a §4.3
+/// gate and calling this does not give you one.** A service that must refuse a
+/// set-but-invalid value — and any service whose behaviour differs between
+/// classes should — calls [`Deployment::from_env`] itself and handles the
+/// `Err`. The two resolutions are deliberately different policies for
+/// deliberately different jobs (§4.4y).
 pub fn init() {
     init_with(LogConfig::from_env());
 }

@@ -37,5 +37,5 @@ only; nothing to `nix build`.
 ## Stand context
 Implements DECISIONS.md R6 / CODESTYLE.md §8. Builds are serialized under R4's
 disk regime — coordinate a slot with the manager session before compiling.
-Consumers migrate off raw `tracing` onto this crate as part of the restructure
-wave; `common-oidc` is first.
+Every Les Rust crate and binary logs through this crate, `common-oidc` included
+(§8.5) — no consumer emits raw `tracing` targets.

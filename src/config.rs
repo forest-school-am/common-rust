@@ -93,7 +93,12 @@ impl LogConfig {
         Self { format, deployment, filter }
     }
 
-    /// Read the three env vars and resolve.
+    /// Read the three env vars and resolve. Infallible.
+    ///
+    /// The `deployment` it returns is resolved LENIENTLY for logging purposes
+    /// (see [`LogConfig::resolve`]). It is NOT a §4.3 gate — a service needing
+    /// one calls [`Deployment::from_env`], which returns `Err` on a
+    /// set-but-invalid value.
     pub fn from_env() -> Self {
         let get = |k: &str| std::env::var(k).ok();
         Self::resolve(

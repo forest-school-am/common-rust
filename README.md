@@ -4,19 +4,21 @@ The Les stand's shared logging crate — the single owner of CODESTYLE.md §8
 mechanics, so nothing drifts per repo. Every Les binary and library depends on
 it, `common-oidc` included (which logs through here, not raw `tracing`).
 
-- **Version:** `0.1.0` · **Toolchain:** Rust 1.98.0.
+- **Version:** `0.1.1` · **Toolchain:** Rust 1.98.0.
 
 ## Depend on it
 
-Plain path dep + a NOTE naming the canonical future remote (the stand's
-convention until the repo is pushed):
-
 ```toml
 [dependencies]
-# NOTE: canonical remote is https://github.com/rebenkoy/common-logging — switch to
-# a git dep once it is pushed. Path dep until then.
-common-logging = { path = "../common-logging" }
+common-logging = { git = "https://github.com/forest-school-am/common-rust-logging.git", tag = "v0.1.1" }
 ```
+
+Local work resolves through the shared cargo patch: symlink
+`/mnt/host/workspace/Les/cargo-patch.toml` to `<repo>/.cargo/config.toml`
+(gitignored, opt-in per repo — never at the workspace root, CODESTYLE §11.2a).
+The symlink is REQUIRED SETUP, not a guarded condition: without it a plain
+`cargo build` silently resolves to the published crate and rewrites your
+lockfile to say so.
 
 ## Use
 
