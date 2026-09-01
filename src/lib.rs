@@ -222,8 +222,6 @@ mod tests {
     fn human_span_fields_dedupe_by_name() {
         let buf = Buf::new();
         tracing::subscriber::with_default(human(buf.clone()), || {
-            // the real-world stutter: outer span, instrumented inner span and
-            // the event all carrying `task` printed it three times pre-fix
             let outer = tracing::info_span!("cron_run", task = "hello");
             let _o = outer.enter();
             let inner = tracing::info_span!("execute", task = "hello");
