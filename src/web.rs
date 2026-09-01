@@ -333,8 +333,8 @@ async fn login(
     start_login(&oidc, jar, next, silent, !silent)
 }
 
-/// Serve the browser shim with the login path baked in (no-cache, like the
-/// searchbase.js precedent — frontends always load the current contract).
+/// Serve the browser shim with the login path baked in (no-store: frontends
+/// always load the current contract).
 async fn client_js(State(oidc): State<OidcState>) -> Response {
     // Rendered through common-templating (§9): the template is a validated,
     // version-pinned on-disk file; the cache re-renders only when the file or
