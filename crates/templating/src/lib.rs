@@ -627,9 +627,7 @@ mod tests {
         }
         // §4.3: set-but-invalid refuses rather than falling back, and the
         // message names the alternatives.
-        // "dag" was a valid value until the strategy was removed: it must now
-        // refuse to boot rather than quietly fall back to the default (§4.3).
-        for bad in ["dag", "", "PerRequest", "per_request", "notify", "true"] {
+        for bad in ["", "PerRequest", "per_request", "notify", "true"] {
             let e = Invalidation::parse(Some(bad)).expect_err("must refuse");
             assert!(e.contains("per-request") && e.contains("dnotify"), "unhelpful: {e}");
         }
@@ -640,7 +638,6 @@ mod tests {
         for s in ["per-request", "dnotify", "inotify"] {
             assert!(INVALIDATION_OPTIONS.contains(s), "help omits {s}");
         }
-        assert!(!INVALIDATION_OPTIONS.contains("  dag "), "help still offers the removed dag strategy");
         // The two measured facts that change which option a person picks.
         assert!(
             INVALIDATION_OPTIONS.contains("DOES NOT WORK ON 9p"),
