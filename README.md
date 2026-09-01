@@ -129,7 +129,8 @@ async fn admin(user: Principal) -> Result<String, common_oidc::GateDenied> {
 
 `Principal { uuid, username, email, effective_groups }` — `effective_groups`
 is the downward closure of group **UUIDs** (never names); gate on UUIDs, which
-the stand publishes in `deploy/teststand/state.json`.
+the stand publishes in `Les/state.json` (R10: stand config lives in common
+scope under no repo; it used to sit in `searchbase/deploy/teststand/`).
 
 `require_group` (above) gates one handler and returns 403 on failure. Most
 apps instead gate once in **middleware** with `principal.in_group(&uuid)` —
