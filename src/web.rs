@@ -25,7 +25,9 @@ use crate::config::OidcConfig;
 use crate::principal::Principal;
 use crate::store::{Session, SessionStore};
 
-const FLOW_COOKIE: &str = "so_flow";
+/// Short-lived cookie carrying the in-flight login's PKCE verifier and state.
+/// Private with no config field, so every adopter ships whatever is here.
+const FLOW_COOKIE: &str = "oidc_flow";
 /// Signal header on a 401 telling the served shim to drive silent re-auth.
 ///
 /// Public so adopters can ASSERT it (e2e checks of the 401 contract) without
@@ -79,10 +81,10 @@ impl OidcState {
     pub async fn discover(
         config: OidcConfig,
         store: impl SessionStore,
-    ) -> Result<Self, crate::Error> {
+    ) -> Result<Self, crate::OidcError> {
         // §4.4: a dev-only toggle must never be enabled under prod.
         if matches!(config.deployment, Deployment::Prod) && config.danger_accept_invalid_certs {
-            return Err(crate::Error::Config(
+            return Err(crate::OidcError::Config(
                 "danger_accept_invalid_certs is dev-only and refused under DEPLOYMENT_TYPE=prod"
                     .into(),
             ));
@@ -98,7 +100,7 @@ impl OidcState {
         // "Unknown" is deliberately NOT treated as clean — but it is also not
         // fatal, or a vendored source with no git available could never boot.
         if let Some(msg) = dirty_source_refusal(config.deployment, crate::CRATE_SOURCE_STATE) {
-            return Err(crate::Error::Config(msg));
+            return Err(crate::OidcError::Config(msg));
         }
         if crate::CRATE_SOURCE_STATE == "Unknown" {
             common_logging::warn!(
@@ -113,7 +115,7 @@ impl OidcState {
         let assets = common_templating::Builder::new(&config.assets_dir)
             .pin(SHIM_TEMPLATE, crate::COMMON_OIDC_JS_SHA256)
             .build()
-            .map_err(|e| crate::Error::Assets(e.to_string()))?;
+            .map_err(|e| crate::OidcError::Assets(e.to_string()))?;
 
         Ok(Self {
             client: Arc::new(OidcClient::discover(config).await?),

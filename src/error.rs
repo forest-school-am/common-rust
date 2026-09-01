@@ -4,7 +4,7 @@
 //! and the extractor's rejection types, which answer to different contracts.
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum OidcError {
     #[error("OIDC discovery failed: {0}")]
     Discovery(String),
     #[error("token exchange failed: {0}")]

@@ -334,12 +334,11 @@ async fn serves_shim_and_login_route() {
         )
         .await
         .unwrap();
-    let flow = cookie_from(&resp, "so_flow").expect("flow cookie");
-    let json = hex_decode_test(flow.trim_start_matches("so_flow="));
+    let flow = cookie_from(&resp, "oidc_flow").expect("flow cookie");
+    let json = hex_decode_test(flow.trim_start_matches("oidc_flow="));
     assert!(json.contains("\"n\":\"/\""), "unsafe next must fall back to '/': {json}");
 }
 
-// mirror of web.rs hex_decode for asserting flow-cookie contents in tests
 // mirror of web.rs `hex_decode` (private there) — keep in sync if that changes
 fn hex_decode_test(s: &str) -> String {
     let bytes: Vec<u8> = (0..s.len())
@@ -367,7 +366,7 @@ async fn full_login_loop_and_interactive_escalation() {
     let resp = app.clone().oneshot(get_req("/me", "", true)).await.unwrap();
     assert!(resp.status().is_redirection());
     let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap().to_owned();
-    let flow_cookie = cookie_from(&resp, "so_flow").expect("flow cookie set");
+    let flow_cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie set");
     let state = Url::parse(&loc)
         .unwrap()
         .query_pairs()
@@ -384,7 +383,7 @@ async fn full_login_loop_and_interactive_escalation() {
     assert!(resp.status().is_redirection(), "escalation expected, got {}", resp.status());
     let loc2 = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
     assert!(!loc2.contains("prompt=none"), "escalated attempt must be interactive: {loc2}");
-    let flow2 = cookie_from(&resp, "so_flow").expect("new flow cookie");
+    let flow2 = cookie_from(&resp, "oidc_flow").expect("new flow cookie");
     let resp = app
         .clone()
         .oneshot(get_req("/oidc/callback?error=login_required", &flow2, true))

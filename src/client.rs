@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::config::OidcConfig;
-use crate::error::Error;
+use crate::error::OidcError;
 use crate::principal::Principal;
 
 /// The stand's custom claim, served by the shared `effective_groups` scope
@@ -94,13 +94,13 @@ impl OidcClient {
     /// `issuer` origin, token/userinfo onto the backchannel origin
     /// (authentik builds these URLs from the request host, so a doc fetched
     /// via the backchannel carries backchannel hosts throughout).
-    pub async fn discover(config: OidcConfig) -> Result<Self, Error> {
+    pub async fn discover(config: OidcConfig) -> Result<Self, OidcError> {
         let http = reqwest::Client::builder()
             // openidconnect requirement: no auto-redirects on token calls
             .redirect(reqwest::redirect::Policy::none())
             .danger_accept_invalid_certs(config.danger_accept_invalid_certs)
             .build()
-            .map_err(|e| Error::Config(format!("http client: {e}")))?;
+            .map_err(|e| OidcError::Config(format!("http client: {e}")))?;
 
         let back = config.backchannel.clone().unwrap_or_else(|| config.issuer.clone());
         let disco_url = {
@@ -115,19 +115,19 @@ impl OidcClient {
             .get(&disco_url)
             .send()
             .await
-            .map_err(|e| Error::Discovery(format!("GET {disco_url}: {e}")))?
+            .map_err(|e| OidcError::Discovery(format!("GET {disco_url}: {e}")))?
             .error_for_status()
-            .map_err(|e| Error::Discovery(format!("GET {disco_url}: {e}")))?
+            .map_err(|e| OidcError::Discovery(format!("GET {disco_url}: {e}")))?
             .json()
             .await
-            .map_err(|e| Error::Discovery(format!("parse {disco_url}: {e}")))?;
+            .map_err(|e| OidcError::Discovery(format!("parse {disco_url}: {e}")))?;
 
-        let endpoint = |key: &str, base: &Url| -> Result<Url, Error> {
+        let endpoint = |key: &str, base: &Url| -> Result<Url, OidcError> {
             let raw = doc
                 .get(key)
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| Error::Discovery(format!("discovery document lacks {key}")))?;
-            let u = Url::parse(raw).map_err(|e| Error::Discovery(format!("{key}: {e}")))?;
+                .ok_or_else(|| OidcError::Discovery(format!("discovery document lacks {key}")))?;
+            let u = Url::parse(raw).map_err(|e| OidcError::Discovery(format!("{key}: {e}")))?;
             Ok(OidcConfig::swap_origin(&u, base))
         };
         let auth_url = endpoint("authorization_endpoint", &config.issuer)?;
@@ -182,14 +182,14 @@ impl OidcClient {
 
     /// Redeem the authorization code (PKCE).
     #[tracing::instrument(skip_all)]
-    pub async fn exchange_code(&self, code: String, verifier: String) -> Result<TokenBundle, Error> {
+    pub async fn exchange_code(&self, code: String, verifier: String) -> Result<TokenBundle, OidcError> {
         let resp = self
             .core
             .exchange_code(AuthorizationCode::new(code))
             .set_pkce_verifier(PkceCodeVerifier::new(verifier))
             .request_async(&self.http)
             .await
-            .map_err(|e| Error::Exchange(e.to_string()))?;
+            .map_err(|e| OidcError::Exchange(e.to_string()))?;
         Ok(TokenBundle {
             access_token: resp.access_token().secret().clone(),
             refresh_token: resp.refresh_token().map(|t| t.secret().clone()),
@@ -198,14 +198,14 @@ impl OidcClient {
 
     /// Server-side refresh (v5: the refresh token never reaches a browser).
     #[tracing::instrument(skip_all)]
-    pub async fn refresh(&self, refresh_token: &str) -> Result<TokenBundle, Error> {
+    pub async fn refresh(&self, refresh_token: &str) -> Result<TokenBundle, OidcError> {
         let rt = RefreshToken::new(refresh_token.to_owned());
         let resp = self
             .core
             .exchange_refresh_token(&rt)
             .request_async(&self.http)
             .await
-            .map_err(|e| Error::Refresh(e.to_string()))?;
+            .map_err(|e| OidcError::Refresh(e.to_string()))?;
         Ok(TokenBundle {
             access_token: resp.access_token().secret().clone(),
             // authentik rotates refresh tokens; keep the old one if the
@@ -222,13 +222,13 @@ impl OidcClient {
     /// and the whole integration for bearer-API services (the mint pattern),
     /// which skip the BFF session machinery entirely.
     #[tracing::instrument(skip_all)]
-    pub async fn principal_from_access_token(&self, access_token: &str) -> Result<Principal, Error> {
+    pub async fn principal_from_access_token(&self, access_token: &str) -> Result<Principal, OidcError> {
         let claims: UserInfoClaims<OidcClaims, CoreGenderClaim> = self
             .core
             .user_info(AccessToken::new(access_token.to_owned()), None)
             .request_async(&self.http)
             .await
-            .map_err(|e| Error::Userinfo(e.to_string()))?;
+            .map_err(|e| OidcError::Userinfo(e.to_string()))?;
 
         Principal::from_userinfo(
             claims.subject().as_str(),
@@ -236,6 +236,6 @@ impl OidcClient {
             claims.email().map(|e| e.as_str().to_owned()),
             &claims.additional_claims().effective_groups,
         )
-        .map_err(Error::Userinfo)
+        .map_err(OidcError::Userinfo)
     }
 }

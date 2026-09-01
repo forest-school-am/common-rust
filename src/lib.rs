@@ -75,7 +75,7 @@ include!(concat!(env!("OUT_DIR"), "/source_state.rs"));
 pub use bearer::{BearerValidator, ValidationError};
 pub use client::{OidcClient, TokenBundle};
 pub use config::OidcConfig;
-pub use error::Error;
+pub use error::OidcError;
 pub use principal::{GateDenied, Principal};
 // BoxFuture is named in the SessionStore trait signature, so external impls
 // need it; AuthRedirect is the Principal extractor's rejection type.
