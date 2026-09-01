@@ -192,3 +192,75 @@ async fn instant_logout_kills_access_and_refresh_tokens() {
          ruling v5's refresh model is unsafe here"
     );
 }
+
+#[tokio::test]
+async fn effective_groups_is_a_downward_closure_never_an_upward_one() {
+    let Some(mut e) = env() else { return };
+
+    let admin = reqwest::Client::new();
+    let pk = |name: &'static str, ak: String, tok: String, c: reqwest::Client| async move {
+        let v: Value = c
+            .get(format!("{ak}/api/v3/core/groups/?name={name}"))
+            .bearer_auth(tok)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let pk = v["results"][0]["pk"].as_str().unwrap_or_else(|| panic!("group {name} not in the stand — run stand/setup.py"));
+        uuid::Uuid::parse_str(pk).unwrap()
+    };
+    let g = |n| pk(n, e.ak.clone(), e.token.clone(), admin.clone());
+    let (root, ops, dev, dev_junior, search_users) =
+        (g("root").await, g("ops").await, g("dev").await, g("dev-junior").await, g("search-users").await);
+
+    // ops is a parent of dev-junior; dev-junior's only parents are dev and ops.
+    e.user = "dave".into();
+    let mut dave = groups_of(&e).await;
+    dave.sort();
+    let mut want = vec![ops, dev_junior, search_users];
+    want.sort();
+    assert_eq!(
+        dave, want,
+        "dave is a direct member of ops only: the claim must add ops's descendant dev-junior \
+         (downward closure) and must not add ops's parent root"
+    );
+
+    e.user = "carol".into();
+    let mut carol = groups_of(&e).await;
+    carol.sort();
+    let mut want = vec![dev_junior, search_users];
+    want.sort();
+    assert_eq!(
+        carol, want,
+        "carol is a direct member of the leaf dev-junior: the claim must contain no ancestor \
+         (dev, ops, root) — an upward closure here would silently widen every group gate"
+    );
+    assert!(!carol.contains(&root) && !carol.contains(&dev) && !carol.contains(&ops));
+}
+
+async fn groups_of(e: &Env) -> Vec<uuid::Uuid> {
+    let jar = std::sync::Arc::new(reqwest::cookie::Jar::default());
+    let browser = reqwest::Client::builder().cookie_provider(jar.clone()).build().unwrap();
+    let http = reqwest::Client::builder()
+        .cookie_provider(jar)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    sso_login(&browser, e).await;
+    let config = OidcConfig::new(
+        Url::parse(&format!("{}/application/o/common-oidc-canary/", e.ak)).unwrap(),
+        "common-oidc-canary",
+        Url::parse("http://127.0.0.1:18999/cb").unwrap(),
+    );
+    let client = OidcClient::discover(config).await.expect("discovery against live stand");
+    let auth = client.authorize_url(false);
+    let code = authorization_code(&http, &browser, e, &auth.url).await;
+    let tokens = client.exchange_code(code, auth.pkce_verifier).await.expect("code exchange");
+    client
+        .principal_from_access_token(&tokens.access_token)
+        .await
+        .expect("userinfo")
+        .effective_groups
+}
