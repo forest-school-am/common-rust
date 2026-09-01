@@ -69,6 +69,8 @@ mod web;
 // The served shim's integrity pin, derived from `templates/common-oidc.js.jinja`
 // at build time (build.rs, §9.8). Never the template content — just its hash.
 include!(concat!(env!("OUT_DIR"), "/shim_hash.rs"));
+// §9.8b: "Clean" / "Dirty(n)" / "Unknown" — which crate SOURCE built this.
+include!(concat!(env!("OUT_DIR"), "/source_state.rs"));
 
 pub use bearer::{BearerValidator, ValidationError};
 pub use client::{OidcClient, TokenBundle};

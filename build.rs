@@ -24,6 +24,10 @@ use sha2::{Digest, Sha256};
 fn main() {
     let template = "templates/common-oidc.js.jinja";
     println!("cargo:rerun-if-changed={template}");
+    // §9.8b needs FRESH dirtiness, and emitting any rerun-if-changed narrows
+    // cargo's default "rerun on any package change" to just what is listed.
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=Cargo.toml");
 
     // Published to dependents as DEP_COMMON_OIDC_ASSETS (see module docs).
     // cwd for a build script is the package root, so this resolves inside a
@@ -41,6 +45,49 @@ fn main() {
     std::fs::write(
         &out,
         format!("pub(crate) const COMMON_OIDC_JS_SHA256: [u8; 32] = [{bytes_list}];\n"),
+    )
+    .unwrap();
+    // §9.8b: is the crate source we are being built FROM a dirty working tree?
+    //
+    // Under R11's shared cargo patch, consumers resolve this crate to a local
+    // working copy, so an uncommitted or half-edited template flows through the
+    // dependent's build into the served /common-oidc.js and out to BROWSERS.
+    // The §9.8 integrity pin cannot catch that (§9.8a): the hash above and the
+    // assets dir published to dependents derive from the SAME directory, so the
+    // two sides cannot disagree. The pin guards post-build tampering of the
+    // deployed asset; it says nothing about which crate source built it.
+    //
+    // Self-locating, so it costs nothing where it does not apply: as a git or
+    // registry dependency this inspects a cargo checkout, which is always
+    // clean. It only reports dirt under the patch, which is exactly where the
+    // risk lives.
+    let dirt = std::process::Command::new("git")
+        .args(["-C", &std::env::var("CARGO_MANIFEST_DIR").unwrap(), "status", "--porcelain"])
+        .output();
+    let state = match dirt {
+        Ok(o) if o.status.success() => {
+            let files = String::from_utf8_lossy(&o.stdout);
+            let n = files.lines().count();
+            if n == 0 {
+                "Clean".to_owned()
+            } else {
+                println!(
+                    "cargo:warning=common-oidc is being built from a DIRTY working tree \
+                     ({n} uncommitted file(s)). The served /common-oidc.js and anything else \
+                     this crate ships are therefore unreproducible. Refused under \
+                     DEPLOYMENT_TYPE=prod (§9.8b)."
+                );
+                format!("Dirty({n})")
+            }
+        }
+        // Fail OPEN, but never silently: "could not determine" must not read as
+        // "clean", or the guard becomes a false assurance. No git binary, or not
+        // a work tree (a vendored/unpacked source), lands here.
+        _ => "Unknown".to_owned(),
+    };
+    std::fs::write(
+        PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("source_state.rs"),
+        format!("pub(crate) const CRATE_SOURCE_STATE: &str = {state:?};\n"),
     )
     .unwrap();
 }

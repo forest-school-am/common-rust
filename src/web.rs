@@ -55,6 +55,22 @@ pub struct OidcState {
     pub assets: Arc<AssetCache>,
 }
 
+/// §9.8b decision, as a pure function so it is testable without a build-time
+/// const or a live IdP (§1.1: logic that needs tests stays free of IO).
+///
+/// `state` is what build.rs derived about the crate SOURCE this was compiled
+/// from: `Clean`, `Dirty(n)`, or `Unknown`.
+pub(crate) fn dirty_source_refusal(deployment: Deployment, state: &str) -> Option<String> {
+    if matches!(deployment, Deployment::Prod) && state.starts_with("Dirty") {
+        return Some(format!(
+            "common-oidc was built from a dirty working tree ({state}); the served shim \
+             is unreproducible and this is refused under DEPLOYMENT_TYPE=prod (§9.8b). \
+             Commit the crate, or build from a clean checkout."
+        ));
+    }
+    None
+}
+
 impl OidcState {
     /// Run discovery and assemble the state. Validates completely at boot
     /// (§4.3): the §4.4 dev-only refusal, then the asset cache (dir exists,
@@ -71,6 +87,27 @@ impl OidcState {
                     .into(),
             ));
         }
+        // §9.8b: refuse to boot in PROD if this crate was built from a dirty
+        // working tree. Under R11's shared patch, consumers resolve to a local
+        // working copy, so an uncommitted template flows through the adopter's
+        // build into the served /common-oidc.js and out to browsers — and the
+        // §9.8 pin cannot catch it, because the pin and the published assets
+        // dir derive from the same directory (§9.8a).
+        //
+        // Dev warns at build time (cargo:warning) and boots; prod refuses.
+        // "Unknown" is deliberately NOT treated as clean — but it is also not
+        // fatal, or a vendored source with no git available could never boot.
+        if let Some(msg) = dirty_source_refusal(config.deployment, crate::CRATE_SOURCE_STATE) {
+            return Err(crate::Error::Config(msg));
+        }
+        if crate::CRATE_SOURCE_STATE == "Unknown" {
+            common_logging::warn!(
+                common_logging::AUTH,
+                "could not determine whether common-oidc was built from a clean tree \
+                 (no git, or not a work tree) — this is NOT an assurance that it was"
+            );
+        }
+
         // §9.6/§9.8: build + version-pin the served shim from the adopter's
         // assets dir. A missing/stale/tampered template refuses to boot here.
         let assets = common_templating::Builder::new(&config.assets_dir)
@@ -434,5 +471,29 @@ where
             Some((principal, _session)) => Ok(principal),
             None => Err(unauthenticated(&oidc, parts, jar)),
         }
+    }
+}
+
+#[cfg(test)]
+mod source_state_tests {
+    use super::*;
+
+    #[test]
+    fn prod_refuses_a_dirty_crate_source_and_dev_does_not() {
+        // the case §9.8b exists for: a dirty tree can reach browsers via the
+        // served shim, and the §9.8 pin cannot see it (§9.8a)
+        assert!(dirty_source_refusal(Deployment::Prod, "Dirty(3)").is_some());
+        // dev keeps working — a hard refusal during crate development would be
+        // intolerable; the build-time cargo:warning carries dev
+        assert!(dirty_source_refusal(Deployment::Dev, "Dirty(3)").is_none());
+    }
+
+    #[test]
+    fn clean_and_unknown_both_boot_but_mean_different_things() {
+        assert!(dirty_source_refusal(Deployment::Prod, "Clean").is_none());
+        // "could not determine" must not be fatal (a vendored source with no
+        // git would never boot) — but it is warned about at runtime rather
+        // than silently treated as clean, which would be a false assurance.
+        assert!(dirty_source_refusal(Deployment::Prod, "Unknown").is_none());
     }
 }
