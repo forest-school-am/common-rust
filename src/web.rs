@@ -27,7 +27,12 @@ use crate::store::{Session, SessionStore};
 
 const FLOW_COOKIE: &str = "so_flow";
 /// Signal header on a 401 telling the served shim to drive silent re-auth.
-const REAUTH_HEADER: &str = "X-Common-OIDC-Reauth";
+///
+/// Public so adopters can ASSERT it (e2e checks of the 401 contract) without
+/// retyping the string. To BUILD a compliant 401, call
+/// [`OidcState::unauthorized_response`] rather than assembling one from this —
+/// the contract is more than the header (§11.1).
+pub const REAUTH_HEADER: &str = "X-Common-OIDC-Reauth";
 /// The served shim template — the adopter's build copies this from the crate's
 /// `templates/` into their `assets_dir` (§9.8; see README recipe).
 const SHIM_TEMPLATE: &str = "common-oidc.js.jinja";
@@ -78,6 +83,52 @@ impl OidcState {
             store: Arc::new(store),
             assets: Arc::new(assets),
         })
+    }
+
+
+    /// The crate's contract-compliant 401 for an API/XHR caller with no live
+    /// session — **call this from your §3.1 error chokepoint** instead of
+    /// building a 401 yourself.
+    ///
+    /// It exists to resolve a real tension between two canon rules. §3.1 says
+    /// a service has ONE `AppError` owning every status mapping, so the
+    /// adopter renders its own 401; §11.1 says shared policy lives in the
+    /// crate and is never copied per-repo. Without this method an adopter has
+    /// to hardcode the wire contract to satisfy the first rule and thereby
+    /// break the second.
+    ///
+    /// The contract is more than the header name, which is why exporting
+    /// [`REAUTH_HEADER`] alone is not enough. This response also **removes the
+    /// session cookie** — an adopter that copied just the header would leave a
+    /// dead cookie in the browser, which is precisely the cookie-stalling the
+    /// session ruling forbids. Anything added to the contract later (extra
+    /// headers, a body shape) lands here and adopters inherit it with no code
+    /// change.
+    ///
+    /// The login path comes from `config.login_path`, so a service that moved
+    /// its login route stays consistent automatically.
+    ///
+    /// **When NOT to call it:** only when common-oidc is actually wired.
+    /// Advertising re-auth while no login route is mounted (a dev-stub auth
+    /// mode, say) points the shim at a 404 and produces a redirect loop. The
+    /// type system already guards this — an `OidcState` only exists where the
+    /// crate is wired — so a dev stub with no `OidcState` cannot call it by
+    /// construction.
+    pub fn unauthorized_response(&self) -> Response {
+        self.unauthorized_with_jar(CookieJar::new())
+    }
+
+    /// One construction site for the 401 (the extractor passes the request's
+    /// own jar so its other cookies survive; the public entry point starts
+    /// from an empty jar, which emits only the removal).
+    fn unauthorized_with_jar(&self, jar: CookieJar) -> Response {
+        (
+            StatusCode::UNAUTHORIZED,
+            [(REAUTH_HEADER, self.config().login_path.as_str())],
+            jar.add(expiring_removal(self.config().cookie_name.as_str())),
+            "authentication required",
+        )
+            .into_response()
     }
 
     fn config(&self) -> &OidcConfig {
@@ -180,6 +231,23 @@ fn base_cookie<'a>(name: &'a str, value: String, config: &OidcConfig) -> Cookie<
     c.set_same_site(SameSite::Lax);
     c.set_secure(config.cookie_secure);
     c
+}
+
+/// An UNCONDITIONAL clear: a `Set-Cookie` that expires the cookie immediately.
+///
+/// [`CookieJar::remove`] is not enough on its own — it only emits anything when
+/// the ORIGINAL cookie was in the request, so it is silently a no-op on a jar
+/// built from nothing. That is fine inside the extractor (the request carried
+/// the cookie) but wrong for [`OidcState::unauthorized_response`], which an
+/// adopter calls without a jar. Caught by the parity test, not by review.
+fn expiring_removal(name: &str) -> Cookie<'static> {
+    // `Max-Age=0` is set by parsing rather than `set_max_age`, because the
+    // `time` crate is not a direct dependency of this crate and pulling one in
+    // for a single zero-duration constant is not worth it. The name comes from
+    // config; if it is not a legal cookie name, fall back to the plain form.
+    Cookie::parse(format!("{name}=; Path=/; Max-Age=0"))
+        .map(|c| c.into_owned())
+        .unwrap_or_else(|_| removal_cookie(name))
 }
 
 fn removal_cookie(name: &str) -> Cookie<'static> {
@@ -334,8 +402,8 @@ fn wants_html(parts: &Parts) -> bool {
 }
 
 fn unauthenticated(oidc: &OidcState, parts: &Parts, jar: CookieJar) -> AuthRedirect {
-    let jar = jar.remove(removal_cookie(oidc.config().cookie_name.as_str()));
     if wants_html(parts) {
+        let jar = jar.remove(removal_cookie(oidc.config().cookie_name.as_str()));
         let next = parts
             .uri
             .path_and_query()
@@ -346,17 +414,9 @@ fn unauthenticated(oidc: &OidcState, parts: &Parts, jar: CookieJar) -> AuthRedir
         common_logging::debug!(common_logging::AUTH, path = %next, "no session — silent re-auth redirect");
         AuthRedirect(start_login(oidc, jar, next, true, false))
     } else {
-        // XHR/fetch: 401 + the signal header so the served shim drives a
-        // silent top-level re-auth and retries.
-        AuthRedirect(
-            (
-                StatusCode::UNAUTHORIZED,
-                [(REAUTH_HEADER, oidc.config().login_path.as_str())],
-                jar,
-                "authentication required",
-            )
-                .into_response(),
-        )
+        // XHR/fetch: the crate's one 401 construction (see
+        // OidcState::unauthorized_response).
+        AuthRedirect(oidc.unauthorized_with_jar(jar))
     }
 }
 

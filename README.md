@@ -7,7 +7,7 @@ re-login, a downward-closure group gate, and a served browser shim for the
 401→re-auth contract. No app login/logout buttons — logout lives only at
 authentik.
 
-- **Version:** `0.2.1`
+- **Version:** `0.2.2`
 - **Toolchain:** Rust 1.98.0 (workspace standard).
 - **Depends on** the stand crates `common-logging` (§8 logging) and `common-templating`
   (§9 asset rendering).
@@ -242,6 +242,45 @@ feature, not a bug: it's what makes drift structurally impossible.
 > `~/.cargo/git/checkouts/` and the copy breaks for everyone. 0.2.1 replaces it
 > with the cargo-native `links` mechanism above. Delete the `just assets` target
 > when you migrate — leaving it is how a stale copy sneaks back in.
+
+
+### Emitting the 401 from your own error chokepoint (§3.1)
+
+Canon §3.1 gives a service ONE `AppError` owning every status mapping, so an
+adopter renders its own 401 rather than letting the `Principal` extractor
+reject. Call the crate instead of rebuilding the contract:
+
+```rust
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        match self {
+            // delegate: header, login path and cookie clearing all come from
+            // the crate and follow it through future contract changes
+            AppError::Unauthenticated(oidc) => oidc.unauthorized_response(),
+            AppError::NotFound => (StatusCode::NOT_FOUND, "not found").into_response(),
+            // …
+        }
+    }
+}
+```
+
+**Do not hand-build the 401 from the header name.** The contract is more than
+the header: the response also **clears the session cookie**, and a service that
+copies only the header leaves a dead cookie in the browser — the cookie
+stalling the session ruling forbids. Anything added to the contract later
+lands in this method and adopters inherit it without a code change.
+
+`REAUTH_HEADER` is exported too, but for **assertions** — an e2e check of the
+401 contract should reference the const rather than retyping the string, since
+it has already been renamed once (`X-Stand-OIDC-Reauth` →
+`X-Common-OIDC-Reauth`) and a copied literal fails silently, with re-auth
+quietly ceasing to work and no compile error.
+
+**When not to call it:** only where common-oidc is actually wired. Advertising
+re-auth while no login route is mounted — a dev-stub auth mode, say — points
+the shim at a 404 and loops. The type system already enforces this: an
+`OidcState` only exists where the crate is wired, so a dev stub that has none
+cannot call the method by construction.
 
 ## 2. Bearer-API services (the mint pattern)
 

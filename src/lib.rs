@@ -78,4 +78,4 @@ pub use principal::{GateDenied, Principal};
 // BoxFuture is named in the SessionStore trait signature, so external impls
 // need it; AuthRedirect is the Principal extractor's rejection type.
 pub use store::{BoxFuture, MemoryStore, Session, SessionStore};
-pub use web::{router, user_portal_url, AuthRedirect, OidcState};
+pub use web::{router, user_portal_url, AuthRedirect, OidcState, REAUTH_HEADER};

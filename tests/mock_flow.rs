@@ -420,3 +420,49 @@ async fn full_login_loop_and_interactive_escalation() {
     let resp = app.oneshot(get_req("/me", &session_cookie, true)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+/// The delegation seam adopters call from their §3.1 chokepoint must produce
+/// the SAME wire contract as the extractor's own rejection — otherwise a
+/// service that obeys §3.1 silently emits a different 401 from one that lets
+/// the extractor reject, and the shim only works for the second.
+#[tokio::test(flavor = "multi_thread")]
+async fn unauthorized_response_matches_the_extractor_401() {
+    let (base, _mock) = spawn_mock().await;
+    let oidc = oidc_state(&base, MemoryStore::default()).await;
+
+    // what an adopter builds by delegating
+    let delegated = oidc.unauthorized_response();
+    // what the extractor rejects with, for a caller with no session at all
+    let from_extractor = app(oidc.clone())
+        .oneshot(get_req("/me", "", false))
+        .await
+        .unwrap();
+
+    assert_eq!(delegated.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(delegated.status(), from_extractor.status());
+
+    let header_of = |r: &axum::response::Response| {
+        r.headers().get(common_oidc::REAUTH_HEADER).unwrap().to_str().unwrap().to_owned()
+    };
+    assert_eq!(header_of(&delegated), "/oidc/login");
+    assert_eq!(
+        header_of(&delegated),
+        header_of(&from_extractor),
+        "both paths must advertise the same login path"
+    );
+
+    // the contract is more than the header: the dead session cookie is cleared,
+    // which is the part an adopter copying only the header string would miss.
+    let cookie = delegated
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .expect("the 401 must clear the session cookie")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(cookie.starts_with("stand_session="), "cleared the wrong cookie: {cookie}");
+    assert!(
+        cookie.contains("stand_session=;") || cookie.to_lowercase().contains("max-age=0"),
+        "session cookie must be cleared, got: {cookie}"
+    );
+}
