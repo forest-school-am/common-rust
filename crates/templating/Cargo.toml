@@ -14,6 +14,8 @@ serde.workspace = true
 # integrity pins for served logic / library templates (§9.7b, §9.8).
 sha2.workspace = true
 thiserror.workspace = true
+# raw fcntl(F_NOTIFY) and inotify: the `notify` crate does not offer dnotify.
+libc = "0.2"
 
 [dev-dependencies]
 # set mtimes forward to test cache invalidation deterministically

@@ -257,6 +257,7 @@ name = "common-templating"
 version = "0.3.0"
 dependencies = [
  "filetime",
+ "libc",
  "minijinja",
  "serde",
  "sha2",

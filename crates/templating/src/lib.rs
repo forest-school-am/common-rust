@@ -38,6 +38,17 @@ use std::time::SystemTime;
 use minijinja::{AutoEscape, Environment};
 use sha2::{Digest, Sha256};
 
+mod invalidation;
+pub use invalidation::{Invalidation, OPTIONS as INVALIDATION_OPTIONS};
+use invalidation::Watch;
+
+thread_local! {
+    /// Names the loader is asked for during one render. `None` outside a
+    /// recording render, so nothing accumulates when the graph is not wanted.
+    static RECORDING: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
     #[error("asset dir does not exist or is not a directory: {0}")]
@@ -52,6 +63,8 @@ pub enum RenderError {
     Io(String, String),
     #[error("render of {0} failed: {1}")]
     Render(String, String),
+    #[error("cannot arm template invalidation: {0}")]
+    Invalidation(String),
     #[error("unsafe asset name (path traversal / escape rejected): {0}")]
     UnsafeName(String),
 }
@@ -71,6 +84,9 @@ fn autoescape(name: &str) -> AutoEscape {
 
 struct CtxEnv {
     env: Environment<'static>,
+    /// Upstream set per template, as the loader reported it: transitive
+    /// extends/include and dynamically-named targets alike.
+    graph: HashMap<String, Vec<String>>,
     mtimes: HashMap<String, SystemTime>,
     loads: u64,
 }
@@ -81,22 +97,36 @@ pub struct AssetCache {
     env: Environment<'static>,
     ctx_env: RwLock<CtxEnv>,
     pins: HashMap<String, [u8; 32]>,
+    watch: Watch,
     entries: RwLock<HashMap<String, Entry>>,
 }
 
 pub struct Builder {
     root: PathBuf,
     required: Vec<String>,
+    invalidation: Invalidation,
     pins: HashMap<String, [u8; 32]>,
 }
 
 impl Builder {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into(), required: Vec::new(), pins: HashMap::new() }
+        Self {
+            root: root.into(),
+            required: Vec::new(),
+            invalidation: Invalidation::PerRequest,
+            pins: HashMap::new(),
+        }
     }
 
     pub fn require_template(mut self, name: impl Into<String>) -> Self {
         self.required.push(name.into());
+        self
+    }
+
+    /// Selects the strategy (§4.4). Unset is `PerRequest`; see
+    /// `INVALIDATION_OPTIONS` for what each one does on this stand.
+    pub fn invalidation(mut self, strategy: Invalidation) -> Self {
+        self.invalidation = strategy;
         self
     }
 
@@ -123,13 +153,28 @@ impl Builder {
 
         let mut ctx_env = Environment::new();
         ctx_env.set_auto_escape_callback(autoescape);
-        ctx_env.set_loader(minijinja::path_loader(&canonical_root));
+        let inner = minijinja::path_loader(&canonical_root);
+        ctx_env.set_loader(move |name| {
+            RECORDING.with(|r| {
+                if let Some(v) = r.borrow_mut().as_mut() {
+                    v.push(name.to_owned());
+                }
+            });
+            inner(name)
+        });
 
+        let watch = Watch::arm(self.invalidation, &canonical_root).map_err(RenderError::Invalidation)?;
         let cache = AssetCache {
             root: self.root,
             canonical_root,
             env,
-            ctx_env: RwLock::new(CtxEnv { env: ctx_env, mtimes: HashMap::new(), loads: 0 }),
+            ctx_env: RwLock::new(CtxEnv {
+                env: ctx_env,
+                graph: HashMap::new(),
+                mtimes: HashMap::new(),
+                loads: 0,
+            }),
+            watch,
             pins: self.pins,
             entries: RwLock::new(HashMap::new()),
         };
@@ -267,26 +312,48 @@ impl AssetCache {
         let _ = self.read_verified(&path, name, self.pins.get(name))?;
         self.verify_all_pins()?;
 
+        // Consulted once per render: a kernel strategy CONSUMES what it reports.
+        let stale;
+
         {
             let g = self.ctx_env.read().unwrap_or_else(|e| e.into_inner());
-            if g.mtimes.contains_key(name) && !self.loaded_stale(&g) {
+            stale = self.watch.stale(|| self.graph_stale(name, &g));
+            if !stale && g.mtimes.contains_key(name) {
                 return self.ctx_render(&g.env, name, ctx);
             }
         }
 
         let mut g = self.ctx_env.write().unwrap_or_else(|e| e.into_inner());
         g.loads += 1;
-        if self.loaded_stale(&g) {
+        if stale {
+            // Whole cache, not the affected subtree: no partial-invalidation
+            // bookkeeping and no chance of a stale sibling. The graph goes too,
+            // so a removed edge cannot outlive the templates that had it.
             g.env.clear_templates();
+            g.graph.clear();
             g.mtimes.clear();
+        } else if !g.graph.contains_key(name) {
+            // minijinja memoizes by name, so the loader is not consulted for a
+            // template a previous render already pulled in. Recording a NEW
+            // template's upstream set against a populated environment would
+            // therefore miss exactly the shared bases. Drop the compiled
+            // templates so this render sees its whole set.
+            g.env.clear_templates();
         }
-        let out = self.ctx_render(&g.env, name, ctx)?;
-        let loaded: Vec<String> = g.env.templates().map(|(n, _)| n.to_owned()).collect();
-        for tname in loaded {
-            if let Ok(mt) = self.canonical_root.join(&tname).metadata().and_then(|m| m.modified()) {
-                g.mtimes.insert(tname, mt);
+
+        RECORDING.with(|r| *r.borrow_mut() = Some(Vec::new()));
+        let rendered = self.ctx_render(&g.env, name, ctx);
+        let mut upstream = RECORDING.with(|r| r.borrow_mut().take()).unwrap_or_default();
+        let out = rendered?;
+
+        upstream.sort();
+        upstream.dedup();
+        for node in &upstream {
+            if let Ok(mt) = self.canonical_root.join(node).metadata().and_then(|m| m.modified()) {
+                g.mtimes.insert(node.clone(), mt);
             }
         }
+        g.graph.insert(name.to_owned(), upstream);
         Ok(out)
     }
 
@@ -307,10 +374,13 @@ impl AssetCache {
             .map_err(|e| RenderError::Render(name.to_owned(), e.to_string()))
     }
 
-    fn loaded_stale(&self, g: &CtxEnv) -> bool {
-        g.mtimes.iter().any(|(tname, recorded)| {
-            match self.canonical_root.join(tname).metadata().and_then(|m| m.modified()) {
-                Ok(now) => now != *recorded,
+    /// One stat per upstream node of the REQUESTED template — typically the
+    /// page and its base — rather than a stat of everything ever recorded.
+    fn graph_stale(&self, name: &str, g: &CtxEnv) -> bool {
+        let Some(upstream) = g.graph.get(name) else { return false };
+        upstream.iter().any(|node| {
+            match self.canonical_root.join(node).metadata().and_then(|m| m.modified()) {
+                Ok(now) => g.mtimes.get(node).is_none_or(|rec| now != *rec),
                 Err(_) => true,
             }
         })
@@ -598,7 +668,7 @@ mod tests {
             "page.html",
             "{% extends \"base.html\" %}{% block body %}v{{ n }}{% endblock %}",
         );
-        let c = Builder::new(&d).build().unwrap();
+        let c = Builder::new(&d).invalidation(Invalidation::Dag).build().unwrap();
         let loads = || c.ctx_env.read().unwrap().loads;
 
         assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 1)])).unwrap(), "<html>v1</html>");
@@ -641,5 +711,110 @@ mod tests {
         write(&d, "base.html", base);
         bump_mtime(&d, "base.html");
         assert_eq!(c.render_ctx("page.html", &Ctx { n: 2 }).unwrap(), "BASE 2");
+    }
+
+    #[test]
+    fn invalidation_parses_strictly_and_round_trips() {
+        assert_eq!(Invalidation::parse(None).unwrap(), Invalidation::PerRequest);
+        for s in ["per-request", "dag", "dnotify", "inotify"] {
+            let v = Invalidation::parse(Some(s)).expect("valid strategy");
+            assert_eq!(v.as_str(), s, "as_str must round-trip the accepted spelling");
+        }
+        // §4.3: set-but-invalid refuses rather than falling back, and the
+        // message names the alternatives.
+        for bad in ["", "PerRequest", "per_request", "notify", "true"] {
+            let e = Invalidation::parse(Some(bad)).expect_err("must refuse");
+            assert!(e.contains("per-request") && e.contains("dnotify"), "unhelpful: {e}");
+        }
+    }
+
+    #[test]
+    fn options_help_states_what_a_chooser_needs() {
+        for s in ["per-request", "dag", "dnotify", "inotify"] {
+            assert!(INVALIDATION_OPTIONS.contains(s), "help omits {s}");
+        }
+        // The two measured facts that change which option a person picks.
+        assert!(INVALIDATION_OPTIONS.contains("INERT"), "help must say inotify is inert on 9p");
+        assert!(
+            INVALIDATION_OPTIONS.contains("UPSTREAM"),
+            "help must say dag checks the requested template's upstream set"
+        );
+    }
+
+    #[test]
+    fn per_request_reloads_every_render_and_dag_does_not() {
+        let mk = |strategy| {
+            let d = tmpdir();
+            write(&d, "base.html", "<b>{% block body %}{% endblock %}</b>");
+            write(&d, "page.html", "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}");
+            let c = Builder::new(&d).invalidation(strategy).build().unwrap();
+            for i in 0..3 {
+                c.render_ctx("page.html", &BTreeMap::from([("n", i)])).unwrap();
+            }
+            let n = c.ctx_env.read().unwrap().loads;
+            n
+        };
+        assert_eq!(mk(Invalidation::PerRequest), 3, "per-request must rebuild on every render");
+        assert_eq!(mk(Invalidation::Dag), 1, "dag must not rebuild while nothing changed");
+    }
+
+    #[test]
+    fn dnotify_sees_an_edit_to_an_extended_base() {
+        let d = tmpdir();
+        write(&d, "base.html", "<b>v1 {% block body %}{% endblock %}</b>");
+        write(&d, "page.html", "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}");
+        let c = match Builder::new(&d).invalidation(Invalidation::Dnotify).build() {
+            Ok(c) => c,
+            // A kernel without CONFIG_DNOTIFY cannot run this; that is a
+            // property of the host, not a failure of the code under test.
+            Err(RenderError::Invalidation(e)) => {
+                eprintln!("skipped: dnotify unavailable here ({e})");
+                return;
+            }
+            Err(e) => panic!("unexpected build failure: {e}"),
+        };
+        let ctx = BTreeMap::from([("n", 7)]);
+        assert_eq!(c.render_ctx("page.html", &ctx).unwrap(), "<b>v1 7</b>");
+
+        write(&d, "base.html", "<b>v2 {% block body %}{% endblock %}</b>");
+        bump_mtime(&d, "base.html");
+        std::thread::sleep(Duration::from_millis(150));
+        assert_eq!(
+            c.render_ctx("page.html", &ctx).unwrap(),
+            "<b>v2 7</b>",
+            "an edit to a BASE template must be picked up — editing the child was always caught"
+        );
+    }
+
+    #[test]
+    fn dag_records_a_shared_base_for_a_page_first_rendered_after_it_was_loaded() {
+        let d = tmpdir();
+        write(&d, "base.html", "<b>v1 {% block body %}{% endblock %}</b>");
+        for p in ["one.html", "two.html"] {
+            write(&d, p, "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}");
+        }
+        let c = Builder::new(&d).invalidation(Invalidation::Dag).build().unwrap();
+        let ctx = BTreeMap::from([("n", 1)]);
+
+        // one.html loads base.html. two.html is rendered afterwards, when the
+        // loader would be memoized past base.html.
+        assert_eq!(c.render_ctx("one.html", &ctx).unwrap(), "<b>v1 1</b>");
+        assert_eq!(c.render_ctx("two.html", &ctx).unwrap(), "<b>v1 1</b>");
+        {
+            let g = c.ctx_env.read().unwrap();
+            assert!(
+                g.graph["two.html"].contains(&"base.html".to_owned()),
+                "two.html's upstream set must include the shared base, not just itself: {:?}",
+                g.graph["two.html"]
+            );
+        }
+
+        write(&d, "base.html", "<b>v2 {% block body %}{% endblock %}</b>");
+        bump_mtime(&d, "base.html");
+        assert_eq!(
+            c.render_ctx("two.html", &ctx).unwrap(),
+            "<b>v2 1</b>",
+            "editing the shared base must invalidate a page that never loaded it itself"
+        );
     }
 }
