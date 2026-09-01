@@ -22,6 +22,37 @@ pub enum Deployment {
     Dev,
 }
 
+impl Deployment {
+    /// Parse the declared class, REFUSING a set-but-invalid value (§4.3).
+    ///
+    /// `Prod`, `production` or any typo must not silently become `Dev` — that
+    /// is how a mistyped prod deployment quietly activates dev-only
+    /// permissiveness. Unset is the one legitimate default.
+    ///
+    /// This is deliberately STRICTER than [`LogConfig::resolve`]'s handling of
+    /// `LOG_FORMAT`, which degrades to a default on an unrecognised value
+    /// because logging must always come up. That leniency is correct for a
+    /// FORMAT and wrong for a class that gates security behaviour, so the two
+    /// do not share a policy (§4.4y).
+    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+        match value {
+            None => Ok(Deployment::Dev),
+            Some("prod") => Ok(Deployment::Prod),
+            Some("dev") => Ok(Deployment::Dev),
+            Some(other) => Err(format!(
+                "DEPLOYMENT_TYPE={other:?} is not valid — expected \"prod\" or \"dev\" \
+                 (unset means dev). Refusing rather than defaulting: a typo here would \
+                 silently enable dev-only behaviour under a prod deployment."
+            )),
+        }
+    }
+
+    /// [`Deployment::parse`] against the process environment.
+    pub fn from_env() -> Result<Self, String> {
+        Self::parse(std::env::var("DEPLOYMENT_TYPE").ok().as_deref())
+    }
+}
+
 /// Fully-resolved logging configuration.
 #[derive(Debug, Clone)]
 pub struct LogConfig {
@@ -104,5 +135,30 @@ mod tests {
         assert_eq!(LogConfig::resolve(None, Some("prod"), None).filter, "info");
         assert_eq!(LogConfig::resolve(None, Some("dev"), None).filter, "debug");
         assert_eq!(LogConfig::resolve(None, None, None).filter, "debug"); // default dev
+    }
+}
+
+#[cfg(test)]
+mod deployment_tests {
+    use super::*;
+
+    #[test]
+    fn unset_is_dev_and_the_two_valid_values_parse() {
+        assert_eq!(Deployment::parse(None).unwrap(), Deployment::Dev);
+        assert_eq!(Deployment::parse(Some("dev")).unwrap(), Deployment::Dev);
+        assert_eq!(Deployment::parse(Some("prod")).unwrap(), Deployment::Prod);
+    }
+
+    #[test]
+    fn set_but_invalid_refuses_rather_than_defaulting_to_dev() {
+        // §4.3: typos must not become defaults. Each of these previously fell
+        // through to Dev, silently enabling dev-only permissiveness under what
+        // the operator believed was a prod deployment.
+        for bad in ["Prod", "PROD", "production", "prd", ""] {
+            assert!(
+                Deployment::parse(Some(bad)).is_err(),
+                "DEPLOYMENT_TYPE={bad:?} must be refused, not treated as dev"
+            );
+        }
     }
 }
