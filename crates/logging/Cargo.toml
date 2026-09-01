@@ -1,12 +1,12 @@
 [package]
 name = "common-logging"
-version = "0.1.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Shared logging for Les stand crates (CODESTYLE.md §8): subscriber setup, designators, emission macros, request-span helper"
-license = "MIT"
 
 [dependencies]
-tracing = "0.1"
+tracing.workspace = true
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "std",
     "fmt",
@@ -18,4 +18,4 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 time = { version = "0.3", default-features = false, features = ["std", "formatting"] }
 
 [dev-dependencies]
-serde_json = "1"
+serde_json.workspace = true

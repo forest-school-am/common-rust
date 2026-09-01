@@ -1,22 +1,22 @@
 [package]
 name = "common-templating"
-version = "0.1.2"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Shared template + static-asset rendering for Les services (CODESTYLE.md §9): minijinja + an mtime/params-keyed asset cache over a validated dir"
-license = "MIT"
 
 [dependencies]
 # "loader": render_ctx resolves {% extends %}/{% include %} through a
 # per-call path_loader over the validated asset dir (§9.4 data-driven pages).
 minijinja = { version = "2", features = ["loader"] }
 # the render_ctx context bound (§9.4); no derive needed here.
-serde = "1"
+serde.workspace = true
 # integrity pins for served logic / library templates (§9.7b, §9.8).
-sha2 = "0.10"
-thiserror = "2"
+sha2.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 # set mtimes forward to test cache invalidation deterministically
 filetime = "0.2"
 # derive for render_ctx test contexts
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }

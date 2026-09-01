@@ -222,8 +222,9 @@ dependencies = [
 
 [[package]]
 name = "common-logging"
-version = "0.1.1"
+version = "0.3.0"
 dependencies = [
+ "serde_json",
  "time",
  "tracing",
  "tracing-subscriber",
@@ -231,7 +232,7 @@ dependencies = [
 
 [[package]]
 name = "common-oidc"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -253,8 +254,9 @@ dependencies = [
 
 [[package]]
 name = "common-templating"
-version = "0.1.2"
+version = "0.3.0"
 dependencies = [
+ "filetime",
  "minijinja",
  "serde",
  "sha2",
@@ -578,6 +580,16 @@ name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
+
+[[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
+]
 
 [[package]]
 name = "find-msvc-tools"
