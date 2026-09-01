@@ -223,7 +223,6 @@ dependencies = [
 [[package]]
 name = "common-logging"
 version = "0.1.1"
-source = "git+https://github.com/forest-school-am/common-rust-logging.git?tag=v0.1.1#18ec0b98c898264766026bc309c21e60d1520faa"
 dependencies = [
  "time",
  "tracing",
@@ -255,7 +254,6 @@ dependencies = [
 [[package]]
 name = "common-templating"
 version = "0.1.2"
-source = "git+https://github.com/forest-school-am/common-rust-templating.git?tag=v0.1.2#ee6148149e148ace8a21f33e5bee0780acd9a83e"
 dependencies = [
  "minijinja",
  "serde",
@@ -1932,9 +1930,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "smallvec"
-version = "1.15.2"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
 
 [[package]]
 name = "socket2"
