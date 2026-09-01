@@ -1,10 +1,3 @@
-//! The OIDC protocol client: discovery, PKCE authorization-code exchange,
-//! refresh, and userinfo — all via the `openidconnect` crate (§11.1, buy the
-//! protocol). Nothing about the wire is hand-written here; this module adds
-//! only the stand conventions (browser/backchannel issuer split, public-client
-//! PKCE, userinfo → Principal). The verbose typestate aliases exist solely to
-//! carry our additional-claims type through openidconnect's generics.
-
 use openidconnect::core::{
     CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim,
     CoreJsonWebKey, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm, CoreRevocableToken,
@@ -23,19 +16,13 @@ use crate::config::OidcConfig;
 use crate::error::OidcError;
 use crate::principal::Principal;
 
-/// The stand's custom claim, served by the shared `effective_groups` scope
-/// mapping (downward closure of group UUIDs).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct OidcClaims {
-    // kept as strings so Principal::from_userinfo is the single UUID-parsing
-    // / fail-closed point shared with the bearer validator
     #[serde(default)]
     effective_groups: Vec<String>,
 }
 impl AdditionalClaims for OidcClaims {}
 
-/// `CoreTokenResponse` with our additional claims (the client's token
-/// response type must match its claims type).
 type OidcTokenResponse = StandardTokenResponse<
     IdTokenFields<
         OidcClaims,
@@ -47,9 +34,6 @@ type OidcTokenResponse = StandardTokenResponse<
     CoreTokenType,
 >;
 
-/// A `CoreClient` carrying our additional claims (the claims type of
-/// `user_info` responses is fixed by the client type), with the three
-/// endpoints we use statically set.
 type OidcCore = Client<
     OidcClaims,
     CoreAuthDisplay,
@@ -70,16 +54,12 @@ type OidcCore = Client<
     EndpointSet,    // userinfo
 >;
 
-/// Tokens as returned by an exchange or refresh.
 #[derive(Debug, Clone)]
 pub struct TokenBundle {
     pub access_token: String,
     pub refresh_token: Option<String>,
 }
 
-/// Discovery-configured OIDC protocol client. All hand-shaking goes through
-/// the `openidconnect` crate; this wrapper only pins the stand conventions
-/// (issuer/backchannel origin split, PKCE public client, userinfo → Principal).
 pub struct OidcClient {
     core: OidcCore,
     http: reqwest::Client,
@@ -87,16 +67,8 @@ pub struct OidcClient {
 }
 
 impl OidcClient {
-    /// Fetch the provider's discovery document and build the client.
-    ///
-    /// Origin policy: the document is fetched via the backchannel origin;
-    /// the authorize endpoint is normalized onto the browser-canonical
-    /// `issuer` origin, token/userinfo onto the backchannel origin
-    /// (authentik builds these URLs from the request host, so a doc fetched
-    /// via the backchannel carries backchannel hosts throughout).
     pub async fn discover(config: OidcConfig) -> Result<Self, OidcError> {
         let http = reqwest::Client::builder()
-            // openidconnect requirement: no auto-redirects on token calls
             .redirect(reqwest::redirect::Policy::none())
             .danger_accept_invalid_certs(config.danger_accept_invalid_certs)
             .build()
@@ -153,10 +125,6 @@ impl OidcClient {
         &self.config
     }
 
-    /// Browser authorize URL. `silent` adds `prompt=none` (invisible while
-    /// the SSO session is alive; comes back `error=login_required` if not).
-    /// Returns (url, state, pkce_verifier) — persist state and verifier in
-    /// the short-lived flow cookie.
     pub fn authorize_url(&self, silent: bool) -> (Url, String, String) {
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
         let mut req = self
@@ -169,7 +137,6 @@ impl OidcClient {
             .set_pkce_challenge(challenge);
         for s in &self.config.scopes {
             if s != "openid" {
-                // authorize_url adds the openid scope itself
                 req = req.add_scope(Scope::new(s.clone()));
             }
         }
@@ -180,7 +147,6 @@ impl OidcClient {
         (url, state.secret().clone(), verifier.secret().clone())
     }
 
-    /// Redeem the authorization code (PKCE).
     #[tracing::instrument(skip_all)]
     pub async fn exchange_code(&self, code: String, verifier: String) -> Result<TokenBundle, OidcError> {
         let resp = self
@@ -196,7 +162,6 @@ impl OidcClient {
         })
     }
 
-    /// Server-side refresh (v5: the refresh token never reaches a browser).
     #[tracing::instrument(skip_all)]
     pub async fn refresh(&self, refresh_token: &str) -> Result<TokenBundle, OidcError> {
         let rt = RefreshToken::new(refresh_token.to_owned());
@@ -208,8 +173,6 @@ impl OidcClient {
             .map_err(|e| OidcError::Refresh(e.to_string()))?;
         Ok(TokenBundle {
             access_token: resp.access_token().secret().clone(),
-            // authentik rotates refresh tokens; keep the old one if the
-            // response omits a new one
             refresh_token: resp
                 .refresh_token()
                 .map(|t| t.secret().clone())
@@ -217,10 +180,6 @@ impl OidcClient {
         })
     }
 
-    /// Per-request validation: ask authentik's userinfo who this access
-    /// token is; fail closed on anything but a 200. This is the v4 rule —
-    /// and the whole integration for bearer-API services (the mint pattern),
-    /// which skip the BFF session machinery entirely.
     #[tracing::instrument(skip_all)]
     pub async fn principal_from_access_token(&self, access_token: &str) -> Result<Principal, OidcError> {
         let claims: UserInfoClaims<OidcClaims, CoreGenderClaim> = self

@@ -1,34 +1,16 @@
-//! The authenticated caller as userinfo reported it THIS request (nothing here
-//! is cached — per-request validation). `Principal::from_userinfo` is the
-//! single place the stand's identity contract is enforced (UUID `sub`, UUID
-//! `effective_groups`, fail-closed), shared by the BFF client and the bearer
-//! validator so every service agrees on what identity means.
-
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use uuid::Uuid;
 
-/// The authenticated caller, as authentik's userinfo reported it for THIS
-/// request (per-request validation — nothing here is cached).
 #[derive(Debug, Clone)]
 pub struct Principal {
-    /// authentik user UUID (`sub` under the stand-wide `sub_mode=user_uuid`).
     pub uuid: Uuid,
     pub username: String,
     pub email: Option<String>,
-    /// Downward closure (direct groups ∪ all descendants) of group UUIDs from
-    /// the `effective_groups` claim — parents inherit their children's
-    /// access. Gate on UUIDs, never names.
     pub effective_groups: Vec<Uuid>,
 }
 
 impl Principal {
-    /// The single place the stand's identity contract is enforced: `sub`
-    /// MUST be a user UUID (provider `sub_mode=user_uuid`) and every
-    /// `effective_groups` entry MUST be a group UUID. Both the BFF client
-    /// and the bearer validator build principals through here, so every
-    /// stand service agrees on what identity means. Fails closed (`Err`) on
-    /// any non-UUID — never a partially-understood principal.
     pub(crate) fn from_userinfo(
         sub: &str,
         username: Option<String>,
@@ -50,14 +32,10 @@ impl Principal {
         })
     }
 
-    /// Downward-semantics gate: is `group` within the caller's effective
-    /// groups? (Members of any ancestor group pass — the closure is already
-    /// expanded server-side by authentik.)
     pub fn in_group(&self, group: &Uuid) -> bool {
         self.effective_groups.contains(group)
     }
 
-    /// `?`-friendly gate: `p.require_group(&cron_admins)?` → 403 on failure.
     pub fn require_group(&self, group: &Uuid) -> Result<(), GateDenied> {
         if self.in_group(group) {
             Ok(())
@@ -67,7 +45,6 @@ impl Principal {
     }
 }
 
-/// 403 response for a failed [`Principal::require_group`] gate.
 #[derive(Debug)]
 pub struct GateDenied;
 

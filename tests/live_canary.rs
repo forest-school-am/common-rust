@@ -1,17 +1,3 @@
-//! LIVE canary against the real teststand authentik: pins the
-//! **instant-logout assumption** — authentik revokes access AND refresh
-//! tokens when the SSO session ends. This behavior is version-dependent
-//! (observed on 2026.5.2; goauthentik#13780 claims otherwise for other
-//! versions), and the whole "server-side refresh cannot outlive logout"
-//! guarantee of ruling v5 rests on it. **Run this against any authentik
-//! upgrade — the 2026.8 migration in particular — before trusting it.**
-//!
-//! Gated: only runs with COMMON_OIDC_LIVE=1 (needs the teststand up and
-//! setup.py's `common-oidc-canary` provider). Overridable env:
-//!   COMMON_OIDC_AK        base URL          (default http://127.0.0.1:8000)
-//!   COMMON_OIDC_AK_TOKEN  admin API token   (default teststand-api-token)
-//!   COMMON_OIDC_USER / COMMON_OIDC_PASSWORD       (default alice / 123456)
-
 use serde_json::{json, Value};
 use url::Url;
 
@@ -38,9 +24,6 @@ fn env() -> Option<Env> {
     })
 }
 
-/// Log in through the flow executor like a browser would, leaving the SSO
-/// session cookie in the shared jar. `browser` follows redirects (the
-/// executor uses POST-redirect-GET chains).
 async fn sso_login(browser: &reqwest::Client, e: &Env) {
     let exec = format!("{}/api/v3/flows/executor/default-authentication-flow/?query=", e.ak);
     let mut challenge: Value =
@@ -66,10 +49,6 @@ async fn sso_login(browser: &reqwest::Client, e: &Env) {
     panic!("authentication flow did not converge: {challenge}");
 }
 
-/// Drive the authorize redirect + implicit-consent flow to an authorization
-/// code, using the crate's own authorize URL (PKCE and scopes included).
-/// `http` has redirects DISABLED (we sniff Location for the code);
-/// `browser` follows them (executor PRG chains).
 async fn authorization_code(
     http: &reqwest::Client,
     browser: &reqwest::Client,
@@ -105,7 +84,6 @@ async fn authorization_code(
             "authorize did not enter a flow (status {}): {loc}",
             resp.status()
         );
-        // same flow, executor API form
         let flow_url = Url::parse(&format!("{}{}", e.ak, loc)).unwrap();
         let slug = flow_url.path().trim_matches('/').rsplit('/').next().unwrap().to_owned();
         let query = flow_url.query().unwrap_or_default();
@@ -136,8 +114,6 @@ fn urlenc(s: &str) -> String {
 async fn instant_logout_kills_access_and_refresh_tokens() {
     let Some(e) = env() else { return };
 
-    // one cookie jar, two views of it: `browser` follows redirects (flow
-    // executor), `http` does not (Location sniffing on authorize)
     let jar = std::sync::Arc::new(reqwest::cookie::Jar::default());
     let browser = reqwest::Client::builder().cookie_provider(jar.clone()).build().unwrap();
     let http = reqwest::Client::builder()
@@ -147,7 +123,6 @@ async fn instant_logout_kills_access_and_refresh_tokens() {
         .unwrap();
     sso_login(&browser, &e).await;
 
-    // the crate under test does discovery, PKCE, exchange, refresh, userinfo
     let config = OidcConfig::new(
         Url::parse(&format!("{}/application/o/common-oidc-canary/", e.ak)).unwrap(),
         "common-oidc-canary",
@@ -162,7 +137,6 @@ async fn instant_logout_kills_access_and_refresh_tokens() {
         "no refresh token issued — is offline_access allowed on the canary provider (setup.py)?",
     );
 
-    // sanity: both tokens work while the SSO session lives
     let p = client
         .principal_from_access_token(&tokens.access_token)
         .await
@@ -177,7 +151,6 @@ async fn instant_logout_kills_access_and_refresh_tokens() {
         .await
         .expect("refreshed access token must work");
 
-    // end the SSO session administratively (same effect as user logout)
     let admin = reqwest::Client::new();
     let sessions: Value = admin
         .get(format!("{}/api/v3/core/authenticated_sessions/?username={}", e.ak, e.user))
@@ -205,7 +178,6 @@ async fn instant_logout_kills_access_and_refresh_tokens() {
         assert!(r.status().is_success(), "session delete failed: {}", r.status());
     }
 
-    // THE CANARY: both tokens must be dead IMMEDIATELY — no grace, no TTL.
     let access_dead = client.principal_from_access_token(&live_access).await.is_err();
     let refresh_dead = client.refresh(&live_refresh).await.is_err();
     assert!(

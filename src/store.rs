@@ -1,9 +1,3 @@
-//! Server-side session storage for the BFF pattern: the browser holds only an
-//! opaque cookie id; tokens live here, never in the browser. `SessionStore` is
-//! pluggable; `MemoryStore` is the single-instance default — acceptable as a
-//! default only because identity is re-validated per request, so a lost store
-//! is a re-login, never a security hole.
-
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -11,32 +5,21 @@ use std::time::{Duration, SystemTime};
 
 use tokio::sync::Mutex;
 
-/// Server-side session state. The browser holds only an opaque id in an
-/// HttpOnly cookie; tokens never leave the backend (BFF).
 #[derive(Debug, Clone)]
 pub struct Session {
     pub access_token: String,
-    /// Present when the provider granted `offline_access`. Redeemed
-    /// server-side only, when userinfo rejects the access token.
     pub refresh_token: Option<String>,
     pub created: SystemTime,
 }
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Pluggable session storage. The in-memory default fits single-instance
-/// stand apps; multi-instance deployments implement this over their shared
-/// store. Note that per-request userinfo means a lost session store is only
-/// a re-login inconvenience, never a security issue.
 pub trait SessionStore: Send + Sync + 'static {
     fn get(&self, id: &str) -> BoxFuture<'_, Option<Session>>;
     fn put(&self, id: String, session: Session) -> BoxFuture<'_, ()>;
     fn remove(&self, id: &str) -> BoxFuture<'_, ()>;
 }
 
-/// In-memory default store. Sessions are dropped after `max_age` (default
-/// 12 h) as a hygiene bound; real session death is observed per request via
-/// userinfo, not by this timer.
 pub struct MemoryStore {
     sessions: Mutex<HashMap<String, Session>>,
     max_age: Duration,

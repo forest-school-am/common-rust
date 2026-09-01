@@ -1,7 +1,3 @@
-//! BFF policy tests against a mock authentik: per-request userinfo,
-//! server-side refresh (exactly once), silent→interactive escalation, and
-//! the full PKCE code-exchange loop.
-
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -98,7 +94,6 @@ async fn mock_userinfo(
     }
 }
 
-/// Serve a mock authentik; returns (its base url, handle to its state).
 async fn spawn_mock() -> (String, Arc<Mock>) {
     let mock = Arc::new(Mock::default());
     let base_path = "/application/o/test";
@@ -128,7 +123,6 @@ async fn spawn_mock() -> (String, Arc<Mock>) {
 }
 
 async fn oidc_state(base: &str, store: MemoryStore) -> OidcState {
-    // these tests exercise the server-side refresh path, so opt in
     let mut config = OidcConfig::new(
         Url::parse(&format!("{base}/application/o/test/")).unwrap(),
         "test-client",
@@ -136,8 +130,6 @@ async fn oidc_state(base: &str, store: MemoryStore) -> OidcState {
     )
     .request_refresh_tokens();
     config.cookie_secure = false;
-    // serve the shim from the crate's own templates dir (its hash matches the
-    // build.rs pin); a bad dir/stale template would refuse discovery.
     config.assets_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/templates").into();
     OidcState::discover(config, store).await.expect("discovery against mock")
 }
@@ -181,13 +173,11 @@ async fn bearer_validator_shares_the_identity_contract() {
     let userinfo = format!("{base}/application/o/userinfo/");
     let validator = BearerValidator::new(reqwest::Client::new(), userinfo);
 
-    // good token -> principal with UUID sub + effective_groups
     let p = validator.validate("at-api").await.expect("valid token");
     assert_eq!(p.username, "alice");
     assert_eq!(p.uuid.to_string(), ALICE_SUB);
     assert!(p.in_group(&GROUP_A.parse().unwrap()));
 
-    // rejected token -> Rejected (mapped to 401 by callers), never a principal
     match validator.validate("nope").await {
         Err(ValidationError::Rejected) => {}
         other => panic!("expected Rejected, got {other:?}"),
@@ -228,7 +218,6 @@ async fn valid_access_token_yields_principal() {
 #[tokio::test(flavor = "multi_thread")]
 async fn expired_access_is_refreshed_server_side_exactly_once() {
     let (base, mock) = spawn_mock().await;
-    // access token dead, refresh token alive
     mock.valid_refresh.lock().unwrap().insert("rt-live".into());
     let (store, sid) = seed_session("at-dead", Some("rt-live")).await;
     let app = app(oidc_state(&base, store).await);
@@ -241,7 +230,6 @@ async fn expired_access_is_refreshed_server_side_exactly_once() {
     assert_eq!(resp.status(), StatusCode::OK, "refresh must rescue the request");
     assert_eq!(mock.refresh_calls.load(Ordering::SeqCst), 1);
 
-    // second request: refreshed access token is in the session now — no new refresh
     let resp = app
         .oneshot(get_req("/me", &format!("stand_session={sid}"), true))
         .await
@@ -256,7 +244,6 @@ async fn dead_tokens_destroy_session_and_start_silent_login() {
     let (store, sid) = seed_session("at-dead", Some("rt-dead")).await;
     let app = app(oidc_state(&base, store).await);
 
-    // browser navigation -> redirect into silent authorize
     let resp = app
         .clone()
         .oneshot(get_req("/me", &format!("stand_session={sid}"), true))
@@ -271,10 +258,8 @@ async fn dead_tokens_destroy_session_and_start_silent_login() {
         loc.contains("effective_groups") && loc.contains("offline_access"),
         "stand scopes must be requested: {loc}"
     );
-    // the dead refresh token was tried once, then the session was dropped
     assert_eq!(mock.refresh_calls.load(Ordering::SeqCst), 1);
 
-    // API caller (no text/html) -> plain 401 carrying the re-auth signal
     let resp = app
         .oneshot(get_req("/me", &format!("stand_session={sid}"), false))
         .await
@@ -292,7 +277,6 @@ async fn serves_shim_and_login_route() {
     let (base, _mock) = spawn_mock().await;
     let app = app(oidc_state(&base, MemoryStore::default()).await);
 
-    // the served shim: baked login path, framework-free module
     let resp = app
         .clone()
         .oneshot(Request::builder().uri("/common-oidc.js").body(Body::empty()).unwrap())
@@ -309,7 +293,6 @@ async fn serves_shim_and_login_route() {
     assert!(!js.contains("__LOGIN_PATH__"), "placeholder must be replaced");
     assert!(js.contains("installReauthGuard"), "must expose the guard API");
 
-    // login route -> silent authorize, returning to a SAFE next
     let resp = app
         .clone()
         .oneshot(
@@ -324,7 +307,6 @@ async fn serves_shim_and_login_route() {
     let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
     assert!(loc.contains("prompt=none"), "login defaults to silent: {loc}");
 
-    // open-redirect guard: a protocol-relative next is dropped to "/"
     let resp = app
         .oneshot(
             Request::builder()
@@ -339,7 +321,6 @@ async fn serves_shim_and_login_route() {
     assert!(json.contains("\"n\":\"/\""), "unsafe next must fall back to '/': {json}");
 }
 
-// mirror of web.rs `hex_decode` (private there) — keep in sync if that changes
 fn hex_decode_test(s: &str) -> String {
     let bytes: Vec<u8> = (0..s.len())
         .step_by(2)
@@ -362,7 +343,6 @@ async fn full_login_loop_and_interactive_escalation() {
     let (base, mock) = spawn_mock().await;
     let app = app(oidc_state(&base, MemoryStore::default()).await);
 
-    // 1. anonymous browser hit -> silent authorize + flow cookie
     let resp = app.clone().oneshot(get_req("/me", "", true)).await.unwrap();
     assert!(resp.status().is_redirection());
     let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap().to_owned();
@@ -374,7 +354,6 @@ async fn full_login_loop_and_interactive_escalation() {
         .map(|(_, v)| v.into_owned())
         .unwrap();
 
-    // 2a. the SSO session was dead: login_required escalates to interactive, once
     let resp = app
         .clone()
         .oneshot(get_req("/oidc/callback?error=login_required", &flow_cookie, true))
@@ -391,7 +370,6 @@ async fn full_login_loop_and_interactive_escalation() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "loop breaker: no second escalation");
 
-    // 2b. wrong state on an otherwise-fine callback is rejected
     let resp = app
         .clone()
         .oneshot(get_req("/oidc/callback?code=goodcode&state=WRONG", &flow_cookie, true))
@@ -399,7 +377,6 @@ async fn full_login_loop_and_interactive_escalation() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-    // 3. proper callback: code exchange -> session cookie -> original page
     let resp = app
         .clone()
         .oneshot(get_req(
@@ -415,23 +392,16 @@ async fn full_login_loop_and_interactive_escalation() {
     let session_cookie = cookie_from(&resp, "stand_session").expect("session cookie set");
     assert_eq!(mock.exchange_calls.load(Ordering::SeqCst), 1);
 
-    // 4. the session works
     let resp = app.oneshot(get_req("/me", &session_cookie, true)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
-/// The delegation seam adopters call from their §3.1 chokepoint must produce
-/// the SAME wire contract as the extractor's own rejection — otherwise a
-/// service that obeys §3.1 silently emits a different 401 from one that lets
-/// the extractor reject, and the shim only works for the second.
 #[tokio::test(flavor = "multi_thread")]
 async fn unauthorized_response_matches_the_extractor_401() {
     let (base, _mock) = spawn_mock().await;
     let oidc = oidc_state(&base, MemoryStore::default()).await;
 
-    // what an adopter builds by delegating
     let delegated = oidc.unauthorized_response();
-    // what the extractor rejects with, for a caller with no session at all
     let from_extractor = app(oidc.clone())
         .oneshot(get_req("/me", "", false))
         .await
@@ -450,8 +420,6 @@ async fn unauthorized_response_matches_the_extractor_401() {
         "both paths must advertise the same login path"
     );
 
-    // the contract is more than the header: the dead session cookie is cleared,
-    // which is the part an adopter copying only the header string would miss.
     let cookie = delegated
         .headers()
         .get(axum::http::header::SET_COOKIE)
