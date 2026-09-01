@@ -73,6 +73,9 @@ impl Builder {
         self
     }
 
+    /// Pins are per-file: a pinned template that `extends` or `include`s an
+    /// unpinned one gets no coverage of that dependency. Pin every file whose
+    /// content matters.
     pub fn pin(mut self, name: impl Into<String>, expected_sha256: [u8; 32]) -> Self {
         let name = name.into();
         self.pins.insert(name.clone(), expected_sha256);
@@ -217,6 +220,17 @@ impl AssetCache {
         Ok(out)
     }
 
+    /// `extends`/`include` targets reach minijinja through the path loader,
+    /// which never calls `read_verified` — so a pin on a base template held
+    /// only until boot finished. Every pin is re-checked on every render.
+    fn verify_all_pins(&self) -> Result<(), RenderError> {
+        for (pinned, expected) in &self.pins {
+            let path = self.safe_path(pinned)?;
+            self.read_verified(&path, pinned, Some(expected))?;
+        }
+        Ok(())
+    }
+
     pub fn render_ctx<S: serde::Serialize>(
         &self,
         name: &str,
@@ -224,6 +238,7 @@ impl AssetCache {
     ) -> Result<String, RenderError> {
         let path = self.safe_path(name)?;
         let _ = self.read_verified(&path, name, self.pins.get(name))?;
+        self.verify_all_pins()?;
 
         {
             let g = self.ctx_env.read().unwrap_or_else(|e| e.into_inner());
@@ -573,5 +588,31 @@ mod tests {
 
         assert_eq!(&c.render_ctx("page.html", &BTreeMap::from([("n", 4)])).unwrap(), "<div>v4</div>");
         assert_eq!(loads(), 2);
+    }
+
+    #[test]
+    fn pinned_base_template_is_verified_on_every_render_not_just_at_boot() {
+        #[derive(serde::Serialize)]
+        struct Ctx { n: u32 }
+        let d = tmpdir();
+        let base = "BASE {% block body %}{% endblock %}";
+        let page = "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}";
+        write(&d, "base.html", base);
+        write(&d, "page.html", page);
+        let bs: [u8; 32] = Sha256::digest(base.as_bytes()).into();
+        let pg: [u8; 32] = Sha256::digest(page.as_bytes()).into();
+        let c = Builder::new(&d).pin("page.html", pg).pin("base.html", bs).build().unwrap();
+        assert_eq!(c.render_ctx("page.html", &Ctx { n: 1 }).unwrap(), "BASE 1");
+
+        write(&d, "base.html", "TAMPERED {% block body %}{% endblock %}");
+        bump_mtime(&d, "base.html");
+        assert!(
+            matches!(c.render_ctx("page.html", &Ctx { n: 1 }), Err(RenderError::PinMismatch(n)) if n == "base.html"),
+            "tampering a pinned base template must fail the render"
+        );
+
+        write(&d, "base.html", base);
+        bump_mtime(&d, "base.html");
+        assert_eq!(c.render_ctx("page.html", &Ctx { n: 2 }).unwrap(), "BASE 2");
     }
 }
