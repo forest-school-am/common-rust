@@ -1,3 +1,6 @@
+//! Configuration values and their defaults. Resolution and validation only —
+//! nothing here performs IO or decides a response.
+
 use std::path::PathBuf;
 
 use common_logging::Deployment;

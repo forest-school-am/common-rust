@@ -1,3 +1,6 @@
+//! Session storage: the trait every backend implements, plus the in-memory
+//! one. What a session MEANS belongs in principal.rs; who may see it, web.rs.
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;

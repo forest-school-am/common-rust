@@ -1,3 +1,7 @@
+//! OIDC protocol only: discovery, the authorize URL, code exchange, refresh,
+//! userinfo. Speaks to the IdP and knows nothing about HTTP handlers,
+//! cookies or sessions — those belong in web.rs.
+
 use openidconnect::core::{
     CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim,
     CoreJsonWebKey, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm, CoreRevocableToken,

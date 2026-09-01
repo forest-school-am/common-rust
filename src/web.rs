@@ -1,3 +1,7 @@
+//! The axum layer: routes, extractors, cookies, redirects, and the policy
+//! decisions that shape a response. Anything that talks to the IdP belongs
+//! in client.rs; anything a bearer-only API needs belongs in bearer.rs.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;

@@ -1,3 +1,6 @@
+//! The authenticated caller and the group-membership gate. Pure data and
+//! predicates — no IO, no HTTP, no storage.
+
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use uuid::Uuid;

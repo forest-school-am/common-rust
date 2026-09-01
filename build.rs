@@ -1,3 +1,7 @@
+//! Build script: derives the served shim's integrity pin and publishes the
+//! template directory to dependents. Anything needed at RUN time belongs in
+//! src/, not here.
+
 use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};

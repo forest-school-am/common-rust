@@ -1,3 +1,7 @@
+//! Bearer-token validation for API services that have no browser session:
+//! userinfo per request, no discovery, no cookies. If it needs a session
+//! store or a redirect, it belongs in web.rs.
+
 use reqwest::header;
 use serde::Deserialize;
 
