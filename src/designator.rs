@@ -1,3 +1,6 @@
+//! The designator vocabulary and the macros that emit through it. A new
+//! designator goes here; a new way of RENDERING one goes in format.rs.
+
 pub const AUTH: &str = "auth";
 pub const BUSINESS: &str = "business";
 pub const UPSTREAM: &str = "upstream";

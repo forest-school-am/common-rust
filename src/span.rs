@@ -1,3 +1,6 @@
+//! Request-scoped spans: the fields every service attaches to a request
+//! and how they are set. Not for spans a single module opens for itself.
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 

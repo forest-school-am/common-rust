@@ -1,3 +1,6 @@
+//! How a log line looks. Formatters and layers only; what a line SAYS is
+//! decided by the caller, and which values are legal by config.rs.
+
 use std::fmt;
 
 use time::format_description::well_known::Rfc3339;

@@ -1,3 +1,6 @@
+//! Subscriber setup and the crate's public surface. Assembly only — the
+//! pieces live in config.rs, format.rs, designator.rs and span.rs.
+
 mod config;
 mod designator;
 mod format;

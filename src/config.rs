@@ -1,3 +1,6 @@
+//! What the logging environment says: formats, deployment class, filters.
+//! Resolution and parsing only — nothing here writes a log line.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Human,
