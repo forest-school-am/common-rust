@@ -1,50 +1,42 @@
 //! What the logging environment says: formats, deployment class, filters.
 //! Resolution and parsing only — nothing here writes a log line.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Format {
-    Human,
-    Json,
+use crate::str_enum::{or_list, str_enum};
+
+str_enum! {
+    pub enum Format {
+        Human = "human",
+        Json = "json",
+    }
 }
 
-/// Deployment class. Presence of options never infers this — it is
-/// declared. Here it only sets logging defaults (verbosity); services apply
-/// the prod-required / dev-only / neutral option rules themselves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Deployment {
-    Prod,
-    Dev,
+str_enum! {
+    /// Deployment class. Presence of options never infers this — it is
+    /// declared. Here it only sets logging defaults (verbosity); services apply
+    /// the prod-required / dev-only / neutral option rules themselves.
+    pub enum Deployment {
+        Prod = "prod",
+        Dev = "dev",
+    }
 }
 
 impl Deployment {
     pub fn parse(value: Option<&str>) -> Result<Self, String> {
-        match value {
-            None => Ok(Deployment::Dev),
-            Some("prod") => Ok(Deployment::Prod),
-            Some("dev") => Ok(Deployment::Dev),
-            Some(other) => Err(format!(
-                "DEPLOYMENT_TYPE={other:?} is not valid — expected \"prod\" or \"dev\" \
+        let Some(text) = value else {
+            return Ok(Deployment::Dev);
+        };
+        Deployment::try_from_str(text).ok_or_else(|| {
+            format!(
+                "DEPLOYMENT_TYPE={text:?} is not valid — expected {} \
                  (unset means dev). Refusing rather than defaulting: a typo here would \
-                 silently enable dev-only behaviour under a prod deployment."
-            )),
-        }
+                 silently enable dev-only behaviour under a prod deployment.",
+                or_list(Deployment::VALUES)
+            )
+        })
     }
 
     pub fn from_env() -> Result<Self, String> {
         Self::parse(std::env::var("DEPLOYMENT_TYPE").ok().as_deref())
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Deployment::Prod => "prod",
-            Deployment::Dev => "dev",
-        }
-    }
-}
-
-impl std::fmt::Display for Deployment {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
     }
 }
 
@@ -61,14 +53,9 @@ impl LogConfig {
         deployment_type: Option<&str>,
         rust_log: Option<&str>,
     ) -> Self {
-        let format = match log_format {
-            Some("human") => Format::Human,
-            _ => Format::Json,
-        };
-        let deployment = match deployment_type {
-            Some("prod") => Deployment::Prod,
-            _ => Deployment::Dev,
-        };
+        let format = log_format.and_then(Format::try_from_str).unwrap_or(Format::Json);
+        let deployment =
+            deployment_type.and_then(Deployment::try_from_str).unwrap_or(Deployment::Dev);
         let filter = match rust_log {
             Some(s) if !s.is_empty() => s.to_owned(),
             _ => match deployment {

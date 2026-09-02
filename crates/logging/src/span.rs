@@ -8,6 +8,14 @@ use tracing::field::Empty;
 use tracing::Span;
 
 use crate::designator::HTTP;
+use crate::str_enum::str_enum;
+
+str_enum! {
+    pub(crate) enum FixedField {
+        ReqId = "reqid",
+        Actor = "actor",
+    }
+}
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -25,5 +33,26 @@ pub fn request_span(reqid: &str) -> Span {
 }
 
 pub fn set_actor(span: &Span, actor: &str) {
-    span.record("actor", actor);
+    span.record(FixedField::Actor.as_str(), actor);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_vocabulary_spells_the_names_request_span_declares() {
+        assert_eq!(FixedField::ReqId.as_str(), "reqid");
+        assert_eq!(FixedField::Actor.as_str(), "actor");
+    }
+
+    #[test]
+    fn request_span_declares_exactly_the_vocabulary() {
+        tracing::subscriber::with_default(tracing_subscriber::registry(), || {
+            let span = request_span("rq0000");
+            let meta = span.metadata().expect("a span is enabled under a registry");
+            let names: Vec<&str> = meta.fields().iter().map(|f| f.name()).collect();
+            assert_eq!(names, FixedField::VALUES);
+        });
+    }
 }

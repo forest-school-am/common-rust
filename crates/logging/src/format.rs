@@ -13,6 +13,8 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
+use crate::span::FixedField;
+
 #[derive(Default, Clone)]
 pub(crate) struct ReqCtx {
     pub reqid: Option<String>,
@@ -21,25 +23,29 @@ pub(crate) struct ReqCtx {
 
 struct ReqVisitor<'a>(&'a mut ReqCtx);
 
+impl ReqVisitor<'_> {
+    fn set(&mut self, field: FixedField, value: String) {
+        match field {
+            FixedField::ReqId => self.0.reqid = Some(value),
+            FixedField::Actor => self.0.actor = Some(value),
+        }
+    }
+}
+
 impl Visit for ReqVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
-        match field.name() {
-            "reqid" => self.0.reqid = Some(value.to_owned()),
-            "actor" => self.0.actor = Some(value.to_owned()),
-            _ => {}
+        if let Some(field) = FixedField::try_from_str(field.name()) {
+            self.set(field, value.to_owned());
         }
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        if matches!(field.name(), "reqid" | "actor") {
-            let s = format!("{value:?}");
-            let s = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&s);
-            match field.name() {
-                "reqid" => self.0.reqid = Some(s.to_owned()),
-                "actor" => self.0.actor = Some(s.to_owned()),
-                _ => {}
-            }
-        }
+        let Some(field) = FixedField::try_from_str(field.name()) else {
+            return;
+        };
+        let s = format!("{value:?}");
+        let s = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&s);
+        self.set(field, s.to_owned());
     }
 }
 
