@@ -8,11 +8,11 @@ description = "Shared in-app OIDC for stand apps: BFF sessions, per-request user
 # DEP_COMMON_OIDC_ASSETS (cargo derives that name from THIS `links` value, not
 # from the package name: `links = "common-oidc"` + `cargo:assets=` =>
 # DEP_COMMON_OIDC_ASSETS). It is how adopters copy the shim template without a
-# `../common-oidc` sibling path, so it works for git deps too (§9.8).
+# `../common-oidc` sibling path, so it works for git deps too.
 links = "common-oidc"
 
 [dependencies]
-# Workspace siblings (CODESTYLE.md §8 logging, §9 asset rendering). Before the
+# Workspace siblings: logging and asset rendering. Before the
 # R15 merge these were git deps by tag, so this crate's own tests compiled
 # against the published crates while every consumer built against the local
 # ones — the two silently diverged. As workspace members they cannot.
@@ -31,7 +31,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [build-dependencies]
-# derive the served shim's integrity-pin hash at build time (§9.8).
+# derive the served shim's integrity-pin hash at build time.
 sha2.workspace = true
 
 [dev-dependencies]
