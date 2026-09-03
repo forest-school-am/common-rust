@@ -21,7 +21,6 @@ mod config;
 mod designator;
 mod format;
 mod span;
-mod str_enum;
 
 pub use tracing;
 

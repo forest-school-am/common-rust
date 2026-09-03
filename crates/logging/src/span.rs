@@ -4,17 +4,21 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use strum::{AsRefStr, EnumString, VariantNames};
 use tracing::field::Empty;
 use tracing::Span;
 
 use crate::designator::HTTP;
-use crate::str_enum::str_enum;
 
-str_enum! {
-    pub(crate) enum FixedField {
-        ReqId = "reqid",
-        Actor = "actor",
-    }
+/// The request-field vocabulary. Each name is written once, in `serialize`;
+/// `request_span` declares them and format.rs reads them back through the same
+/// declaration, so the two can no longer drift (CODESTYLE 4.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, EnumString, VariantNames)]
+pub(crate) enum FixedField {
+    #[strum(serialize = "reqid")]
+    ReqId,
+    #[strum(serialize = "actor")]
+    Actor,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -33,17 +37,19 @@ pub fn request_span(reqid: &str) -> Span {
 }
 
 pub fn set_actor(span: &Span, actor: &str) {
-    span.record(FixedField::Actor.as_str(), actor);
+    span.record(FixedField::Actor.as_ref(), actor);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Spelled out rather than read off the declaration: a test that reuses it
+    /// asserts nothing (CODESTYLE 4.5).
     #[test]
     fn the_vocabulary_spells_the_names_request_span_declares() {
-        assert_eq!(FixedField::ReqId.as_str(), "reqid");
-        assert_eq!(FixedField::Actor.as_str(), "actor");
+        assert_eq!(FixedField::ReqId.as_ref(), "reqid");
+        assert_eq!(FixedField::Actor.as_ref(), "actor");
     }
 
     #[test]
@@ -52,7 +58,7 @@ mod tests {
             let span = request_span("rq0000");
             let meta = span.metadata().expect("a span is enabled under a registry");
             let names: Vec<&str> = meta.fields().iter().map(|f| f.name()).collect();
-            assert_eq!(names, FixedField::VALUES);
+            assert_eq!(names, FixedField::VARIANTS);
         });
     }
 }

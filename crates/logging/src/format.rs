@@ -2,6 +2,7 @@
 //! decided by the caller, and which values are legal by config.rs.
 
 use std::fmt;
+use std::str::FromStr;
 
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -34,13 +35,13 @@ impl ReqVisitor<'_> {
 
 impl Visit for ReqVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
-        if let Some(field) = FixedField::try_from_str(field.name()) {
+        if let Ok(field) = FixedField::from_str(field.name()) {
             self.set(field, value.to_owned());
         }
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        let Some(field) = FixedField::try_from_str(field.name()) else {
+        let Ok(field) = FixedField::from_str(field.name()) else {
             return;
         };
         let s = format!("{value:?}");
