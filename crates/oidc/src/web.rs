@@ -13,6 +13,7 @@ use axum::routing::get;
 use axum::Router;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
+use url::Url;
 use uuid::Uuid;
 
 use common_logging::Deployment;
@@ -27,18 +28,55 @@ const FLOW_COOKIE: &str = "oidc_flow";
 pub const REAUTH_HEADER: &str = "X-Common-OIDC-Reauth";
 const SHIM_TEMPLATE: &str = "common-oidc.js.jinja";
 
-/// Only same-origin absolute paths are valid post-login redirect targets —
-/// never a scheme, host, or protocol-relative `//evil` (open-redirect guard).
+/// Reduce a post-login redirect target to a same-origin relative reference,
+/// or to `/`. This is the open-redirect guard.
+///
+/// RESOLVE, do not pattern-match. A prefix test answers "does this look
+/// relative", which is not the question — the question is "where does a
+/// browser END UP". Those differ: `/\evil.example` and `/<TAB>/evil.example`
+/// both look relative and both land on `evil.example`, because the WHATWG URL
+/// parser folds `\` to `/` and strips tab/CR/LF before resolving. So the value
+/// is resolved against a fixed base and the resulting ORIGIN is compared;
+/// anything that moved origin is discarded.
+///
+/// The re-serialised path is then prefix-checked as well, because resolution
+/// NORMALISES: `/..//evil.example` resolves same-origin but its path is
+/// `//evil.example`, which would leave the origin all over again once emitted
+/// into a `Location` header. Each half covers the other's blind spot.
 ///
 /// MUST be applied at every USE, not only where the value enters. `next`
 /// survives the round trip inside the flow cookie, which is unauthenticated
 /// and therefore writable by anyone who can set a cookie for this origin, so a
 /// value that was sanitised on the way in is untrusted again on the way out.
 fn safe_next(raw: Option<&str>) -> String {
-    match raw {
-        Some(p) if p.starts_with('/') && !p.starts_with("//") => p.to_owned(),
-        _ => "/".into(),
+    fn resolve(raw: &str) -> Option<String> {
+        // Absolute-path form only, which is what the shim ever sends
+        // (`location.pathname + search + hash`). Resolution alone would also
+        // accept `a/b` and rewrite it to `/a/b`; that is same-origin and
+        // harmless, but it widens the contract for no caller that exists.
+        if !raw.starts_with('/') {
+            return None;
+        }
+        // Opaque, unreachable base: `next` is only ever emitted as a relative
+        // reference, so the host here is never used for anything but the
+        // origin comparison.
+        let base = Url::parse("https://next.invalid/").ok()?;
+        let resolved = base.join(raw).ok()?;
+        if resolved.origin() != base.origin() {
+            return None;
+        }
+        let mut out = resolved.path().to_owned();
+        if let Some(query) = resolved.query() {
+            out.push('?');
+            out.push_str(query);
+        }
+        if let Some(fragment) = resolved.fragment() {
+            out.push('#');
+            out.push_str(fragment);
+        }
+        (out.starts_with('/') && !out.starts_with("//")).then_some(out)
     }
+    raw.and_then(resolve).unwrap_or_else(|| "/".to_owned())
 }
 
 #[derive(Clone)]
@@ -398,6 +436,46 @@ where
             Some((principal, _session)) => Ok(principal),
             None => Err(unauthenticated(&oidc, parts, jar)),
         }
+    }
+}
+
+#[cfg(test)]
+mod safe_next_tests {
+    use super::safe_next;
+
+    /// Every value here LOOKS relative and a prefix check passes it, but a
+    /// WHATWG parser — which is what the browser reading our `Location`
+    /// header is — resolves each one onto another origin. Verified against
+    /// `url::Url::join` before being written down, not assumed.
+    #[test]
+    fn values_that_look_relative_but_change_origin_are_refused() {
+        for hostile in [
+            "//evil.example/x",
+            "/\\evil.example/x",  // backslash folds to `/`
+            "/\t/evil.example/x", // tab is stripped, leaving `//`
+            "/\r/evil.example/x", // CR likewise
+            "/\n/evil.example/x", // LF likewise
+            "/..//evil.example",  // normalises to a `//` path
+            "https://evil.example",
+            "http://evil.example",
+            "\\/evil.example/x",
+        ] {
+            assert_eq!(
+                safe_next(Some(hostile)),
+                "/",
+                "next={hostile:?} must not survive the guard"
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_same_origin_targets_survive_intact() {
+        assert_eq!(safe_next(Some("/me")), "/me");
+        assert_eq!(safe_next(Some("/a/b?x=1&y=2")), "/a/b?x=1&y=2");
+        assert_eq!(safe_next(Some("/a#frag")), "/a#frag");
+        assert_eq!(safe_next(None), "/");
+        assert_eq!(safe_next(Some("")), "/");
+        assert_eq!(safe_next(Some("relative/no/slash")), "/");
     }
 }
 
