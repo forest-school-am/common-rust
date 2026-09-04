@@ -1,8 +1,8 @@
 //! How the ctx environment decides a loaded template is stale.
 //!
-//! Four strategies, selected by config and parsed strictly, because a
-//! misspelled name that quietly selected a default would produce the RIGHT
-//! page by the wrong mechanism — nothing visible to correct.
+//! Strategies are selected by config and parsed strictly, because a misspelled
+//! name that quietly selected a default would produce the RIGHT page by the
+//! wrong mechanism — nothing visible to correct.
 //!
 //! What each strategy actually does on this stand is documented in `OPTIONS`
 //! rather than checked at boot. Choosing inotify here yields a stale page,
