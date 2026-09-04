@@ -70,9 +70,12 @@ impl LogConfig {
         deployment_type: Option<&str>,
         rust_log: Option<&str>,
     ) -> Self {
-        let format = log_format.and_then(|s| Format::from_str(s).ok()).unwrap_or(Format::Json);
-        let deployment =
-            deployment_type.and_then(|s| Deployment::from_str(s).ok()).unwrap_or(Deployment::Dev);
+        let format = log_format
+            .and_then(|s| Format::from_str(s).ok())
+            .unwrap_or(Format::Json);
+        let deployment = deployment_type
+            .and_then(|s| Deployment::from_str(s).ok())
+            .unwrap_or(Deployment::Dev);
         let filter = match rust_log {
             Some(s) if !s.is_empty() => s.to_owned(),
             _ => match deployment {
@@ -80,7 +83,11 @@ impl LogConfig {
                 Deployment::Dev => "debug".to_owned(),
             },
         };
-        Self { format, deployment, filter }
+        Self {
+            format,
+            deployment,
+            filter,
+        }
     }
 
     pub fn from_env() -> Self {
@@ -100,24 +107,54 @@ mod tests {
     #[test]
     fn format_defaults_to_json_including_unknown() {
         assert_eq!(LogConfig::resolve(None, None, None).format, Format::Json);
-        assert_eq!(LogConfig::resolve(Some("json"), None, None).format, Format::Json);
-        assert_eq!(LogConfig::resolve(Some("HUMAN"), None, None).format, Format::Json); // case-sensitive; unknown -> json
-        assert_eq!(LogConfig::resolve(Some("bogus"), None, None).format, Format::Json);
-        assert_eq!(LogConfig::resolve(Some("human"), None, None).format, Format::Human);
+        assert_eq!(
+            LogConfig::resolve(Some("json"), None, None).format,
+            Format::Json
+        );
+        assert_eq!(
+            LogConfig::resolve(Some("HUMAN"), None, None).format,
+            Format::Json
+        ); // case-sensitive; unknown -> json
+        assert_eq!(
+            LogConfig::resolve(Some("bogus"), None, None).format,
+            Format::Json
+        );
+        assert_eq!(
+            LogConfig::resolve(Some("human"), None, None).format,
+            Format::Human
+        );
     }
 
     #[test]
     fn deployment_defaults_to_dev_including_unknown() {
-        assert_eq!(LogConfig::resolve(None, None, None).deployment, Deployment::Dev);
-        assert_eq!(LogConfig::resolve(None, Some("dev"), None).deployment, Deployment::Dev);
-        assert_eq!(LogConfig::resolve(None, Some("bogus"), None).deployment, Deployment::Dev);
-        assert_eq!(LogConfig::resolve(None, Some("prod"), None).deployment, Deployment::Prod);
+        assert_eq!(
+            LogConfig::resolve(None, None, None).deployment,
+            Deployment::Dev
+        );
+        assert_eq!(
+            LogConfig::resolve(None, Some("dev"), None).deployment,
+            Deployment::Dev
+        );
+        assert_eq!(
+            LogConfig::resolve(None, Some("bogus"), None).deployment,
+            Deployment::Dev
+        );
+        assert_eq!(
+            LogConfig::resolve(None, Some("prod"), None).deployment,
+            Deployment::Prod
+        );
     }
 
     #[test]
     fn filter_uses_rust_log_else_deployment_default() {
-        assert_eq!(LogConfig::resolve(None, Some("prod"), Some("mycrate=trace")).filter, "mycrate=trace");
-        assert_eq!(LogConfig::resolve(None, Some("prod"), Some("")).filter, "info");
+        assert_eq!(
+            LogConfig::resolve(None, Some("prod"), Some("mycrate=trace")).filter,
+            "mycrate=trace"
+        );
+        assert_eq!(
+            LogConfig::resolve(None, Some("prod"), Some("")).filter,
+            "info"
+        );
         assert_eq!(LogConfig::resolve(None, Some("prod"), None).filter, "info");
         assert_eq!(LogConfig::resolve(None, Some("dev"), None).filter, "debug");
         assert_eq!(LogConfig::resolve(None, None, None).filter, "debug"); // default dev

@@ -33,7 +33,10 @@ pub struct BearerValidator {
 
 impl BearerValidator {
     pub fn new(http: reqwest::Client, userinfo_url: impl Into<String>) -> Self {
-        Self { http, userinfo_url: userinfo_url.into() }
+        Self {
+            http,
+            userinfo_url: userinfo_url.into(),
+        }
     }
 
     pub async fn validate(&self, bearer: &str) -> Result<Principal, ValidationError> {

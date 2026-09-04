@@ -3,9 +3,9 @@
 //! cookies or sessions — those belong in web.rs.
 
 use openidconnect::core::{
-    CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType, CoreGenderClaim,
-    CoreJsonWebKey, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm, CoreRevocableToken,
-    CoreRevocationErrorResponse, CoreTokenIntrospectionResponse, CoreTokenType,
+    CoreAuthDisplay, CoreAuthPrompt, CoreAuthenticationFlow, CoreErrorResponseType,
+    CoreGenderClaim, CoreJsonWebKey, CoreJweContentEncryptionAlgorithm, CoreJwsSigningAlgorithm,
+    CoreRevocableToken, CoreRevocationErrorResponse, CoreTokenIntrospectionResponse, CoreTokenType,
 };
 use openidconnect::{
     AccessToken, AdditionalClaims, AuthUrl, AuthorizationCode, Client, ClientId, CsrfToken,
@@ -84,7 +84,10 @@ impl OidcClient {
             .build()
             .map_err(|e| OidcError::Config(format!("http client: {e}")))?;
 
-        let back = config.backchannel.clone().unwrap_or_else(|| config.issuer.clone());
+        let back = config
+            .backchannel
+            .clone()
+            .unwrap_or_else(|| config.issuer.clone());
         let disco_url = {
             let base = OidcConfig::swap_origin(&config.issuer, &back);
             let mut s = base.to_string();
@@ -162,7 +165,11 @@ impl OidcClient {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn exchange_code(&self, code: String, verifier: String) -> Result<TokenBundle, OidcError> {
+    pub async fn exchange_code(
+        &self,
+        code: String,
+        verifier: String,
+    ) -> Result<TokenBundle, OidcError> {
         let resp = self
             .core
             .exchange_code(AuthorizationCode::new(code))
@@ -195,7 +202,10 @@ impl OidcClient {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn principal_from_access_token(&self, access_token: &str) -> Result<Principal, OidcError> {
+    pub async fn principal_from_access_token(
+        &self,
+        access_token: &str,
+    ) -> Result<Principal, OidcError> {
         let claims: UserInfoClaims<OidcClaims, CoreGenderClaim> = self
             .core
             .user_info(AccessToken::new(access_token.to_owned()), None)

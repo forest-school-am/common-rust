@@ -16,11 +16,14 @@ fn main() {
         .unwrap_or_else(|e| panic!("cannot canonicalize templates dir: {e}"));
     println!("cargo:assets={}", assets.display());
 
-    let bytes = std::fs::read(template)
-        .unwrap_or_else(|e| panic!("cannot read {template}: {e}"));
+    let bytes = std::fs::read(template).unwrap_or_else(|e| panic!("cannot read {template}: {e}"));
     let hash: [u8; 32] = Sha256::digest(&bytes).into();
 
-    let bytes_list = hash.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ");
+    let bytes_list = hash
+        .iter()
+        .map(|b| b.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("shim_hash.rs");
     std::fs::write(
         &out,
@@ -28,7 +31,12 @@ fn main() {
     )
     .unwrap();
     let dirt = std::process::Command::new("git")
-        .args(["-C", &std::env::var("CARGO_MANIFEST_DIR").unwrap(), "status", "--porcelain"])
+        .args([
+            "-C",
+            &std::env::var("CARGO_MANIFEST_DIR").unwrap(),
+            "status",
+            "--porcelain",
+        ])
         .output();
     let state = match dirt {
         Ok(o) if o.status.success() => {

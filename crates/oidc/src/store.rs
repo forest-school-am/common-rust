@@ -30,19 +30,27 @@ pub struct MemoryStore {
 
 impl Default for MemoryStore {
     fn default() -> Self {
-        Self { sessions: Mutex::new(HashMap::new()), max_age: Duration::from_secs(12 * 3600) }
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+            max_age: Duration::from_secs(12 * 3600),
+        }
     }
 }
 
 impl MemoryStore {
     pub fn with_max_age(max_age: Duration) -> Self {
-        Self { sessions: Mutex::new(HashMap::new()), max_age }
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+            max_age,
+        }
     }
 
     fn sweep(&self, sessions: &mut HashMap<String, Session>) {
         let now = SystemTime::now();
         sessions.retain(|_, s| {
-            now.duration_since(s.created).map(|age| age < self.max_age).unwrap_or(true)
+            now.duration_since(s.created)
+                .map(|age| age < self.max_age)
+                .unwrap_or(true)
         });
     }
 }
@@ -78,7 +86,11 @@ mod tests {
     use super::*;
 
     fn session(created: SystemTime) -> Session {
-        Session { access_token: "at".into(), refresh_token: Some("rt".into()), created }
+        Session {
+            access_token: "at".into(),
+            refresh_token: Some("rt".into()),
+            created,
+        }
     }
 
     #[tokio::test]
@@ -93,9 +105,16 @@ mod tests {
     #[tokio::test]
     async fn sweep_drops_sessions_older_than_max_age() {
         let s = MemoryStore::with_max_age(Duration::from_secs(60));
-        s.put("old".into(), session(SystemTime::now() - Duration::from_secs(120))).await;
+        s.put(
+            "old".into(),
+            session(SystemTime::now() - Duration::from_secs(120)),
+        )
+        .await;
         s.put("new".into(), session(SystemTime::now())).await;
-        assert!(s.get("old").await.is_none(), "expired session must be swept");
+        assert!(
+            s.get("old").await.is_none(),
+            "expired session must be swept"
+        );
         assert!(s.get("new").await.is_some());
     }
 }

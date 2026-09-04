@@ -45,7 +45,10 @@ impl Visit for ReqVisitor<'_> {
             return;
         };
         let s = format!("{value:?}");
-        let s = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&s);
+        let s = s
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or(&s);
         self.set(field, s.to_owned());
     }
 }
@@ -143,7 +146,9 @@ where
     ) -> fmt::Result {
         let meta = event.metadata();
 
-        let ts = OffsetDateTime::now_utc().format(&Rfc3339).map_err(|_| fmt::Error)?;
+        let ts = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .map_err(|_| fmt::Error)?;
         let (reqid, actor) = lookup_ctx(ctx, event);
         write!(
             writer,
@@ -163,7 +168,11 @@ where
         if let Some(scope) = ctx.event_scope() {
             for span in scope {
                 let ext = span.extensions();
-                if ext.get::<ReqCtx>().map(|c| c.reqid.is_some()).unwrap_or(false) {
+                if ext
+                    .get::<ReqCtx>()
+                    .map(|c| c.reqid.is_some())
+                    .unwrap_or(false)
+                {
                     continue;
                 }
                 if let Some(sf) = ext.get::<SpanFields>() {
@@ -198,7 +207,10 @@ fn event_field_names(event: &Event<'_>) -> Vec<&'static str> {
     names.0
 }
 
-fn lookup_ctx<S, N>(ctx: &FmtContext<'_, S, N>, event: &Event<'_>) -> (Option<String>, Option<String>)
+fn lookup_ctx<S, N>(
+    ctx: &FmtContext<'_, S, N>,
+    event: &Event<'_>,
+) -> (Option<String>, Option<String>)
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
     N: for<'a> FormatFields<'a> + 'static,

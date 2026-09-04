@@ -163,19 +163,25 @@ fn arm_dnotify(root: &Path) -> Result<Watch, String> {
         .map_err(|e| format!("dnotify: bad root path: {e}"))?;
     unsafe {
         // Signal context: the handler sets a flag and does nothing else.
-        if libc::signal(dnotify_signal(), dnotify_handler as extern "C" fn(libc::c_int) as libc::sighandler_t) == libc::SIG_ERR {
+        if libc::signal(
+            dnotify_signal(),
+            dnotify_handler as extern "C" fn(libc::c_int) as libc::sighandler_t,
+        ) == libc::SIG_ERR
+        {
             return Err("dnotify: cannot install signal handler".to_owned());
         }
         let fd = libc::open(cpath.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY);
         if fd < 0 {
-            return Err(format!("dnotify: cannot open {} as a directory", root.display()));
+            return Err(format!(
+                "dnotify: cannot open {} as a directory",
+                root.display()
+            ));
         }
         if libc::fcntl(fd, F_SETSIG, dnotify_signal()) < 0 {
             libc::close(fd);
             return Err("dnotify: F_SETSIG failed".to_owned());
         }
-        let mask =
-            DN_MODIFY | DN_CREATE | DN_DELETE | DN_RENAME | DN_MULTISHOT;
+        let mask = DN_MODIFY | DN_CREATE | DN_DELETE | DN_RENAME | DN_MULTISHOT;
         if libc::fcntl(fd, libc::F_NOTIFY, mask) < 0 {
             libc::close(fd);
             return Err(format!(
@@ -183,7 +189,10 @@ fn arm_dnotify(root: &Path) -> Result<Watch, String> {
                 root.display()
             ));
         }
-        Ok(Watch::Dnotify { fd, seen: AtomicU64::new(DNOTIFY_TICKS.load(Ordering::SeqCst)) })
+        Ok(Watch::Dnotify {
+            fd,
+            seen: AtomicU64::new(DNOTIFY_TICKS.load(Ordering::SeqCst)),
+        })
     }
 }
 

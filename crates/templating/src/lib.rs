@@ -39,8 +39,8 @@ use minijinja::{AutoEscape, Environment};
 use sha2::{Digest, Sha256};
 
 mod invalidation;
-pub use invalidation::{Invalidation, OPTIONS as INVALIDATION_OPTIONS};
 use invalidation::Watch;
+pub use invalidation::{Invalidation, OPTIONS as INVALIDATION_OPTIONS};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
@@ -63,8 +63,15 @@ pub enum RenderError {
 }
 
 enum Entry {
-    Template { mtime: SystemTime, key: u64, out: Arc<str> },
-    Static { mtime: SystemTime, bytes: Arc<[u8]> },
+    Template {
+        mtime: SystemTime,
+        key: u64,
+        out: Arc<str>,
+    },
+    Static {
+        mtime: SystemTime,
+        bytes: Arc<[u8]>,
+    },
 }
 
 fn autoescape(name: &str) -> AutoEscape {
@@ -144,12 +151,16 @@ impl Builder {
         ctx_env.set_auto_escape_callback(autoescape);
         ctx_env.set_loader(minijinja::path_loader(&canonical_root));
 
-        let watch = Watch::arm(self.invalidation, &canonical_root).map_err(RenderError::Invalidation)?;
+        let watch =
+            Watch::arm(self.invalidation, &canonical_root).map_err(RenderError::Invalidation)?;
         let cache = AssetCache {
             root: self.root,
             canonical_root,
             env,
-            ctx_env: RwLock::new(CtxEnv { env: ctx_env, loads: 0 }),
+            ctx_env: RwLock::new(CtxEnv {
+                env: ctx_env,
+                loads: 0,
+            }),
             watch,
             pins: self.pins,
             entries: RwLock::new(HashMap::new()),
@@ -245,7 +256,12 @@ impl AssetCache {
         let key = params_key(params);
 
         if let Ok(entries) = self.entries.read() {
-            if let Some(Entry::Template { mtime: m, key: k, out }) = entries.get(name) {
+            if let Some(Entry::Template {
+                mtime: m,
+                key: k,
+                out,
+            }) = entries.get(name)
+            {
                 if *m == mtime && *k == key {
                     return Ok(out.clone());
                 }
@@ -259,11 +275,20 @@ impl AssetCache {
             .env
             .template_from_named_str(name, &src)
             .map_err(|e| RenderError::Parse(name.to_owned(), e.to_string()))?;
-        let out: Arc<str> =
-            Arc::from(tmpl.render(ctx).map_err(|e| RenderError::Render(name.to_owned(), e.to_string()))?);
+        let out: Arc<str> = Arc::from(
+            tmpl.render(ctx)
+                .map_err(|e| RenderError::Render(name.to_owned(), e.to_string()))?,
+        );
 
         if let Ok(mut entries) = self.entries.write() {
-            entries.insert(name.to_owned(), Entry::Template { mtime, key, out: out.clone() });
+            entries.insert(
+                name.to_owned(),
+                Entry::Template {
+                    mtime,
+                    key,
+                    out: out.clone(),
+                },
+            );
         }
         Ok(out)
     }
@@ -333,7 +358,13 @@ impl AssetCache {
 
         let bytes: Arc<[u8]> = Arc::from(self.read_verified(&path, name, self.pins.get(name))?);
         if let Ok(mut entries) = self.entries.write() {
-            entries.insert(name.to_owned(), Entry::Static { mtime, bytes: bytes.clone() });
+            entries.insert(
+                name.to_owned(),
+                Entry::Static {
+                    mtime,
+                    bytes: bytes.clone(),
+                },
+            );
         }
         Ok(bytes)
     }
@@ -368,7 +399,11 @@ mod tests {
         use std::sync::atomic::{AtomicU64, Ordering};
         static C: AtomicU64 = AtomicU64::new(0);
         let n = C.fetch_add(1, Ordering::Relaxed);
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as u64 ^ n
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64
+            ^ n
     }
     fn write(dir: &Path, name: &str, body: &str) {
         fs::write(dir.join(name), body).unwrap();
@@ -382,13 +417,22 @@ mod tests {
     fn render_substitutes_and_caches_by_params_and_mtime() {
         let d = tmpdir();
         write(&d, "shim.js.jinja", "const P = {{ login_path }};");
-        let c = Builder::new(&d).require_template("shim.js.jinja").build().unwrap();
+        let c = Builder::new(&d)
+            .require_template("shim.js.jinja")
+            .build()
+            .unwrap();
 
-        let a = c.render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")]).unwrap();
+        let a = c
+            .render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")])
+            .unwrap();
         assert_eq!(&*a, "const P = \"/oidc/login\";");
-        let b = c.render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")]).unwrap();
+        let b = c
+            .render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")])
+            .unwrap();
         assert!(Arc::ptr_eq(&a, &b), "same params+mtime must be a cache hit");
-        let e = c.render("shim.js.jinja", &[("login_path", "\"/x\"")]).unwrap();
+        let e = c
+            .render("shim.js.jinja", &[("login_path", "\"/x\"")])
+            .unwrap();
         assert_eq!(&*e, "const P = \"/x\";");
         assert!(!Arc::ptr_eq(&a, &e));
     }
@@ -421,7 +465,10 @@ mod tests {
     #[test]
     fn boot_refuses_bad_dir_and_missing_template() {
         let missing = std::env::temp_dir().join(format!("nope-{}", uniq()));
-        assert!(matches!(Builder::new(&missing).build(), Err(RenderError::BadDir(_))));
+        assert!(matches!(
+            Builder::new(&missing).build(),
+            Err(RenderError::BadDir(_))
+        ));
 
         let d = tmpdir();
         assert!(matches!(
@@ -457,14 +504,24 @@ mod tests {
         std::thread::sleep(Duration::from_millis(5));
         write(&d, "logic.js", "tampered();");
         bump_mtime(&d, "logic.js");
-        assert!(matches!(c.static_file("logic.js"), Err(RenderError::PinMismatch(_))));
+        assert!(matches!(
+            c.static_file("logic.js"),
+            Err(RenderError::PinMismatch(_))
+        ));
     }
 
     #[test]
     fn render_ctx_takes_structured_context_and_iterates() {
         let d = tmpdir();
-        write(&d, "list.html", "{% for t in tasks %}<li>{{ t.name }}</li>{% endfor %}");
-        let c = Builder::new(&d).require_template("list.html").build().unwrap();
+        write(
+            &d,
+            "list.html",
+            "{% for t in tasks %}<li>{{ t.name }}</li>{% endfor %}",
+        );
+        let c = Builder::new(&d)
+            .require_template("list.html")
+            .build()
+            .unwrap();
         #[derive(serde::Serialize)]
         struct Ctx {
             tasks: Vec<Row>,
@@ -476,18 +533,30 @@ mod tests {
         let out = c
             .render_ctx(
                 "list.html",
-                &Ctx { tasks: vec![Row { name: "a".into() }, Row { name: "<b>".into() }] },
+                &Ctx {
+                    tasks: vec![Row { name: "a".into() }, Row { name: "<b>".into() }],
+                },
             )
             .unwrap();
-        assert_eq!(out, "<li>a</li><li>&lt;b&gt;</li>", "iteration + autoescape");
+        assert_eq!(
+            out, "<li>a</li><li>&lt;b&gt;</li>",
+            "iteration + autoescape"
+        );
     }
 
     #[test]
     fn render_ctx_supports_extends_and_edits_without_restart() {
         let d = tmpdir();
         write(&d, "base.html", "[{% block body %}{% endblock %}]");
-        write(&d, "page.html", "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}");
-        let c = Builder::new(&d).require_template("page.html").build().unwrap();
+        write(
+            &d,
+            "page.html",
+            "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}",
+        );
+        let c = Builder::new(&d)
+            .require_template("page.html")
+            .build()
+            .unwrap();
         #[derive(serde::Serialize)]
         struct Ctx {
             n: u32,
@@ -533,8 +602,14 @@ mod tests {
         write(&d, "p.html", "<b>{{ v }}</b>");
         write(&d, "p.js.jinja", "x = {{ v }}");
         let c = Builder::new(&d).build().unwrap();
-        assert_eq!(&*c.render("p.html", &[("v", "<x>")]).unwrap(), "<b>&lt;x&gt;</b>");
-        assert_eq!(&*c.render("p.js.jinja", &[("v", "<x>")]).unwrap(), "x = <x>");
+        assert_eq!(
+            &*c.render("p.html", &[("v", "<x>")]).unwrap(),
+            "<b>&lt;x&gt;</b>"
+        );
+        assert_eq!(
+            &*c.render("p.js.jinja", &[("v", "<x>")]).unwrap(),
+            "x = <x>"
+        );
     }
 
     #[test]
@@ -545,7 +620,13 @@ mod tests {
         let c = Builder::new(&d).build().unwrap();
         assert_eq!(&*c.static_file("ok.txt").unwrap(), b"ok");
 
-        for bad in ["../../etc/passwd", "../secret", "/etc/passwd", "a/../../b", "./../x"] {
+        for bad in [
+            "../../etc/passwd",
+            "../secret",
+            "/etc/passwd",
+            "a/../../b",
+            "./../x",
+        ] {
             assert!(
                 matches!(c.static_file(bad), Err(RenderError::UnsafeName(_))),
                 "static_file({bad:?}) not rejected"
@@ -587,15 +668,22 @@ mod tests {
         let d = tmpdir();
         write(&d, "real.txt", "x");
         let c = Builder::new(&d).build().unwrap();
-        assert!(matches!(c.static_file("absent.txt"), Err(RenderError::Missing(_))));
-        assert!(matches!(c.render("absent.js.jinja", &[]), Err(RenderError::Missing(_))));
+        assert!(matches!(
+            c.static_file("absent.txt"),
+            Err(RenderError::Missing(_))
+        ));
+        assert!(matches!(
+            c.render("absent.js.jinja", &[]),
+            Err(RenderError::Missing(_))
+        ));
     }
-
 
     #[test]
     fn pinned_base_template_is_verified_on_every_render_not_just_at_boot() {
         #[derive(serde::Serialize)]
-        struct Ctx { n: u32 }
+        struct Ctx {
+            n: u32,
+        }
         let d = tmpdir();
         let base = "BASE {% block body %}{% endblock %}";
         let page = "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}";
@@ -603,7 +691,11 @@ mod tests {
         write(&d, "page.html", page);
         let bs: [u8; 32] = Sha256::digest(base.as_bytes()).into();
         let pg: [u8; 32] = Sha256::digest(page.as_bytes()).into();
-        let c = Builder::new(&d).pin("page.html", pg).pin("base.html", bs).build().unwrap();
+        let c = Builder::new(&d)
+            .pin("page.html", pg)
+            .pin("base.html", bs)
+            .build()
+            .unwrap();
         assert_eq!(c.render_ctx("page.html", &Ctx { n: 1 }).unwrap(), "BASE 1");
 
         write(&d, "base.html", "TAMPERED {% block body %}{% endblock %}");
@@ -623,11 +715,18 @@ mod tests {
         assert_eq!(Invalidation::parse(None).unwrap(), Invalidation::PerRequest);
         for s in ["per-request", "dnotify", "inotify"] {
             let v = Invalidation::parse(Some(s)).expect("valid strategy");
-            assert_eq!(v.as_str(), s, "as_str must round-trip the accepted spelling");
+            assert_eq!(
+                v.as_str(),
+                s,
+                "as_str must round-trip the accepted spelling"
+            );
         }
         for bad in ["", "PerRequest", "per_request", "notify", "true"] {
             let e = Invalidation::parse(Some(bad)).expect_err("must refuse");
-            assert!(e.contains("per-request") && e.contains("dnotify"), "unhelpful: {e}");
+            assert!(
+                e.contains("per-request") && e.contains("dnotify"),
+                "unhelpful: {e}"
+            );
         }
     }
 
@@ -648,19 +747,31 @@ mod tests {
         let mk = |strategy| {
             let d = tmpdir();
             write(&d, "base.html", "<b>{% block body %}{% endblock %}</b>");
-            write(&d, "page.html", "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}");
+            write(
+                &d,
+                "page.html",
+                "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}",
+            );
             let c = Builder::new(&d).invalidation(strategy).build().ok()?;
             for i in 0..3 {
-                c.render_ctx("page.html", &BTreeMap::from([("n", i)])).unwrap();
+                c.render_ctx("page.html", &BTreeMap::from([("n", i)]))
+                    .unwrap();
             }
             let n = c.ctx_env.read().unwrap().loads;
             Some(n)
         };
-        assert_eq!(mk(Invalidation::PerRequest), Some(3), "per-request must rebuild every render");
+        assert_eq!(
+            mk(Invalidation::PerRequest),
+            Some(3),
+            "per-request must rebuild every render"
+        );
         // dnotify may be unavailable on a kernel without CONFIG_DNOTIFY; that
         // is a property of the host, not of the code under test.
         if let Some(loads) = mk(Invalidation::Dnotify) {
-            assert!(loads <= 1, "a kernel watch must not rebuild while nothing changed: {loads}");
+            assert!(
+                loads <= 1,
+                "a kernel watch must not rebuild while nothing changed: {loads}"
+            );
         }
     }
 
@@ -668,7 +779,11 @@ mod tests {
     fn dnotify_sees_an_edit_to_an_extended_base() {
         let d = tmpdir();
         write(&d, "base.html", "<b>v1 {% block body %}{% endblock %}</b>");
-        write(&d, "page.html", "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}");
+        write(
+            &d,
+            "page.html",
+            "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}",
+        );
         let c = match Builder::new(&d).invalidation(Invalidation::Dnotify).build() {
             Ok(c) => c,
             // A kernel without CONFIG_DNOTIFY cannot run this; that is a
@@ -691,7 +806,4 @@ mod tests {
             "an edit to a BASE template must be picked up — editing the child was always caught"
         );
     }
-
-
-
 }

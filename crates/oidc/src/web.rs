@@ -88,7 +88,6 @@ impl OidcState {
         })
     }
 
-
     pub fn unauthorized_response(&self) -> Response {
         self.unauthorized_with_jar(CookieJar::new())
     }
@@ -109,10 +108,17 @@ impl OidcState {
 
     #[tracing::instrument(skip_all)]
     pub async fn resolve_session(&self, jar: &CookieJar) -> Option<(Principal, Session)> {
-        let sid = jar.get(self.config().cookie_name.as_str())?.value().to_owned();
+        let sid = jar
+            .get(self.config().cookie_name.as_str())?
+            .value()
+            .to_owned();
         let session = self.store.get(&sid).await?;
 
-        if let Ok(p) = self.client.principal_from_access_token(&session.access_token).await {
+        if let Ok(p) = self
+            .client
+            .principal_from_access_token(&session.access_token)
+            .await
+        {
             return Some((p, session));
         }
 
@@ -124,16 +130,24 @@ impl OidcState {
                     created: session.created,
                 };
                 self.store.put(sid.clone(), refreshed.clone()).await;
-                if let Ok(p) =
-                    self.client.principal_from_access_token(&refreshed.access_token).await
+                if let Ok(p) = self
+                    .client
+                    .principal_from_access_token(&refreshed.access_token)
+                    .await
                 {
-                    common_logging::debug!(common_logging::AUTH, "access token refreshed server-side");
+                    common_logging::debug!(
+                        common_logging::AUTH,
+                        "access token refreshed server-side"
+                    );
                     return Some((p, refreshed));
                 }
             }
         }
 
-        common_logging::info!(common_logging::AUTH, "session tokens dead — destroying local session");
+        common_logging::info!(
+            common_logging::AUTH,
+            "session tokens dead — destroying local session"
+        );
         self.store.remove(&sid).await;
         None
     }
@@ -142,7 +156,12 @@ impl OidcState {
 pub fn user_portal_url(config: &OidcConfig) -> String {
     let o = &config.issuer;
     let port = o.port().map(|p| format!(":{p}")).unwrap_or_default();
-    format!("{}://{}{}/if/user/", o.scheme(), o.host_str().unwrap_or_default(), port)
+    format!(
+        "{}://{}{}/if/user/",
+        o.scheme(),
+        o.host_str().unwrap_or_default(),
+        port
+    )
 }
 
 #[derive(Serialize, Deserialize)]
@@ -198,7 +217,13 @@ fn removal_cookie(name: &str) -> Cookie<'static> {
     c
 }
 
-fn start_login(oidc: &OidcState, jar: CookieJar, next: String, silent: bool, interactive_tried: bool) -> Response {
+fn start_login(
+    oidc: &OidcState,
+    jar: CookieJar,
+    next: String,
+    silent: bool,
+    interactive_tried: bool,
+) -> Response {
     let auth = oidc.client.authorize_url(silent);
     let flow = Flow {
         state: auth.csrf_state,
@@ -236,7 +261,10 @@ async fn login(
 
 async fn client_js(State(oidc): State<OidcState>) -> Response {
     let login_path = oidc.config().login_path.clone();
-    match oidc.assets.render(SHIM_TEMPLATE, &[("login_path", login_path.as_str())]) {
+    match oidc
+        .assets
+        .render(SHIM_TEMPLATE, &[("login_path", login_path.as_str())])
+    {
         Ok(js) => (
             [
                 (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
@@ -267,12 +295,18 @@ async fn callback(
 
     if let Some(error) = params.get("error") {
         let jar = jar.remove(removal_cookie(FLOW_COOKIE));
-        let needs_interaction =
-            matches!(error.as_str(), "login_required" | "interaction_required" | "consent_required");
+        let needs_interaction = matches!(
+            error.as_str(),
+            "login_required" | "interaction_required" | "consent_required"
+        );
         if needs_interaction && !flow.interactive_tried {
             return start_login(&oidc, jar, flow.next, false, true);
         }
-        return (StatusCode::UNAUTHORIZED, jar, format!("authentication failed: {error}"))
+        return (
+            StatusCode::UNAUTHORIZED,
+            jar,
+            format!("authentication failed: {error}"),
+        )
             .into_response();
     }
 
@@ -296,9 +330,9 @@ async fn callback(
                     },
                 )
                 .await;
-            let jar = jar
-                .remove(removal_cookie(FLOW_COOKIE))
-                .add(base_cookie(oidc.config().cookie_name.as_str(), sid, oidc.config()).into_owned());
+            let jar = jar.remove(removal_cookie(FLOW_COOKIE)).add(
+                base_cookie(oidc.config().cookie_name.as_str(), sid, oidc.config()).into_owned(),
+            );
             (jar, Redirect::temporary(&flow.next)).into_response()
         }
         Err(e) => {
@@ -393,10 +427,16 @@ mod flow_wire {
         })
         .unwrap();
         for k in ["\"s\":", "\"v\":", "\"n\":", "\"i\":"] {
-            assert!(json.contains(k), "flow cookie key {k} missing — wire form changed: {json}");
+            assert!(
+                json.contains(k),
+                "flow cookie key {k} missing — wire form changed: {json}"
+            );
         }
         for k in ["state", "verifier", "interactive_tried"] {
-            assert!(!json.contains(k), "field name {k} leaked into the cookie: {json}");
+            assert!(
+                !json.contains(k),
+                "field name {k} leaked into the cookie: {json}"
+            );
         }
     }
 }

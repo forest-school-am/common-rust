@@ -106,6 +106,9 @@ mod tests {
         )
         .request_refresh_tokens()
         .request_refresh_tokens();
-        assert_eq!(c.scopes.iter().filter(|s| *s == "offline_access").count(), 1);
+        assert_eq!(
+            c.scopes.iter().filter(|s| *s == "offline_access").count(),
+            1
+        );
     }
 }

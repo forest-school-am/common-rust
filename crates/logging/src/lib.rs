@@ -100,17 +100,23 @@ mod tests {
         tracing_subscriber::registry()
             .with(EnvFilter::new("trace"))
             .with(format::CaptureLayer)
-            .with(fmt::layer().event_format(format::HumanFormat).with_writer(buf))
+            .with(
+                fmt::layer()
+                    .event_format(format::HumanFormat)
+                    .with_writer(buf),
+            )
     }
     fn json(buf: Buf) -> impl tracing::Subscriber {
-        tracing_subscriber::registry().with(EnvFilter::new("trace")).with(
-            fmt::layer()
-                .json()
-                .flatten_event(true)
-                .with_current_span(true)
-                .with_span_list(false)
-                .with_writer(buf),
-        )
+        tracing_subscriber::registry()
+            .with(EnvFilter::new("trace"))
+            .with(
+                fmt::layer()
+                    .json()
+                    .flatten_event(true)
+                    .with_current_span(true)
+                    .with_span_list(false)
+                    .with_writer(buf),
+            )
     }
 
     #[test]
@@ -126,7 +132,11 @@ mod tests {
         let line = out.trim_end();
         let p: Vec<&str> = line.splitn(7, ' ').collect();
         assert_eq!(p.len(), 7, "line: {line:?}");
-        assert!(p[0].contains('T') && p[0].contains(':'), "timestamp: {}", p[0]);
+        assert!(
+            p[0].contains('T') && p[0].contains(':'),
+            "timestamp: {}",
+            p[0]
+        );
         assert_eq!(p[1], "INFO");
         assert_eq!(p[2], "auth");
         assert!(p[3].contains(".rs:"), "file:row: {}", p[3]);
@@ -180,11 +190,20 @@ mod tests {
             let _o = outer.enter();
             let inner = tracing::info_span!("execute", task = "hello");
             let _i = inner.enter();
-            crate::info!(custom!("scheduler"), task = "hello", run_id = 1, "run started");
+            crate::info!(
+                custom!("scheduler"),
+                task = "hello",
+                run_id = 1,
+                "run started"
+            );
         });
         let line1 = buf.string();
         let line1 = line1.trim_end();
-        assert_eq!(line1.matches("task=").count(), 1, "task must print once: {line1}");
+        assert_eq!(
+            line1.matches("task=").count(),
+            1,
+            "task must print once: {line1}"
+        );
         assert!(line1.contains("run_id=1"), "event fields intact: {line1}");
 
         let buf = Buf::new();
@@ -197,7 +216,11 @@ mod tests {
         });
         let line2 = buf.string();
         let line2 = line2.trim_end();
-        assert_eq!(line2.matches("task=").count(), 1, "span field appended once: {line2}");
+        assert_eq!(
+            line2.matches("task=").count(),
+            1,
+            "span field appended once: {line2}"
+        );
     }
 
     #[test]

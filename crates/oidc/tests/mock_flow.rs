@@ -48,7 +48,11 @@ async fn mock_token(State(m): State<Arc<Mock>>, body: String) -> impl IntoRespon
                 }))
                 .into_response()
             } else {
-                (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant"}))).into_response()
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "invalid_grant"})),
+                )
+                    .into_response()
             }
         }
         Some("authorization_code") => {
@@ -64,10 +68,18 @@ async fn mock_token(State(m): State<Arc<Mock>>, body: String) -> impl IntoRespon
                 }))
                 .into_response()
             } else {
-                (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid_grant"}))).into_response()
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "invalid_grant"})),
+                )
+                    .into_response()
             }
         }
-        _ => (StatusCode::BAD_REQUEST, Json(json!({"error": "unsupported_grant_type"}))).into_response(),
+        _ => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "unsupported_grant_type"})),
+        )
+            .into_response(),
     }
 }
 
@@ -114,7 +126,10 @@ async fn spawn_mock() -> (String, Arc<Mock>) {
         }
     };
     let app = Router::new()
-        .route(&format!("{base_path}/.well-known/openid-configuration"), get(disco))
+        .route(
+            &format!("{base_path}/.well-known/openid-configuration"),
+            get(disco),
+        )
         .route("/application/o/token/", post(mock_token))
         .route("/application/o/userinfo/", get(mock_userinfo))
         .with_state(mock.clone());
@@ -132,7 +147,9 @@ async fn oidc_state(base: &str, store: MemoryStore) -> OidcState {
     .request_refresh_tokens();
     config.cookie_secure = false;
     config.assets_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/templates").into();
-    OidcState::discover(config, store).await.expect("discovery against mock")
+    OidcState::discover(config, store)
+        .await
+        .expect("discovery against mock")
 }
 
 async fn me(p: Principal) -> String {
@@ -187,8 +204,10 @@ async fn bearer_validator_shares_the_identity_contract() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn bearer_validator_fails_closed_when_userinfo_unreachable() {
-    let validator =
-        BearerValidator::new(reqwest::Client::new(), "http://127.0.0.1:1/userinfo".to_string());
+    let validator = BearerValidator::new(
+        reqwest::Client::new(),
+        "http://127.0.0.1:1/userinfo".to_string(),
+    );
     match validator.validate("whatever").await {
         Err(ValidationError::Upstream(_)) => {}
         other => panic!("expected Upstream (fail closed), got {other:?}"),
@@ -208,12 +227,23 @@ async fn valid_access_token_yields_principal() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body = String::from_utf8(
-        http_body_util::BodyExt::collect(resp.into_body()).await.unwrap().to_bytes().to_vec(),
+        http_body_util::BodyExt::collect(resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
     )
     .unwrap();
     assert!(body.contains("alice"), "body: {body}");
-    assert!(body.contains(GROUP_A), "effective_groups must come through: {body}");
-    assert_eq!(mock.userinfo_calls.load(Ordering::SeqCst), 1, "userinfo per request, exactly");
+    assert!(
+        body.contains(GROUP_A),
+        "effective_groups must come through: {body}"
+    );
+    assert_eq!(
+        mock.userinfo_calls.load(Ordering::SeqCst),
+        1,
+        "userinfo per request, exactly"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -228,7 +258,11 @@ async fn expired_access_is_refreshed_server_side_exactly_once() {
         .oneshot(get_req("/me", &format!("test_session={sid}"), true))
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "refresh must rescue the request");
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "refresh must rescue the request"
+    );
     assert_eq!(mock.refresh_calls.load(Ordering::SeqCst), 1);
 
     let resp = app
@@ -236,7 +270,11 @@ async fn expired_access_is_refreshed_server_side_exactly_once() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(mock.refresh_calls.load(Ordering::SeqCst), 1, "no refresh while access is valid");
+    assert_eq!(
+        mock.refresh_calls.load(Ordering::SeqCst),
+        1,
+        "no refresh while access is valid"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -251,10 +289,21 @@ async fn dead_tokens_destroy_session_and_start_silent_login() {
         .await
         .unwrap();
     assert!(resp.status().is_redirection(), "got {}", resp.status());
-    let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+    let loc = resp
+        .headers()
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert!(loc.contains("/application/o/authorize/"), "location: {loc}");
-    assert!(loc.contains("prompt=none"), "first attempt must be silent: {loc}");
-    assert!(loc.contains("code_challenge_method=S256"), "PKCE required: {loc}");
+    assert!(
+        loc.contains("prompt=none"),
+        "first attempt must be silent: {loc}"
+    );
+    assert!(
+        loc.contains("code_challenge_method=S256"),
+        "PKCE required: {loc}"
+    );
     assert!(
         loc.contains("effective_groups") && loc.contains("offline_access"),
         "stand scopes must be requested: {loc}"
@@ -267,7 +316,11 @@ async fn dead_tokens_destroy_session_and_start_silent_login() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
-        resp.headers().get("x-common-oidc-reauth").unwrap().to_str().unwrap(),
+        resp.headers()
+            .get("x-common-oidc-reauth")
+            .unwrap()
+            .to_str()
+            .unwrap(),
         "/oidc/login",
         "the shim's 401 contract needs the re-auth signal header"
     );
@@ -280,19 +333,43 @@ async fn serves_shim_and_login_route() {
 
     let resp = app
         .clone()
-        .oneshot(Request::builder().uri("/common-oidc.js").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/common-oidc.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let ct = resp.headers().get(header::CONTENT_TYPE).unwrap().to_str().unwrap().to_owned();
+    let ct = resp
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
     assert!(ct.contains("javascript"), "content-type: {ct}");
     let js = String::from_utf8(
-        http_body_util::BodyExt::collect(resp.into_body()).await.unwrap().to_bytes().to_vec(),
+        http_body_util::BodyExt::collect(resp.into_body())
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
     )
     .unwrap();
-    assert!(js.contains("\"/oidc/login\""), "login path must be baked in");
-    assert!(!js.contains("__LOGIN_PATH__"), "placeholder must be replaced");
-    assert!(js.contains("installReauthGuard"), "must expose the guard API");
+    assert!(
+        js.contains("\"/oidc/login\""),
+        "login path must be baked in"
+    );
+    assert!(
+        !js.contains("__LOGIN_PATH__"),
+        "placeholder must be replaced"
+    );
+    assert!(
+        js.contains("installReauthGuard"),
+        "must expose the guard API"
+    );
 
     let resp = app
         .clone()
@@ -305,8 +382,16 @@ async fn serves_shim_and_login_route() {
         .await
         .unwrap();
     assert!(resp.status().is_redirection());
-    let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
-    assert!(loc.contains("prompt=none"), "login defaults to silent: {loc}");
+    let loc = resp
+        .headers()
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        loc.contains("prompt=none"),
+        "login defaults to silent: {loc}"
+    );
 
     let resp = app
         .oneshot(
@@ -319,7 +404,10 @@ async fn serves_shim_and_login_route() {
         .unwrap();
     let flow = cookie_from(&resp, "oidc_flow").expect("flow cookie");
     let json = hex_decode_test(flow.trim_start_matches("oidc_flow="));
-    assert!(json.contains("\"n\":\"/\""), "unsafe next must fall back to '/': {json}");
+    assert!(
+        json.contains("\"n\":\"/\""),
+        "unsafe next must fall back to '/': {json}"
+    );
 }
 
 fn hex_decode_test(s: &str) -> String {
@@ -346,7 +434,13 @@ async fn full_login_loop_and_interactive_escalation() {
 
     let resp = app.clone().oneshot(get_req("/me", "", true)).await.unwrap();
     assert!(resp.status().is_redirection());
-    let loc = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap().to_owned();
+    let loc = resp
+        .headers()
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
     let flow_cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie set");
     let state = Url::parse(&loc)
         .unwrap()
@@ -357,23 +451,47 @@ async fn full_login_loop_and_interactive_escalation() {
 
     let resp = app
         .clone()
-        .oneshot(get_req("/oidc/callback?error=login_required", &flow_cookie, true))
+        .oneshot(get_req(
+            "/oidc/callback?error=login_required",
+            &flow_cookie,
+            true,
+        ))
         .await
         .unwrap();
-    assert!(resp.status().is_redirection(), "escalation expected, got {}", resp.status());
-    let loc2 = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
-    assert!(!loc2.contains("prompt=none"), "escalated attempt must be interactive: {loc2}");
+    assert!(
+        resp.status().is_redirection(),
+        "escalation expected, got {}",
+        resp.status()
+    );
+    let loc2 = resp
+        .headers()
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(
+        !loc2.contains("prompt=none"),
+        "escalated attempt must be interactive: {loc2}"
+    );
     let flow2 = cookie_from(&resp, "oidc_flow").expect("new flow cookie");
     let resp = app
         .clone()
         .oneshot(get_req("/oidc/callback?error=login_required", &flow2, true))
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "loop breaker: no second escalation");
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "loop breaker: no second escalation"
+    );
 
     let resp = app
         .clone()
-        .oneshot(get_req("/oidc/callback?code=goodcode&state=WRONG", &flow_cookie, true))
+        .oneshot(get_req(
+            "/oidc/callback?code=goodcode&state=WRONG",
+            &flow_cookie,
+            true,
+        ))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -388,12 +506,20 @@ async fn full_login_loop_and_interactive_escalation() {
         .await
         .unwrap();
     assert!(resp.status().is_redirection(), "got {}", resp.status());
-    let back = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+    let back = resp
+        .headers()
+        .get(header::LOCATION)
+        .unwrap()
+        .to_str()
+        .unwrap();
     assert_eq!(back, "/me", "must land on the originally requested page");
     let session_cookie = cookie_from(&resp, "test_session").expect("session cookie set");
     assert_eq!(mock.exchange_calls.load(Ordering::SeqCst), 1);
 
-    let resp = app.oneshot(get_req("/me", &session_cookie, true)).await.unwrap();
+    let resp = app
+        .oneshot(get_req("/me", &session_cookie, true))
+        .await
+        .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
@@ -412,7 +538,12 @@ async fn unauthorized_response_matches_the_extractor_401() {
     assert_eq!(delegated.status(), from_extractor.status());
 
     let header_of = |r: &axum::response::Response| {
-        r.headers().get(common_oidc::REAUTH_HEADER).unwrap().to_str().unwrap().to_owned()
+        r.headers()
+            .get(common_oidc::REAUTH_HEADER)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned()
     };
     assert_eq!(header_of(&delegated), "/oidc/login");
     assert_eq!(
@@ -428,7 +559,10 @@ async fn unauthorized_response_matches_the_extractor_401() {
         .to_str()
         .unwrap()
         .to_owned();
-    assert!(cookie.starts_with("test_session="), "cleared the wrong cookie: {cookie}");
+    assert!(
+        cookie.starts_with("test_session="),
+        "cleared the wrong cookie: {cookie}"
+    );
     assert!(
         cookie.contains("test_session=;") || cookie.to_lowercase().contains("max-age=0"),
         "session cookie must be cleared, got: {cookie}"
