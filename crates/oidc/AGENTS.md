@@ -49,7 +49,7 @@ members). Library only; `cargo build` is the build path (R11(a)), there is no
 `nix build`. The live canary is env-gated: `COMMON_OIDC_LIVE=1` with the teststand
 up (its `common-oidc-canary` provider).
 
-## Canon compliance (restructure wave — landed in 0.2.0)
+## Canon compliance
 - Logs through `common-logging` (§8.5): designator macros (AUTH events for
   code-exchange/redirect/refresh/session-destroy). Instrumented (§8.2):
   `resolve_session` and client.rs's `exchange_code` / `refresh` /

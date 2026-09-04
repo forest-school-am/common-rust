@@ -14,20 +14,6 @@ authentik.
 - **Depends on** the stand crates `common-logging` (§8 logging) and `common-templating`
   (§9 asset rendering).
 
-> ## ⚠️ Upgrading to 0.2.x is a BREAKING change with a REQUIRED build step
-> 0.2.x no longer embeds its JS shim — it renders an on-disk template that it
-> **hash-verifies at boot**. If you bump to 0.2.x without doing the assets step
-> below, your service **crash-loops on startup** with an integrity-pin error —
-> this is a hard **boot failure, not a warning**. You MUST, in the SAME change:
-> 1. add the build-script copy step (copies the crate's template into your
->    `assets/` — see [the recipe](#serving-the-shim-the-template-copy-recipe-98--required));
-> 2. `.gitignore` the copied `assets/common-oidc.js.jinja` so a stale hand-copy
->    can never be committed — the copy is a build artifact, always re-derived;
-> 3. set `OidcConfig.assets_dir` and a `deployment` class (`OidcConfig` gained
->    both fields).
-> The loud crash is deliberate: it makes a stale shim impossible rather than
-> silently serving one that disagrees with the backend's 401 contract.
-
 ## Depend on it
 
 ```toml
@@ -53,21 +39,15 @@ to the published crate and rewrites your lockfile to say so. Run
 ordering is non-deterministic); that is a lock-check failure, not a build
 failure, and is not to be "fixed".
 
-Since 0.3.0 this crate's own two dependencies (`common-logging`,
-`common-templating`) are workspace siblings by path, not git deps — the three
-crates share one workspace, so a member cannot drift from a sibling's
-transitive pick.
+This crate's own two dependencies (`common-logging`, `common-templating`) are
+workspace siblings by path, not git deps — the three crates share one
+workspace, so a member cannot drift from a sibling's transitive pick.
 
 **Building:** `cargo build` is the build path (R11(a)); `nix build` is not used
 for these crates, and the flake provides the dev shell only. Build inside
 `nix develop --impure`.
 
-**For push day, when a remote does exist:** declare it as an `https` URL, never
-`git@github.com:`. Dependency fetches happen in places that have no SSH key, no
-agent and no `known_hosts` — Docker build containers, nix fixed-output
-derivations. Measured on the stand: an https clone of a tag inside
-`docker build` succeeds, the `git@` form fails with "Host key verification
-failed". See `PUSH-MIGRATION.md`.
+Push-day dependency-URL requirements live in `PUSH-MIGRATION.md`.
 
 ## 1. Backends with browser users (BFF)
 
@@ -150,7 +130,7 @@ async fn admin(user: Principal) -> Result<String, common_oidc::GateDenied> {
 `Principal { uuid, username, email, effective_groups }` — `effective_groups`
 is the downward closure of group **UUIDs** (never names); gate on UUIDs, which
 the stand publishes in `Les/state.json` (R10: stand config lives in common
-scope under no repo; it used to sit in `searchbase/deploy/teststand/`).
+scope under no repo).
 
 `require_group` (above) gates one handler and returns 403 on failure. Most
 apps instead gate once in **middleware** with `principal.in_group(&uuid)` —
@@ -179,7 +159,7 @@ to interactive exactly once when the SSO session is truly dead).
 
 ### Serving the shim: the template copy recipe (§9.8 — REQUIRED)
 
-The shim is no longer embedded in the crate — it's an on-disk template
+The shim is an on-disk template
 (`templates/common-oidc.js.jinja`) rendered through `common-templating`. Your app
 serves it from its `assets_dir`, and the crate **refuses to boot** unless the
 on-disk copy's hash matches the version this crate was built against (a pin
@@ -197,9 +177,9 @@ discovery nor an assets dir, so it needs no copy step at all.
 
 So each adopter MUST mechanically copy the template into a conventional
 `assets/` dir — **never a hand-copy** (a stale hand-copy is exactly the skew
-this prevents). Since 0.2.1 the crate tells you where to copy FROM, so the
-recipe no longer needs a `../common-oidc` sibling path and works identically
-whether you took this crate as a path dep or a git dep.
+this prevents). The crate tells you where to copy FROM, so the recipe needs no
+`../common-oidc` sibling path and works identically whether you took this crate
+as a path dep or a git dep.
 
 `Cargo.toml` — a build script and this crate as a build-dependency-free
 regular dependency is enough; `links` metadata reaches your build script
@@ -256,14 +236,6 @@ ever does go stale, the boot pin fails LOUD and EARLY — the app refuses to
 start with an integrity-pin error — rather than silently serving a stale shim
 that disagrees with the backend's 401 contract. That loud failure is the
 feature, not a bug: it's what makes drift structurally impossible.
-
-> **History:** through 0.2.0 this recipe was a `just assets` target running
-> `cp ../common-oidc/templates/common-oidc.js.jinja assets/`. That relative path
-> only resolves while the crate is a sibling path dep; a git dep lives under
-> `~/.cargo/git/checkouts/` and the copy breaks for everyone. 0.2.1 replaces it
-> with the cargo-native `links` mechanism above. Delete the `just assets` target
-> when you migrate — leaving it is how a stale copy sneaks back in.
-
 
 ### Emitting the 401 from your own error chokepoint (§3.1)
 

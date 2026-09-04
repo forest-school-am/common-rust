@@ -104,8 +104,8 @@ explained in its repo's README; one proposed by an LLM/agent MUST be
 operator-confirmed before it lands.
 
 _common-logging itself defines no custom designators. First known customers:
-cron-viewer (`c-scheduler`, run-lifecycle, pending operator confirmation);
-les-registry maps onto `upstream`+`http` with none needed._
+cron-viewer (`c-scheduler`, run-lifecycle); les-registry maps onto
+`upstream`+`http` with none needed._
 
 ## Formats (§8.4)
 
