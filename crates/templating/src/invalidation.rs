@@ -115,11 +115,6 @@ impl Drop for Watch {
     }
 }
 
-// Safety: the descriptors are only read through `&self` under the cache's
-// existing locking, and the signal handler touches nothing but an atomic.
-unsafe impl Send for Watch {}
-unsafe impl Sync for Watch {}
-
 /// Not exposed by the `libc` crate; values read from <fcntl.h> on this kernel.
 const F_SETSIG: libc::c_int = 10;
 const DN_MODIFY: libc::c_int = 0x2;
@@ -222,5 +217,20 @@ fn drain_inotify(fd: libc::c_int) -> bool {
             continue;
         }
         return any;
+    }
+}
+
+#[cfg(test)]
+mod auto_trait_tests {
+    use super::Watch;
+
+    /// `Watch` holds only `c_int` and `AtomicU64`, so `Send`/`Sync` are
+    /// derived. This fails to compile if a future field makes that untrue —
+    /// which is the moment someone would need to think about it, rather than
+    /// inheriting an `unsafe impl` that asserted it unconditionally.
+    #[test]
+    fn watch_is_send_and_sync_without_an_unsafe_impl() {
+        fn require<T: Send + Sync>() {}
+        require::<Watch>();
     }
 }
