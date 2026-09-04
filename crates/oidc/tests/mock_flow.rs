@@ -410,6 +410,18 @@ async fn serves_shim_and_login_route() {
     );
 }
 
+fn hex_encode_test(s: &str) -> String {
+    s.bytes().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What an attacker who can set a cookie for this origin actually has: the
+/// flow cookie carries no MAC, so every field is theirs to choose. Built here
+/// by hand rather than through the crate, with the wire keys spelled out.
+fn forged_flow_cookie(state: &str, next: &str) -> String {
+    let json = format!(r#"{{"s":"{state}","v":"forged-verifier","n":"{next}","i":false}}"#);
+    format!("oidc_flow={}", hex_encode_test(&json))
+}
+
 fn hex_decode_test(s: &str) -> String {
     let bytes: Vec<u8> = (0..s.len())
         .step_by(2)
@@ -521,6 +533,74 @@ async fn full_login_loop_and_interactive_escalation() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+}
+
+/// The `?next=` door is shut in `serves_shim_and_login_route`. This one covers
+/// the way back OUT: `next` round-trips through the unauthenticated flow
+/// cookie, so a value that was sanitised on entry is attacker-controlled again
+/// on return, at both sites that read it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_next_from_the_flow_cookie_cannot_leave_the_origin() {
+    let (base, _mock) = spawn_mock().await;
+    let app = app(oidc_state(&base, MemoryStore::default()).await);
+
+    for hostile in [
+        "//evil.example/steal",
+        "https://evil.example/steal",
+        "http://evil.example",
+    ] {
+        // The post-exchange redirect: a real login completes and the response
+        // that sets the session cookie must not carry the victim off-origin.
+        let cookie = forged_flow_cookie("forged-state", hostile);
+        let resp = app
+            .clone()
+            .oneshot(get_req(
+                "/oidc/callback?code=goodcode&state=forged-state",
+                &cookie,
+                true,
+            ))
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_redirection(),
+            "exchange should have succeeded for {hostile:?}, got {}",
+            resp.status()
+        );
+        let loc = resp
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(
+            loc, "/",
+            "post-exchange redirect left the origin for next={hostile:?}"
+        );
+
+        // The error re-entry: `next` is carried forward into a NEW flow
+        // cookie, so an unsanitised value would survive to the redirect above
+        // on the following pass.
+        let resp = app
+            .clone()
+            .oneshot(get_req(
+                "/oidc/callback?error=login_required",
+                &cookie,
+                true,
+            ))
+            .await
+            .unwrap();
+        assert!(
+            resp.status().is_redirection(),
+            "escalation expected for {hostile:?}, got {}",
+            resp.status()
+        );
+        let flow = cookie_from(&resp, "oidc_flow").expect("new flow cookie");
+        let json = hex_decode_test(flow.trim_start_matches("oidc_flow="));
+        assert!(
+            json.contains(r#""n":"/""#),
+            "re-entry carried next={hostile:?} forward: {json}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

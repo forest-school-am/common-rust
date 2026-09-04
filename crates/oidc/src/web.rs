@@ -29,9 +29,14 @@ const SHIM_TEMPLATE: &str = "common-oidc.js.jinja";
 
 /// Only same-origin absolute paths are valid post-login redirect targets —
 /// never a scheme, host, or protocol-relative `//evil` (open-redirect guard).
-fn safe_next(raw: Option<&String>) -> String {
+///
+/// MUST be applied at every USE, not only where the value enters. `next`
+/// survives the round trip inside the flow cookie, which is unauthenticated
+/// and therefore writable by anyone who can set a cookie for this origin, so a
+/// value that was sanitised on the way in is untrusted again on the way out.
+fn safe_next(raw: Option<&str>) -> String {
     match raw {
-        Some(p) if p.starts_with('/') && !p.starts_with("//") => p.clone(),
+        Some(p) if p.starts_with('/') && !p.starts_with("//") => p.to_owned(),
         _ => "/".into(),
     }
 }
@@ -254,7 +259,7 @@ async fn login(
     jar: CookieJar,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let next = safe_next(params.get("next"));
+    let next = safe_next(params.get("next").map(String::as_str));
     let silent = params.get("prompt").map(String::as_str) != Some("login");
     start_login(&oidc, jar, next, silent, !silent)
 }
@@ -300,7 +305,7 @@ async fn callback(
             "login_required" | "interaction_required" | "consent_required"
         );
         if needs_interaction && !flow.interactive_tried {
-            return start_login(&oidc, jar, flow.next, false, true);
+            return start_login(&oidc, jar, safe_next(Some(&flow.next)), false, true);
         }
         return (
             StatusCode::UNAUTHORIZED,
@@ -333,7 +338,7 @@ async fn callback(
             let jar = jar.remove(removal_cookie(FLOW_COOKIE)).add(
                 base_cookie(oidc.config().cookie_name.as_str(), sid, oidc.config()).into_owned(),
             );
-            (jar, Redirect::temporary(&flow.next)).into_response()
+            (jar, Redirect::temporary(&safe_next(Some(&flow.next)))).into_response()
         }
         Err(e) => {
             common_logging::warn!(common_logging::AUTH, error = %e, "code exchange failed");
