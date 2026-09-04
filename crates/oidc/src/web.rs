@@ -20,7 +20,9 @@ use common_templating::AssetCache;
 
 use crate::client::OidcClient;
 use crate::config::OidcConfig;
+use crate::error::Upstream;
 use crate::principal::Principal;
+use crate::retry;
 use crate::store::{FlowState, FlowStore, MemoryFlowStore, Session, SessionStore};
 
 const FLOW_COOKIE: &str = "oidc_flow";
@@ -162,26 +164,49 @@ impl OidcState {
             .to_owned();
         let session = self.store.get(&sid).await?;
 
-        if let Ok(p) = self
-            .client
-            .principal_from_access_token(&session.access_token)
-            .await
+        // ONE budget for the whole resolution (R27). A userinfo call, a
+        // refresh and a second userinfo each starting their own would let a
+        // single request spend ninety seconds upstream.
+        let deadline = retry::Deadline::starting_now();
+
+        match retry::within(&deadline, || {
+            self.client
+                .principal_from_access_token(&session.access_token)
+        })
+        .await
         {
-            return Some((p, session));
+            Ok(p) => return Some((p, session)),
+            // No usable answer within the budget. The IdP is gone rather than
+            // saying no, so the session is NOT destroyed on a guess — but
+            // R27 is fail-closed once the budget is spent, so the request is
+            // refused and the session ends.
+            Err(Upstream::Unreachable(why)) => {
+                common_logging::warn!(
+                    common_logging::AUTH,
+                    reason = %why,
+                    "identity unresolvable within the upstream budget — ending session"
+                );
+                self.store.remove(&sid).await;
+                return None;
+            }
+            // The expected path for an expired access token: the IdP said no,
+            // which is what the refresh token exists for.
+            Err(Upstream::Rejected(_)) => {}
         }
 
         if let Some(rt) = &session.refresh_token {
-            if let Ok(tokens) = self.client.refresh(rt).await {
+            if let Ok(tokens) = retry::within(&deadline, || self.client.refresh(rt)).await {
                 let refreshed = Session {
                     access_token: tokens.access_token,
                     refresh_token: tokens.refresh_token,
                     created: session.created,
                 };
                 self.store.put(sid.clone(), refreshed.clone()).await;
-                if let Ok(p) = self
-                    .client
-                    .principal_from_access_token(&refreshed.access_token)
-                    .await
+                if let Ok(p) = retry::within(&deadline, || {
+                    self.client
+                        .principal_from_access_token(&refreshed.access_token)
+                })
+                .await
                 {
                     common_logging::debug!(
                         common_logging::AUTH,
@@ -194,7 +219,7 @@ impl OidcState {
 
         common_logging::info!(
             common_logging::AUTH,
-            "session tokens dead — destroying local session"
+            "session tokens rejected by the IdP — destroying local session"
         );
         self.store.remove(&sid).await;
         None

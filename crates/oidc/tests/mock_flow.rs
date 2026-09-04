@@ -28,6 +28,9 @@ struct Mock {
     userinfo_calls: AtomicUsize,
     refresh_calls: AtomicUsize,
     exchange_calls: AtomicUsize,
+    /// Accept the request and never answer — the failure mode §6.1 exists
+    /// for, and the one a refused connection does NOT reproduce.
+    hang_userinfo: std::sync::atomic::AtomicBool,
 }
 
 async fn mock_token(State(m): State<Arc<Mock>>, body: String) -> impl IntoResponse {
@@ -88,6 +91,9 @@ async fn mock_userinfo(
     headers: axum::http::HeaderMap,
 ) -> impl IntoResponse {
     m.userinfo_calls.fetch_add(1, Ordering::SeqCst);
+    if m.hang_userinfo.load(Ordering::SeqCst) {
+        std::future::pending::<()>().await;
+    }
     let bearer = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -182,6 +188,72 @@ fn get_req(path: &str, cookies: &str, html: bool) -> Request<Body> {
         b = b.header(header::ACCEPT, "application/json");
     }
     b.body(Body::empty()).unwrap()
+}
+
+/// The per-attempt timeout is only worth anything if it CANCELS a real hung
+/// call. `reqwest::Client` here sets no timeout of its own, so the whole bound
+/// rests on `tokio::time::timeout` dropping the in-flight future — asserted
+/// against a socket that accepts and never answers, not inferred from the code
+/// shape. The budget arithmetic is proven separately in virtual time
+/// (`retry::tests`); this covers the half virtual time cannot: real I/O.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hung_upstream_is_actually_cancelled_not_merely_wrapped() {
+    let (base, mock) = spawn_mock().await;
+    let oidc = oidc_state(&base, MemoryStore::default()).await;
+    mock.hang_userinfo.store(true, Ordering::SeqCst);
+
+    let started = std::time::Instant::now();
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        oidc.client.principal_from_access_token("at-live"),
+    )
+    .await;
+    let elapsed = started.elapsed();
+
+    assert!(outcome.is_err(), "the hung call must hit the timeout");
+    assert!(
+        elapsed < std::time::Duration::from_secs(3),
+        "a hung upstream must be cut off at the attempt boundary, not run on: {elapsed:?}"
+    );
+    assert_eq!(
+        mock.userinfo_calls.load(Ordering::SeqCst),
+        1,
+        "the request reached the server and was left hanging there"
+    );
+}
+
+/// S3, at the level that matters: an IdP blip must NOT log anyone out. Before
+/// R27 the first failed userinfo — for any reason, including a hang — deleted
+/// the session, so an outage was indistinguishable from a revoked token.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_transient_outage_does_not_end_the_session() {
+    let (base, mock) = spawn_mock().await;
+    mock.valid_access.lock().unwrap().insert("at-live".into());
+    let (store, sid) = seed_session("at-live", None).await;
+    let app = app(oidc_state(&base, store).await);
+
+    // Hang the first attempt; recover while the second is in flight.
+    mock.hang_userinfo.store(true, Ordering::SeqCst);
+    let recovering = mock.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        recovering.hang_userinfo.store(false, Ordering::SeqCst);
+    });
+
+    let resp = app
+        .oneshot(get_req("/me", &format!("test_session={sid}"), true))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "a session must survive an outage that recovers inside the budget"
+    );
+    assert!(
+        mock.userinfo_calls.load(Ordering::SeqCst) >= 2,
+        "the first attempt must have been retried, not accepted as a verdict"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -11,13 +11,14 @@ use openidconnect::{
     AccessToken, AdditionalClaims, AuthUrl, AuthorizationCode, Client, ClientId, CsrfToken,
     EmptyExtraTokenFields, EndpointNotSet, EndpointSet, IdTokenFields, IssuerUrl, JsonWebKeySet,
     Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
-    Scope, StandardErrorResponse, StandardTokenResponse, TokenUrl, UserInfoClaims, UserInfoUrl,
+    RequestTokenError, Scope, StandardErrorResponse, StandardTokenResponse, TokenUrl,
+    UserInfoClaims, UserInfoError, UserInfoUrl,
 };
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::config::OidcConfig;
-use crate::error::OidcError;
+use crate::error::{OidcError, Upstream};
 use crate::principal::Principal;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +58,24 @@ type OidcCore = Client<
     EndpointSet,    // token
     EndpointSet,    // userinfo
 >;
+
+/// Only 401 and 403 are the IdP saying no about the TOKEN. A 5xx, a body that
+/// will not parse and a failed claims check are all the IdP failing to answer
+/// usefully — none of them asserts the credential is invalid, so none may
+/// destroy a session on its own (§3.3). They retry, and the budget decides.
+fn classify_userinfo<RE>(e: UserInfoError<RE>) -> Upstream
+where
+    RE: std::error::Error + 'static,
+{
+    match e {
+        UserInfoError::Response(status, _, ref why)
+            if status.as_u16() == 401 || status.as_u16() == 403 =>
+        {
+            Upstream::Rejected(format!("userinfo returned {status}: {why}"))
+        }
+        other => Upstream::Unreachable(other.to_string()),
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TokenBundle {
@@ -184,14 +203,19 @@ impl OidcClient {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn refresh(&self, refresh_token: &str) -> Result<TokenBundle, OidcError> {
+    pub async fn refresh(&self, refresh_token: &str) -> Result<TokenBundle, Upstream> {
         let rt = RefreshToken::new(refresh_token.to_owned());
         let resp = self
             .core
             .exchange_refresh_token(&rt)
             .request_async(&self.http)
             .await
-            .map_err(|e| OidcError::Refresh(e.to_string()))?;
+            .map_err(|e| match e {
+                // The IdP answered about this refresh token — `invalid_grant`
+                // is the revoked/expired case, and it is a fact.
+                RequestTokenError::ServerResponse(r) => Upstream::Rejected(r.to_string()),
+                other => Upstream::Unreachable(other.to_string()),
+            })?;
         Ok(TokenBundle {
             access_token: resp.access_token().secret().clone(),
             refresh_token: resp
@@ -205,13 +229,13 @@ impl OidcClient {
     pub async fn principal_from_access_token(
         &self,
         access_token: &str,
-    ) -> Result<Principal, OidcError> {
+    ) -> Result<Principal, Upstream> {
         let claims: UserInfoClaims<OidcClaims, CoreGenderClaim> = self
             .core
             .user_info(AccessToken::new(access_token.to_owned()), None)
             .request_async(&self.http)
             .await
-            .map_err(|e| OidcError::Userinfo(e.to_string()))?;
+            .map_err(classify_userinfo)?;
 
         Principal::from_userinfo(
             claims.subject().as_str(),
@@ -219,6 +243,9 @@ impl OidcClient {
             claims.email().map(|e| e.as_str().to_owned()),
             &claims.additional_claims().effective_groups,
         )
-        .map_err(OidcError::Userinfo)
+        // The IdP answered and the answer was about this token's subject, so
+        // this is a rejection rather than an outage: retrying cannot change a
+        // `sub` that is not a UUID.
+        .map_err(Upstream::Rejected)
     }
 }

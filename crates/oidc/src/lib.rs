@@ -28,6 +28,7 @@ mod client;
 mod config;
 mod error;
 mod principal;
+mod retry;
 mod source_state;
 mod store;
 mod web;
@@ -40,7 +41,7 @@ include!(concat!(env!("OUT_DIR"), "/source_state.rs"));
 pub use bearer::{BearerValidator, ValidationError};
 pub use client::{OidcClient, TokenBundle};
 pub use config::OidcConfig;
-pub use error::OidcError;
+pub use error::{OidcError, Upstream};
 pub use principal::{GateDenied, Principal};
 pub use store::{
     BoxFuture, FlowState, FlowStore, MemoryFlowStore, MemoryStore, Session, SessionStore,

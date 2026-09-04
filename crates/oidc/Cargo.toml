@@ -25,7 +25,7 @@ reqwest.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 tracing.workspace = true
 url = "2"
 uuid = { version = "1", features = ["v4"] }
@@ -35,7 +35,7 @@ uuid = { version = "1", features = ["v4"] }
 sha2.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "test-util"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 # cookies: the live canary drives authentik's flow executor like a browser
