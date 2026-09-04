@@ -33,27 +33,16 @@ impl Deployment {
         };
         Deployment::from_str(text).map_err(|_| {
             format!(
-                "DEPLOYMENT_TYPE={text:?} is not valid — expected {} \
+                "DEPLOYMENT_TYPE={text:?} is not valid — expected one of {:?} \
                  (unset means dev). Refusing rather than defaulting: a typo here would \
                  silently enable dev-only behaviour under a prod deployment.",
-                or_list(Deployment::VARIANTS)
+                Deployment::VARIANTS
             )
         })
     }
 
     pub fn from_env() -> Result<Self, String> {
         Self::parse(std::env::var("DEPLOYMENT_TYPE").ok().as_deref())
-    }
-}
-
-/// `["a", "b", "c"]` -> `"a", "b" or "c"`. For refusal messages that must name
-/// every accepted spelling without any of them being retyped here.
-fn or_list(values: &[&str]) -> String {
-    let quoted: Vec<String> = values.iter().map(|v| format!("{v:?}")).collect();
-    match quoted.split_last() {
-        None => String::new(),
-        Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
     }
 }
 
@@ -170,12 +159,17 @@ mod tests {
         assert_eq!(Deployment::Dev.to_string(), "dev");
     }
 
+    /// The accepted values are rendered as an ARRAY, not as prose. The point is
+    /// the reader can see where the list ends and the sentence resumes, which a
+    /// `"prod" or "dev"` join leaves ambiguous. Spelled out here rather than
+    /// built from VARIANTS — a test that reuses the declaration asserts nothing.
     #[test]
-    fn or_list_quotes_and_joins() {
-        assert_eq!(or_list(&[]), "");
-        assert_eq!(or_list(&["dev"]), "\"dev\"");
-        assert_eq!(or_list(Deployment::VARIANTS), "\"prod\" or \"dev\"");
-        assert_eq!(or_list(&["a", "b", "c"]), "\"a\", \"b\" or \"c\"");
+    fn the_refusal_renders_the_values_as_an_array() {
+        let msg = Deployment::parse(Some("prd")).unwrap_err();
+        assert!(
+            msg.contains(r#"expected one of ["prod", "dev"] (unset means dev)"#),
+            "values must read as a delimited array inside the prose: {msg}"
+        );
     }
 }
 
