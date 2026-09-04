@@ -68,7 +68,7 @@ Open the **request root span** (§8.2) in your HTTP middleware; it carries
 
 ```rust
 let reqid = common_logging::gen_reqid();
-let span  = common_logging::request_span(&reqid);
+let span  = common_logging::request_span!(&reqid);
 // once identity resolves (the single resolution point, §5.2):
 common_logging::set_actor(&span, &username);
 // then run the handler inside the span (enter it, or `.instrument(span)`).

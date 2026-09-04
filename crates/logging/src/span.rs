@@ -5,7 +5,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use strum::{AsRefStr, EnumString, VariantNames};
-use tracing::field::Empty;
 use tracing::Span;
 
 /// The request-field vocabulary. Each name is written once, in `serialize`;
@@ -30,16 +29,36 @@ pub fn gen_reqid() -> String {
     format!("{:08x}{:04x}", nanos as u32, (n & 0xffff) as u32)
 }
 
-/// R28 HAZARD, NOT YET RESOLVED — read before setting a module-scoped
-/// `RUST_LOG`. This span's target is now this crate's module path, not a
-/// designator, so `RUST_LOG=my_service=debug` does NOT enable it. The span is
-/// then never created, `enter()` does nothing, and every event inside loses
-/// `reqid` and `actor` — silently, since the events themselves still emit.
-/// A bare level (`RUST_LOG=debug`, and the fleet's unset default) is
-/// unaffected. Making the span take the CALLER's module path means turning
-/// this function into a macro, which is an API break for every adopter.
-pub fn request_span(reqid: &str) -> Span {
-    tracing::info_span!("request", reqid = reqid, actor = Empty)
+/// Opens the request root span (§8.2), carrying `reqid` and `actor`.
+///
+/// A MACRO, NOT A FUNCTION, AND THAT IS LOAD-BEARING (R28). Since designators
+/// left `target`, a span's target is its module path — and for a function that
+/// is THIS crate's path, not the caller's. `RUST_LOG=my_service=debug` would
+/// then fail to enable the span, `enter()` would do nothing, and every event
+/// inside would lose `reqid` and `actor` while still emitting: silent, which is
+/// the failure R28 exists to abolish. Expanding at the call site gives the span
+/// the caller's module path, so a service-scoped `RUST_LOG` covers it.
+///
+/// `tests/request_span_callsite.rs` asserts this from OUTSIDE this crate; a
+/// test in here would carry common-logging's module path either way and so
+/// could not fail for the right reason.
+#[macro_export]
+macro_rules! request_span {
+    ($reqid:expr) => {
+        $crate::tracing::info_span!(
+            "request",
+            reqid = $crate::__reqid($reqid),
+            actor = $crate::tracing::field::Empty
+        )
+    };
+}
+
+/// Deref-coercion point. A macro has no function boundary to coerce at, so
+/// `request_span!(&reqid)` with a `String` would otherwise have to spell the
+/// conversion at every call site.
+#[doc(hidden)]
+pub fn __reqid(reqid: &str) -> &str {
+    reqid
 }
 
 pub fn set_actor(span: &Span, actor: &str) {
@@ -61,7 +80,7 @@ mod tests {
     #[test]
     fn request_span_declares_exactly_the_vocabulary() {
         tracing::subscriber::with_default(tracing_subscriber::registry(), || {
-            let span = request_span("rq0000");
+            let span = crate::request_span!("rq0000");
             let meta = span.metadata().expect("a span is enabled under a registry");
             let names: Vec<&str> = meta.fields().iter().map(|f| f.name()).collect();
             assert_eq!(names, FixedField::VARIANTS);

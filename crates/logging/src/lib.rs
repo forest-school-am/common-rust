@@ -29,7 +29,9 @@ pub use tracing;
 pub use config::{Deployment, Format, LogConfig};
 pub use designator::{AUTH, BUSINESS, HTTP, STORAGE, UPSTREAM};
 pub use filter::Designators;
-pub use span::{gen_reqid, request_span, set_actor};
+#[doc(hidden)]
+pub use span::__reqid;
+pub use span::{gen_reqid, set_actor};
 
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
@@ -150,7 +152,7 @@ mod tests {
     fn human_layout_exact_shape() {
         let buf = Buf::new();
         tracing::subscriber::with_default(human(buf.clone()), || {
-            let span = request_span("rq0001");
+            let span = crate::request_span!("rq0001");
             let _g = span.enter();
             set_actor(&span, "bob");
             crate::info!(AUTH, "hello world");
@@ -176,7 +178,7 @@ mod tests {
     fn human_actor_dash_before_auth() {
         let buf = Buf::new();
         tracing::subscriber::with_default(human(buf.clone()), || {
-            let span = request_span("rq0002");
+            let span = crate::request_span!("rq0002");
             let _g = span.enter();
             crate::warn!(UPSTREAM, "no user yet");
         });
@@ -197,7 +199,7 @@ mod tests {
     fn json_carries_the_designator_as_a_field_and_the_module_path_as_target() {
         let buf = Buf::new();
         tracing::subscriber::with_default(json(buf.clone()), || {
-            let span = request_span("rq0003");
+            let span = crate::request_span!("rq0003");
             let _g = span.enter();
             set_actor(&span, "carol");
             crate::info!(BUSINESS, count = 3, "did a thing");

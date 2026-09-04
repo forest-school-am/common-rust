@@ -18,7 +18,7 @@ included. Change here ripples fleet-wide — treat the output contract as public
   designator.rs.
 - `src/designator.rs` — common designator consts, `custom!`, and the
   `error!/warn!/info!/debug!/trace!` emission macros (designator as first arg).
-- `src/span.rs` — `gen_reqid`, `request_span`, `set_actor`.
+- `src/span.rs` — `gen_reqid`, the `request_span!` MACRO, `set_actor`.
 - `src/format.rs` — the human `FormatEvent` and the `CaptureLayer` that
   snapshots `reqid`/`actor` for it. (JSON uses the stock layer.)
 
@@ -38,6 +38,11 @@ included. Change here ripples fleet-wide — treat the output contract as public
 - An unparseable `LOG_DESIGNATORS` fails OPEN and complains. This is the one
   place a bad value must never silence output; that silence is the defect R28
   removed.
+- `request_span!` is a MACRO and must stay one (R28): it has to expand at the
+  CALL SITE so the span carries the adopter's module path. As a function it
+  carried common-logging's, and a service-scoped `RUST_LOG` then silently
+  dropped `reqid` from every line. `tests/request_span_callsite.rs` asserts
+  this from outside the crate, which is the only place it can be asserted.
 - `actor` renders `-` until `set_actor`; `reqid` is per request.
 - No network, no IO clients — this crate stays dependency-light (tracing,
   tracing-subscriber, time, and strum + strum_macros/heck for the §4.5
