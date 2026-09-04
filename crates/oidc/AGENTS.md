@@ -13,7 +13,9 @@ contract. No login/logout UI — logout lives only at authentik.
 - `src/client.rs` — `OidcClient`: discovery, PKCE, exchange, refresh, userinfo.
 - `src/bearer.rs` — `BearerValidator` for bearer-API services (no discovery).
 - `src/principal.rs` — `Principal` + the single identity-contract enforcer.
-- `src/store.rs` — `SessionStore` trait + `MemoryStore`.
+- `src/store.rs` — server-side state the browser holds only an id for:
+  `SessionStore`/`MemoryStore` for established sessions, `FlowStore`/
+  `MemoryFlowStore` for logins in flight.
 - `src/web.rs` — router, `Principal` extractor, and the `resolve_session` seam.
 - `templates/common-oidc.js.jinja` — the served 401→silent-relogin shim, an
   on-disk template (§9.2a), never embedded.
@@ -29,6 +31,13 @@ contract. No login/logout UI — logout lives only at authentik.
 - `Principal::from_userinfo` is the ONLY place `sub`/`effective_groups` are
   parsed (UUIDs, fail-closed). Both the BFF and bearer paths route through it.
 - `resolve_session` is the mechanism; the extractor is thin policy on top.
+- **The browser never holds flow data.** The CSRF `state`, the PKCE verifier
+  and the post-login `next` live in the `FlowStore`; the `oidc_flow` cookie
+  carries an opaque 256-bit id and nothing else. A `state` the client supplies
+  both sides of is not a CSRF control, and a PKCE verifier the client holds
+  defeats PKCE — so an id naming no live flow simply restarts login. Do not
+  move any of it back into the cookie; if it ever must live client-side it
+  needs a signed or encrypted jar, never a plain one.
 - Identity is resolved in exactly one place; gates read the downward-closure
   `effective_groups` by UUID, never names.
 - Explicit rustls, default-features off (openssl-free); feature-trimmed deps.

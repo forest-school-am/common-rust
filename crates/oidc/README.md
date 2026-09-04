@@ -102,6 +102,28 @@ let app = axum::Router::new()
 your `redirect_url`), the **login-start** route (`/oidc/login`, silent by
 default), and the served **`/common-oidc.js`** shim.
 
+### Where login state lives
+
+A login in flight — the CSRF `state`, the PKCE verifier, and where to land
+afterwards — is held **server-side** in a `FlowStore`. The `oidc_flow` cookie
+carries an opaque id and nothing else, so none of those values is ever
+something the browser can read or choose.
+
+`OidcState::discover` builds an in-memory flow store for you; there is nothing
+to configure. Abandoned logins expire after 10 minutes. Override it only if
+logins must survive a restart or be shared across replicas — the callback lands
+on whichever instance the browser reaches, and an in-memory flow is invisible
+to the others:
+
+```rust
+let oidc = OidcState::discover(config, MemoryStore::default())
+    .await?
+    .with_flow_store(my_shared_flow_store);
+```
+
+That is the same constraint your `SessionStore` already has, so a deployment
+that has solved it for sessions solves it here the same way.
+
 ### The Principal extractor
 
 Add `Principal` to any handler; it runs userinfo **per request** (no cache,

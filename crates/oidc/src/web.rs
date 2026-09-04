@@ -12,7 +12,6 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
@@ -22,7 +21,7 @@ use common_templating::AssetCache;
 use crate::client::OidcClient;
 use crate::config::OidcConfig;
 use crate::principal::Principal;
-use crate::store::{Session, SessionStore};
+use crate::store::{FlowState, FlowStore, MemoryFlowStore, Session, SessionStore};
 
 const FLOW_COOKIE: &str = "oidc_flow";
 pub const REAUTH_HEADER: &str = "X-Common-OIDC-Reauth";
@@ -44,10 +43,12 @@ const SHIM_TEMPLATE: &str = "common-oidc.js.jinja";
 /// `//evil.example`, which would leave the origin all over again once emitted
 /// into a `Location` header. Each half covers the other's blind spot.
 ///
-/// MUST be applied at every USE, not only where the value enters. `next`
-/// survives the round trip inside the flow cookie, which is unauthenticated
-/// and therefore writable by anyone who can set a cookie for this origin, so a
-/// value that was sanitised on the way in is untrusted again on the way out.
+/// Applied where `next` ENTERS, at `/oidc/login`, and again where it is USED.
+/// The stored value cannot currently be tampered with — the flow lives in the
+/// flow store and the browser holds only an opaque id — so the second
+/// application is redundant today and deliberately kept: it is the layer that
+/// still holds if a later change ever puts flow data back in the client's
+/// hands.
 fn safe_next(raw: Option<&str>) -> String {
     fn resolve(raw: &str) -> Option<String> {
         // Absolute-path form only, which is what the shim ever sends
@@ -83,6 +84,7 @@ fn safe_next(raw: Option<&str>) -> String {
 pub struct OidcState {
     pub client: Arc<OidcClient>,
     pub store: Arc<dyn SessionStore>,
+    pub flows: Arc<dyn FlowStore>,
     pub assets: Arc<AssetCache>,
 }
 
@@ -127,8 +129,20 @@ impl OidcState {
         Ok(Self {
             client: Arc::new(OidcClient::discover(config).await?),
             store: Arc::new(store),
+            flows: Arc::new(MemoryFlowStore::default()),
             assets: Arc::new(assets),
         })
+    }
+
+    /// Replace the default in-memory flow store. Needed only where logins must
+    /// survive a restart or be shared across replicas — the callback lands on
+    /// whichever instance the browser reaches, and an in-memory flow is
+    /// invisible to the others. The same constraint already applies to
+    /// [`SessionStore`], so a deployment that has solved it for sessions
+    /// solves it here the same way.
+    pub fn with_flow_store(mut self, flows: impl FlowStore) -> Self {
+        self.flows = Arc::new(flows);
+        self
     }
 
     pub fn unauthorized_response(&self) -> Response {
@@ -207,33 +221,6 @@ pub fn user_portal_url(config: &OidcConfig) -> String {
     )
 }
 
-#[derive(Serialize, Deserialize)]
-struct Flow {
-    #[serde(rename = "s")]
-    state: String,
-    #[serde(rename = "v")]
-    verifier: String,
-    #[serde(rename = "n")]
-    next: String,
-    #[serde(rename = "i")]
-    interactive_tried: bool,
-}
-
-fn hex_encode(s: &str) -> String {
-    s.bytes().map(|b| format!("{b:02x}")).collect()
-}
-
-fn hex_decode(s: &str) -> Option<String> {
-    if !s.len().is_multiple_of(2) {
-        return None;
-    }
-    let bytes: Option<Vec<u8>> = (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
-        .collect();
-    String::from_utf8(bytes?).ok()
-}
-
 fn base_cookie<'a>(name: &'a str, value: String, config: &OidcConfig) -> Cookie<'a> {
     let mut c = Cookie::new(name, value);
     c.set_path("/");
@@ -260,7 +247,15 @@ fn removal_cookie(name: &str) -> Cookie<'static> {
     c
 }
 
-fn start_login(
+/// The browser receives an opaque id and nothing else; the CSRF state, the
+/// PKCE verifier and the redirect target stay in the flow store. Generated
+/// like a session id — two v4 UUIDs, 256 bits — because it is the only thing
+/// binding a callback to the login that started it.
+fn new_flow_id() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+async fn start_login(
     oidc: &OidcState,
     jar: CookieJar,
     next: String,
@@ -268,17 +263,20 @@ fn start_login(
     interactive_tried: bool,
 ) -> Response {
     let auth = oidc.client.authorize_url(silent);
-    let flow = Flow {
-        state: auth.csrf_state,
-        verifier: auth.pkce_verifier,
-        next,
-        interactive_tried,
-    };
-    let jar = jar.add(base_cookie(
-        FLOW_COOKIE,
-        hex_encode(&serde_json::to_string(&flow).expect("flow serializes")),
-        oidc.config(),
-    ));
+    let id = new_flow_id();
+    oidc.flows
+        .put(
+            id.clone(),
+            FlowState {
+                state: auth.csrf_state,
+                verifier: auth.pkce_verifier,
+                next,
+                interactive_tried,
+                created: SystemTime::now(),
+            },
+        )
+        .await;
+    let jar = jar.add(base_cookie(FLOW_COOKIE, id, oidc.config()));
     (jar, Redirect::temporary(auth.url.as_str())).into_response()
 }
 
@@ -299,7 +297,7 @@ async fn login(
 ) -> Response {
     let next = safe_next(params.get("next").map(String::as_str));
     let silent = params.get("prompt").map(String::as_str) != Some("login");
-    start_login(&oidc, jar, next, silent, !silent)
+    start_login(&oidc, jar, next, silent, !silent).await
 }
 
 async fn client_js(State(oidc): State<OidcState>) -> Response {
@@ -328,22 +326,28 @@ async fn callback(
     jar: CookieJar,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let Some(flow) = jar
-        .get(FLOW_COOKIE)
-        .and_then(|c| hex_decode(c.value()))
-        .and_then(|json| serde_json::from_str::<Flow>(&json).ok())
-    else {
-        return start_login(&oidc, jar, "/".into(), true, false);
+    let flow_id = jar.get(FLOW_COOKIE).map(|c| c.value().to_owned());
+    let flow = match &flow_id {
+        Some(id) => oidc.flows.get(id).await,
+        None => None,
     };
+    // An id naming no live flow is indistinguishable from no id at all: the
+    // browser cannot mint one the store will recognise, so an unknown value is
+    // an expired or already-finished login, not a signal.
+    let Some(flow) = flow else {
+        return start_login(&oidc, jar, "/".into(), true, false).await;
+    };
+    let flow_id = flow_id.unwrap_or_default();
 
     if let Some(error) = params.get("error") {
+        oidc.flows.remove(&flow_id).await;
         let jar = jar.remove(removal_cookie(FLOW_COOKIE));
         let needs_interaction = matches!(
             error.as_str(),
             "login_required" | "interaction_required" | "consent_required"
         );
         if needs_interaction && !flow.interactive_tried {
-            return start_login(&oidc, jar, safe_next(Some(&flow.next)), false, true);
+            return start_login(&oidc, jar, safe_next(Some(&flow.next)), false, true).await;
         }
         return (
             StatusCode::UNAUTHORIZED,
@@ -362,6 +366,7 @@ async fn callback(
 
     match oidc.client.exchange_code(code.clone(), flow.verifier).await {
         Ok(tokens) => {
+            oidc.flows.remove(&flow_id).await;
             let sid = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
             oidc.store
                 .put(
@@ -407,16 +412,12 @@ fn wants_html(parts: &Parts) -> bool {
             .is_some_and(|a| a.contains("text/html"))
 }
 
-fn unauthenticated(oidc: &OidcState, parts: &Parts, jar: CookieJar) -> AuthRedirect {
+async fn unauthenticated(oidc: &OidcState, parts: &Parts, jar: CookieJar) -> AuthRedirect {
     if wants_html(parts) {
         let jar = jar.remove(removal_cookie(oidc.config().cookie_name.as_str()));
-        let next = parts
-            .uri
-            .path_and_query()
-            .map(|pq| pq.as_str().to_owned())
-            .unwrap_or_else(|| "/".into());
+        let next = safe_next(parts.uri.path_and_query().map(|pq| pq.as_str()));
         common_logging::debug!(common_logging::AUTH, path = %next, "no session — silent re-auth redirect");
-        AuthRedirect(start_login(oidc, jar, next, true, false))
+        AuthRedirect(start_login(oidc, jar, next, true, false).await)
     } else {
         AuthRedirect(oidc.unauthorized_with_jar(jar))
     }
@@ -434,7 +435,7 @@ where
         let jar = CookieJar::from_headers(&parts.headers);
         match oidc.resolve_session(&jar).await {
             Some((principal, _session)) => Ok(principal),
-            None => Err(unauthenticated(&oidc, parts, jar)),
+            None => Err(unauthenticated(&oidc, parts, jar).await),
         }
     }
 }
@@ -497,29 +498,20 @@ mod source_state_tests {
 }
 
 #[cfg(test)]
-mod flow_wire {
-    use super::Flow;
+mod flow_cookie_tests {
+    use super::*;
 
+    /// Replaces `flow_wire`, which pinned the single-letter JSON keys of a
+    /// cookie that no longer carries a payload. What matters now is the
+    /// opposite property: that the cookie carries NOTHING but an opaque id.
     #[test]
-    fn cookie_keys_stay_single_letter() {
-        let json = serde_json::to_string(&Flow {
-            state: "s".into(),
-            verifier: "v".into(),
-            next: "/".into(),
-            interactive_tried: false,
-        })
-        .unwrap();
-        for k in ["\"s\":", "\"v\":", "\"n\":", "\"i\":"] {
-            assert!(
-                json.contains(k),
-                "flow cookie key {k} missing — wire form changed: {json}"
-            );
-        }
-        for k in ["state", "verifier", "interactive_tried"] {
-            assert!(
-                !json.contains(k),
-                "field name {k} leaked into the cookie: {json}"
-            );
-        }
+    fn the_cookie_value_is_opaque_and_reveals_no_flow_data() {
+        let id = new_flow_id();
+        assert_eq!(id.len(), 64, "two v4 UUIDs, simple form: {id}");
+        assert!(
+            id.chars().all(|c| c.is_ascii_hexdigit()),
+            "id must be opaque hex, nothing decodable: {id}"
+        );
+        assert_ne!(new_flow_id(), new_flow_id(), "ids must not repeat");
     }
 }

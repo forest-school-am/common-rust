@@ -394,6 +394,7 @@ async fn serves_shim_and_login_route() {
     );
 
     let resp = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/oidc/login?next=//evil.example/x")
@@ -402,12 +403,43 @@ async fn serves_shim_and_login_route() {
         )
         .await
         .unwrap();
-    let flow = cookie_from(&resp, "oidc_flow").expect("flow cookie");
-    let json = hex_decode_test(flow.trim_start_matches("oidc_flow="));
-    assert!(
-        json.contains("\"n\":\"/\""),
-        "unsafe next must fall back to '/': {json}"
+    // `next` is server-side now, so the sanitised value cannot be read off the
+    // cookie — it is asserted where it becomes observable, by finishing the
+    // login and seeing where the browser is sent.
+    let flow_cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie");
+    let state = state_from_location(&resp);
+    let resp = app
+        .oneshot(get_req(
+            &format!("/oidc/callback?code=goodcode&state={state}"),
+            &flow_cookie,
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "/",
+        "an unsafe ?next= must land on '/' after the flow completes"
     );
+}
+
+fn state_from_location(resp: &axum::http::Response<Body>) -> String {
+    let loc = resp
+        .headers()
+        .get(header::LOCATION)
+        .expect("redirect to the IdP")
+        .to_str()
+        .unwrap();
+    Url::parse(loc)
+        .unwrap()
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.into_owned())
+        .expect("authorize URL carries state")
 }
 
 fn hex_encode_test(s: &str) -> String {
@@ -446,20 +478,7 @@ async fn full_login_loop_and_interactive_escalation() {
 
     let resp = app.clone().oneshot(get_req("/me", "", true)).await.unwrap();
     assert!(resp.status().is_redirection());
-    let loc = resp
-        .headers()
-        .get(header::LOCATION)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
     let flow_cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie set");
-    let state = Url::parse(&loc)
-        .unwrap()
-        .query_pairs()
-        .find(|(k, _)| k == "state")
-        .map(|(_, v)| v.into_owned())
-        .unwrap();
 
     let resp = app
         .clone()
@@ -496,6 +515,13 @@ async fn full_login_loop_and_interactive_escalation() {
         StatusCode::UNAUTHORIZED,
         "loop breaker: no second escalation"
     );
+
+    // A fresh flow for the remaining two checks: the escalation above
+    // SUPERSEDED the first one, and a superseded flow is now genuinely gone
+    // rather than still decodable from a self-contained cookie.
+    let resp = app.clone().oneshot(get_req("/me", "", true)).await.unwrap();
+    let flow_cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie set");
+    let state = state_from_location(&resp);
 
     let resp = app
         .clone()
@@ -535,72 +561,115 @@ async fn full_login_loop_and_interactive_escalation() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
-/// The `?next=` door is shut in `serves_shim_and_login_route`. This one covers
-/// the way back OUT: `next` round-trips through the unauthenticated flow
-/// cookie, so a value that was sanitised on entry is attacker-controlled again
-/// on return, at both sites that read it.
+/// The property this whole design exists for, asserted against the real
+/// Set-Cookie header rather than against the struct: the browser is handed an
+/// opaque id, and the CSRF state, the PKCE verifier and the redirect target
+/// stay on the server.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_next_from_the_flow_cookie_cannot_leave_the_origin() {
+async fn the_flow_cookie_carries_no_secrets() {
     let (base, _mock) = spawn_mock().await;
     let app = app(oidc_state(&base, MemoryStore::default()).await);
 
-    for hostile in [
-        "//evil.example/steal",
-        "https://evil.example/steal",
-        "http://evil.example",
-    ] {
-        // The post-exchange redirect: a real login completes and the response
-        // that sets the session cookie must not carry the victim off-origin.
-        let cookie = forged_flow_cookie("forged-state", hostile);
-        let resp = app
-            .clone()
-            .oneshot(get_req(
-                "/oidc/callback?code=goodcode&state=forged-state",
-                &cookie,
-                true,
-            ))
-            .await
-            .unwrap();
-        assert!(
-            resp.status().is_redirection(),
-            "exchange should have succeeded for {hostile:?}, got {}",
-            resp.status()
-        );
-        let loc = resp
-            .headers()
-            .get(header::LOCATION)
-            .unwrap()
-            .to_str()
-            .unwrap();
-        assert_eq!(
-            loc, "/",
-            "post-exchange redirect left the origin for next={hostile:?}"
-        );
+    let resp = app
+        .oneshot(get_req("/oidc/login?next=/deep/page", "", true))
+        .await
+        .unwrap();
 
-        // The error re-entry: `next` is carried forward into a NEW flow
-        // cookie, so an unsanitised value would survive to the redirect above
-        // on the following pass.
-        let resp = app
-            .clone()
-            .oneshot(get_req(
-                "/oidc/callback?error=login_required",
-                &cookie,
-                true,
-            ))
-            .await
-            .unwrap();
-        assert!(
-            resp.status().is_redirection(),
-            "escalation expected for {hostile:?}, got {}",
-            resp.status()
-        );
-        let flow = cookie_from(&resp, "oidc_flow").expect("new flow cookie");
-        let json = hex_decode_test(flow.trim_start_matches("oidc_flow="));
-        assert!(
-            json.contains(r#""n":"/""#),
-            "re-entry carried next={hostile:?} forward: {json}"
-        );
-    }
+    let state = state_from_location(&resp);
+    let cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie");
+    let value = cookie.trim_start_matches("oidc_flow=");
+
+    assert!(
+        !cookie.contains(&state),
+        "the CSRF state reached the browser: {cookie}"
+    );
+    assert!(
+        !cookie.contains("/deep/page"),
+        "the redirect target reached the browser: {cookie}"
+    );
+    assert_eq!(value.len(), 64, "expected an opaque id, got {value:?}");
+    assert!(
+        value.chars().all(|c| c.is_ascii_hexdigit()),
+        "cookie value must be opaque: {value:?}"
+    );
+    // Whatever the value is, it must not decode to anything structured — the
+    // old form was hex-encoded JSON and looked equally opaque at a glance.
+    let decoded = hex_decode_test(value);
+    assert!(
+        !decoded.contains('{') && !decoded.contains(':'),
+        "cookie value decodes to structured data: {decoded:?}"
+    );
+}
+
+/// Replaces `a_next_from_the_flow_cookie_cannot_leave_the_origin`, which
+/// forged the cookie payload to steer the post-login redirect. That attack is
+/// no longer expressible — the cookie carries an opaque id and the flow lives
+/// server-side — so the property to assert is the stronger one: a payload the
+/// attacker writes names no flow and therefore does NOTHING.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forged_flow_cookie_is_inert() {
+    let (base, mock) = spawn_mock().await;
+    let app = app(oidc_state(&base, MemoryStore::default()).await);
+
+    // Byte-for-byte the old attack: the pre-store wire form, hex-encoded,
+    // naming an off-origin `next` and a state the attacker also supplies.
+    let payload = r#"{"s":"forged-state","v":"forged-verifier","n":"//evil.example","i":false}"#;
+    let forged = format!(
+        "oidc_flow={}",
+        payload
+            .bytes()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+
+    let resp = app
+        .clone()
+        .oneshot(get_req(
+            "/oidc/callback?code=goodcode&state=forged-state",
+            &forged,
+            true,
+        ))
+        .await
+        .unwrap();
+
+    let loc = resp
+        .headers()
+        .get(header::LOCATION)
+        .expect("a redirect")
+        .to_str()
+        .unwrap();
+    assert!(
+        !loc.contains("evil.example"),
+        "forged next reached the Location header: {loc}"
+    );
+    assert!(
+        loc.contains("/application/o/authorize/"),
+        "an unknown flow id must restart login, not complete one: {loc}"
+    );
+    assert!(
+        cookie_from(&resp, "test_session").is_none(),
+        "a forged flow cookie must not yield a session"
+    );
+    assert_eq!(
+        mock.exchange_calls.load(Ordering::SeqCst),
+        0,
+        "no token exchange may happen for a flow the server never issued"
+    );
+
+    // And the id space is not guessable-by-shape either: a plausible-looking
+    // opaque id that was never issued is equally inert.
+    let resp = app
+        .oneshot(get_req(
+            "/oidc/callback?code=goodcode&state=forged-state",
+            &format!("oidc_flow={}", "a".repeat(64)),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert!(
+        cookie_from(&resp, "test_session").is_none(),
+        "an unissued flow id must not yield a session"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

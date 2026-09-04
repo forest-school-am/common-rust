@@ -39,5 +39,7 @@ pub use client::{OidcClient, TokenBundle};
 pub use config::OidcConfig;
 pub use error::OidcError;
 pub use principal::{GateDenied, Principal};
-pub use store::{BoxFuture, MemoryStore, Session, SessionStore};
+pub use store::{
+    BoxFuture, FlowState, FlowStore, MemoryFlowStore, MemoryStore, Session, SessionStore,
+};
 pub use web::{router, user_portal_url, AuthRedirect, OidcState, REAUTH_HEADER};
