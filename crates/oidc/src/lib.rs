@@ -28,8 +28,11 @@ mod client;
 mod config;
 mod error;
 mod principal;
+mod source_state;
 mod store;
 mod web;
+
+use source_state::SourceState;
 
 include!(concat!(env!("OUT_DIR"), "/shim_hash.rs"));
 include!(concat!(env!("OUT_DIR"), "/source_state.rs"));

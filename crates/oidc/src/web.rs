@@ -88,17 +88,6 @@ pub struct OidcState {
     pub assets: Arc<AssetCache>,
 }
 
-pub(crate) fn dirty_source_refusal(deployment: Deployment, state: &str) -> Option<String> {
-    if matches!(deployment, Deployment::Prod) && state.starts_with("Dirty") {
-        return Some(format!(
-            "common-oidc was built from a dirty working tree ({state}); the served shim \
-             is unreproducible and this is refused under DEPLOYMENT_TYPE=prod. \
-             Commit the crate, or build from a clean checkout."
-        ));
-    }
-    None
-}
-
 impl OidcState {
     pub async fn discover(
         config: OidcConfig,
@@ -110,10 +99,12 @@ impl OidcState {
                     .into(),
             ));
         }
-        if let Some(msg) = dirty_source_refusal(config.deployment, crate::CRATE_SOURCE_STATE) {
+        if let Some(msg) =
+            crate::source_state::dirty_source_refusal(config.deployment, crate::CRATE_SOURCE_STATE)
+        {
             return Err(crate::OidcError::Config(msg));
         }
-        if crate::CRATE_SOURCE_STATE == "Unknown" {
+        if crate::CRATE_SOURCE_STATE == crate::SourceState::Unknown {
             common_logging::warn!(
                 common_logging::AUTH,
                 "could not determine whether common-oidc was built from a clean tree \
@@ -477,23 +468,6 @@ mod safe_next_tests {
         assert_eq!(safe_next(None), "/");
         assert_eq!(safe_next(Some("")), "/");
         assert_eq!(safe_next(Some("relative/no/slash")), "/");
-    }
-}
-
-#[cfg(test)]
-mod source_state_tests {
-    use super::*;
-
-    #[test]
-    fn prod_refuses_a_dirty_crate_source_and_dev_does_not() {
-        assert!(dirty_source_refusal(Deployment::Prod, "Dirty(3)").is_some());
-        assert!(dirty_source_refusal(Deployment::Dev, "Dirty(3)").is_none());
-    }
-
-    #[test]
-    fn clean_and_unknown_both_boot_but_mean_different_things() {
-        assert!(dirty_source_refusal(Deployment::Prod, "Clean").is_none());
-        assert!(dirty_source_refusal(Deployment::Prod, "Unknown").is_none());
     }
 }
 
