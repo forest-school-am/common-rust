@@ -10,7 +10,12 @@ included. Change here ripples fleet-wide — treat the output contract as public
 - `src/lib.rs` — public API + `init`/`init_with` (builds the subscriber);
   inline format/designator tests.
 - `src/config.rs` — `LogConfig::resolve` (pure `LOG_FORMAT`/`DEPLOYMENT_TYPE`/
-  `RUST_LOG` → format/deployment/filter) + matrix tests.
+  `RUST_LOG`/`LOG_DESIGNATORS` → format/deployment/filter/designators) + matrix
+  tests.
+- `src/filter.rs` — `Designators`, the `LOG_DESIGNATORS` axis: parsing,
+  validation, and the `Filter` impl that reads the designator FIELD. Anything
+  about which events pass goes here; what a designator means stays in
+  designator.rs.
 - `src/designator.rs` — common designator consts, `custom!`, and the
   `error!/warn!/info!/debug!/trace!` emission macros (designator as first arg).
 - `src/span.rs` — `gen_reqid`, `request_span`, `set_actor`.
@@ -23,8 +28,16 @@ included. Change here ripples fleet-wide — treat the output contract as public
   tests lock it.
 - Default format is `json`; unknown `LOG_FORMAT` degrades to json (logging
   must always come up). Default `DEPLOYMENT_TYPE` is `dev`.
-- The designator is the tracing target; it must stay a compile-time
-  `&'static str` (so `custom!` uses `concat!`, and consts are `&str`).
+- The designator is an event FIELD, never the tracing target (R28). The target
+  is the module path, so `RUST_LOG` behaves as standard tracing. Designators
+  must stay compile-time `&'static str` (so `custom!` uses `concat!`).
+- TWO filtering axes, ANDed and independent: `RUST_LOG` (module path) and
+  `LOG_DESIGNATORS` (designator). Unset `LOG_DESIGNATORS` must pass
+  EVERYTHING, or the two ANDs resolve to silence. An event with no designator
+  — anything from a dependency — always passes the designator axis.
+- An unparseable `LOG_DESIGNATORS` fails OPEN and complains. This is the one
+  place a bad value must never silence output; that silence is the defect R28
+  removed.
 - `actor` renders `-` until `set_actor`; `reqid` is per request.
 - No network, no IO clients — this crate stays dependency-light (tracing,
   tracing-subscriber, time, and strum + strum_macros/heck for the §4.5

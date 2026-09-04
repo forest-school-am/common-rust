@@ -5,6 +5,8 @@ use std::str::FromStr;
 
 use strum::{AsRefStr, Display, EnumString, VariantNames};
 
+use crate::filter::Designators;
+
 /// Every spelling below is written once, in `serialize`, and both directions
 /// are generated from it (CODESTYLE 4.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, Display, EnumString, VariantNames)]
@@ -50,15 +52,27 @@ impl Deployment {
 pub struct LogConfig {
     pub format: Format,
     pub deployment: Deployment,
+    /// `RUST_LOG`: the module-path axis, standard tracing semantics.
     pub filter: String,
+    /// `LOG_DESIGNATORS`: the designator axis (R28). Independent of `filter`;
+    /// an event must satisfy both.
+    pub designators: Designators,
 }
 
 impl LogConfig {
+    /// `log_designators` DEGRADES TO PERMISSIVE when it will not parse, and
+    /// says so loudly once the subscriber exists. Refusing to boot is the
+    /// §4.3 default, but this is the one option where a wrong value must never
+    /// SILENCE anything — the whole point of R28 is removing a filter that
+    /// quietly matched nothing. Failing open keeps every event visible and
+    /// makes the mistake audible. A service wanting refuse-to-boot calls
+    /// [`Designators::parse`] itself, as it already does for `Deployment`.
     pub fn resolve(
         log_format: Option<&str>,
         deployment_type: Option<&str>,
         rust_log: Option<&str>,
-    ) -> Self {
+        log_designators: Option<&str>,
+    ) -> (Self, Option<String>) {
         let format = log_format
             .and_then(|s| Format::from_str(s).ok())
             .unwrap_or(Format::Json);
@@ -72,19 +86,28 @@ impl LogConfig {
                 Deployment::Dev => "debug".to_owned(),
             },
         };
-        Self {
-            format,
-            deployment,
-            filter,
-        }
+        let (designators, complaint) = match Designators::parse(log_designators) {
+            Ok(d) => (d, None),
+            Err(why) => (Designators::permissive(), Some(why)),
+        };
+        (
+            Self {
+                format,
+                deployment,
+                filter,
+                designators,
+            },
+            complaint,
+        )
     }
 
-    pub fn from_env() -> Self {
+    pub fn from_env() -> (Self, Option<String>) {
         let get = |k: &str| std::env::var(k).ok();
         Self::resolve(
             get("LOG_FORMAT").as_deref(),
             get("DEPLOYMENT_TYPE").as_deref(),
             get("RUST_LOG").as_deref(),
+            get("LOG_DESIGNATORS").as_deref(),
         )
     }
 }
@@ -95,21 +118,24 @@ mod tests {
 
     #[test]
     fn format_defaults_to_json_including_unknown() {
-        assert_eq!(LogConfig::resolve(None, None, None).format, Format::Json);
         assert_eq!(
-            LogConfig::resolve(Some("json"), None, None).format,
+            LogConfig::resolve(None, None, None, None).0.format,
             Format::Json
         );
         assert_eq!(
-            LogConfig::resolve(Some("HUMAN"), None, None).format,
+            LogConfig::resolve(Some("json"), None, None, None).0.format,
+            Format::Json
+        );
+        assert_eq!(
+            LogConfig::resolve(Some("HUMAN"), None, None, None).0.format,
             Format::Json
         ); // case-sensitive; unknown -> json
         assert_eq!(
-            LogConfig::resolve(Some("bogus"), None, None).format,
+            LogConfig::resolve(Some("bogus"), None, None, None).0.format,
             Format::Json
         );
         assert_eq!(
-            LogConfig::resolve(Some("human"), None, None).format,
+            LogConfig::resolve(Some("human"), None, None, None).0.format,
             Format::Human
         );
     }
@@ -117,19 +143,25 @@ mod tests {
     #[test]
     fn deployment_defaults_to_dev_including_unknown() {
         assert_eq!(
-            LogConfig::resolve(None, None, None).deployment,
+            LogConfig::resolve(None, None, None, None).0.deployment,
             Deployment::Dev
         );
         assert_eq!(
-            LogConfig::resolve(None, Some("dev"), None).deployment,
+            LogConfig::resolve(None, Some("dev"), None, None)
+                .0
+                .deployment,
             Deployment::Dev
         );
         assert_eq!(
-            LogConfig::resolve(None, Some("bogus"), None).deployment,
+            LogConfig::resolve(None, Some("bogus"), None, None)
+                .0
+                .deployment,
             Deployment::Dev
         );
         assert_eq!(
-            LogConfig::resolve(None, Some("prod"), None).deployment,
+            LogConfig::resolve(None, Some("prod"), None, None)
+                .0
+                .deployment,
             Deployment::Prod
         );
     }
@@ -137,16 +169,27 @@ mod tests {
     #[test]
     fn filter_uses_rust_log_else_deployment_default() {
         assert_eq!(
-            LogConfig::resolve(None, Some("prod"), Some("mycrate=trace")).filter,
+            LogConfig::resolve(None, Some("prod"), Some("mycrate=trace"), None)
+                .0
+                .filter,
             "mycrate=trace"
         );
         assert_eq!(
-            LogConfig::resolve(None, Some("prod"), Some("")).filter,
+            LogConfig::resolve(None, Some("prod"), Some(""), None)
+                .0
+                .filter,
             "info"
         );
-        assert_eq!(LogConfig::resolve(None, Some("prod"), None).filter, "info");
-        assert_eq!(LogConfig::resolve(None, Some("dev"), None).filter, "debug");
-        assert_eq!(LogConfig::resolve(None, None, None).filter, "debug"); // default dev
+        assert_eq!(
+            LogConfig::resolve(None, Some("prod"), None, None).0.filter,
+            "info"
+        );
+        assert_eq!(
+            LogConfig::resolve(None, Some("dev"), None, None).0.filter,
+            "debug"
+        );
+        assert_eq!(LogConfig::resolve(None, None, None, None).0.filter, "debug");
+        // default dev
     }
 
     /// The spellings are retyped here on purpose: a test that reads them off
@@ -157,6 +200,35 @@ mod tests {
         assert_eq!(Deployment::VARIANTS, &["prod", "dev"]);
         assert_eq!(Deployment::Prod.as_ref(), "prod");
         assert_eq!(Deployment::Dev.to_string(), "dev");
+    }
+
+    /// The two filtering axes are resolved independently (R28) — a value for
+    /// one must never end up governing the other.
+    #[test]
+    fn the_two_filter_axes_do_not_touch_each_other() {
+        let (cfg, complaint) =
+            LogConfig::resolve(None, None, Some("mycrate=debug"), Some("auth=trace"));
+        assert_eq!(cfg.filter, "mycrate=debug");
+        assert_eq!(
+            cfg.designators,
+            Designators::parse(Some("auth=trace")).unwrap()
+        );
+        assert!(complaint.is_none());
+    }
+
+    /// An unparseable LOG_DESIGNATORS must FAIL OPEN and complain. Failing
+    /// closed would silence every event over a typo, which is the exact
+    /// failure R28 exists to remove.
+    #[test]
+    fn an_unparseable_designator_filter_passes_everything_and_complains() {
+        let (cfg, complaint) = LogConfig::resolve(None, None, None, Some("nonsense=info"));
+        assert_eq!(
+            cfg.designators,
+            Designators::permissive(),
+            "a bad filter must not silence anything"
+        );
+        let complaint = complaint.expect("the operator must be told");
+        assert!(complaint.contains("nonsense"), "{complaint}");
     }
 
     /// The accepted values are rendered as an ARRAY, not as prose. The point is

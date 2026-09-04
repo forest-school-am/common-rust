@@ -1,8 +1,9 @@
 //! Subscriber setup and the crate's public surface. Assembly only — the
-//! pieces live in config.rs, format.rs, designator.rs and span.rs.
+//! pieces live in config.rs, filter.rs, format.rs, designator.rs and span.rs.
 //!
-//! Every emission names a designator as its tracing target, so logs can be
-//! filtered by concern rather than by module path:
+//! Every emission carries a designator as an event FIELD, so logs can be
+//! filtered by concern (`LOG_DESIGNATORS`) and by module path (`RUST_LOG`)
+//! independently:
 //!
 //! ```
 //! let name = "alice";
@@ -19,6 +20,7 @@
 
 mod config;
 mod designator;
+mod filter;
 mod format;
 mod span;
 
@@ -26,36 +28,61 @@ pub use tracing;
 
 pub use config::{Deployment, Format, LogConfig};
 pub use designator::{AUTH, BUSINESS, HTTP, STORAGE, UPSTREAM};
+pub use filter::Designators;
 pub use span::{gen_reqid, request_span, set_actor};
 
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
 pub fn init() {
-    init_with(LogConfig::from_env());
+    let (cfg, complaint) = LogConfig::from_env();
+    init_with(cfg);
+    // Emitted AFTER the subscriber exists, which is the only moment it can be
+    // heard: a bad LOG_DESIGNATORS degrades to permissive rather than
+    // silencing anything, so this line is the entire signal that it happened.
+    if let Some(why) = complaint {
+        crate::error!(
+            AUTH,
+            reason = %why,
+            "LOG_DESIGNATORS was not understood — every designator is passing; \
+             the filter you set is NOT in effect"
+        );
+    }
 }
 
 pub fn init_with(cfg: LogConfig) {
-    let filter = EnvFilter::try_new(&cfg.filter).unwrap_or_else(|_| EnvFilter::new("info"));
-    let registry = tracing_subscriber::registry().with(filter);
+    // Two independent axes (R28), ANDed: module path via RUST_LOG, designator
+    // via LOG_DESIGNATORS. Neither can express the other.
+    let env = EnvFilter::try_new(&cfg.filter).unwrap_or_else(|_| EnvFilter::new("info"));
+    let designators = cfg.designators;
     match cfg.format {
         Format::Json => {
-            registry
+            tracing_subscriber::registry()
                 .with(
                     fmt::layer()
                         .json()
                         .flatten_event(true)
                         .with_current_span(true)
-                        .with_span_list(false),
+                        .with_span_list(false)
+                        .with_filter(env)
+                        .with_filter(designators),
                 )
                 .try_init()
                 .ok();
         }
         Format::Human => {
-            registry
+            tracing_subscriber::registry()
+                // CaptureLayer is deliberately unfiltered: it snapshots span
+                // fields for the formatter, so filtering it would strip reqid
+                // from lines that are themselves passing.
                 .with(format::CaptureLayer)
-                .with(fmt::layer().event_format(format::HumanFormat))
+                .with(
+                    fmt::layer()
+                        .event_format(format::HumanFormat)
+                        .with_filter(env)
+                        .with_filter(designators),
+                )
                 .try_init()
                 .ok();
         }
@@ -162,8 +189,12 @@ mod tests {
         assert_eq!(p[5], "[-]", "actor must be - before auth: {line}");
     }
 
+    /// R28 CHANGED THIS OUTPUT CONTRACT. `target` used to carry the
+    /// designator; it now carries the module path, as standard tracing does,
+    /// and the designator has its own field. Anything parsing these lines for
+    /// a designator must read `designator`, not `target`.
     #[test]
-    fn json_shape_has_level_target_message_and_span() {
+    fn json_carries_the_designator_as_a_field_and_the_module_path_as_target() {
         let buf = Buf::new();
         tracing::subscriber::with_default(json(buf.clone()), || {
             let span = request_span("rq0003");
@@ -175,11 +206,74 @@ mod tests {
         let line = out.lines().next().expect("one json line");
         let v: serde_json::Value = serde_json::from_str(line).expect("valid json line");
         assert_eq!(v["level"], "INFO");
-        assert_eq!(v["target"], "business");
+        assert_eq!(v["designator"], "business");
+        assert_eq!(
+            v["target"], "common_logging::tests",
+            "the target is the module path again, which is what makes \
+             RUST_LOG work normally"
+        );
         assert_eq!(v["message"], "did a thing"); // flatten_event
         assert_eq!(v["count"], 3);
         assert_eq!(v["span"]["reqid"], "rq0003");
         assert_eq!(v["span"]["actor"], "carol");
+    }
+
+    /// THE ONLY THING holding the macros' literal field name to
+    /// `designator::FIELD`: tracing resolves field names at expansion time, so
+    /// a const cannot be substituted into the macro. Spelled out here rather
+    /// than read off the const, which would assert nothing (CODESTYLE 4.5).
+    #[test]
+    fn the_emitted_field_is_the_declared_one() {
+        assert_eq!(designator::FIELD, "designator");
+
+        let buf = Buf::new();
+        tracing::subscriber::with_default(json(buf.clone()), || {
+            crate::warn!(STORAGE, "written");
+        });
+        let v: serde_json::Value =
+            serde_json::from_str(buf.string().lines().next().unwrap()).unwrap();
+        assert_eq!(
+            v["designator"], "storage",
+            "the macro emits a field the readers do not know about"
+        );
+    }
+
+    /// The two axes are independent and ANDed: neither can express the other,
+    /// and setting one must not silence the other's traffic.
+    #[test]
+    fn the_designator_filter_and_rust_log_select_independently() {
+        let emit = |env: &str, designators: &str| {
+            let buf = Buf::new();
+            let subscriber = tracing_subscriber::registry().with(
+                fmt::layer()
+                    .json()
+                    .flatten_event(true)
+                    .with_writer(buf.clone())
+                    .with_filter(EnvFilter::new(env))
+                    .with_filter(Designators::parse(Some(designators)).unwrap()),
+            );
+            tracing::subscriber::with_default(subscriber, || {
+                crate::info!(AUTH, "an auth line");
+                crate::info!(BUSINESS, "a business line");
+            });
+            buf.string()
+        };
+
+        let both = emit("trace", "auth=info,business=info");
+        assert!(both.contains("an auth line") && both.contains("a business line"));
+
+        let only_auth = emit("trace", "auth=info");
+        assert!(only_auth.contains("an auth line"));
+        assert!(
+            !only_auth.contains("a business line"),
+            "the designator axis must be able to restrict on its own"
+        );
+
+        let wrong_module = emit("nothing_matches=info", "auth=info");
+        assert!(
+            wrong_module.is_empty(),
+            "RUST_LOG must still be able to exclude on its own: {wrong_module}"
+        );
     }
 
     #[test]
@@ -224,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_designator_prefixes_c_and_sets_target() {
+    fn custom_designator_prefixes_c_and_travels_in_the_field() {
         assert_eq!(custom!("scheduler"), "c-scheduler");
         let buf = Buf::new();
         tracing::subscriber::with_default(json(buf.clone()), || {
@@ -232,6 +326,49 @@ mod tests {
         });
         let v: serde_json::Value =
             serde_json::from_str(buf.string().lines().next().unwrap()).unwrap();
-        assert_eq!(v["target"], "c-scheduler");
+        assert_eq!(v["designator"], "c-scheduler");
+    }
+
+    /// A project designator must be selectable too, or `c-` vocabulary would
+    /// be second-class on the axis built for designators.
+    #[test]
+    fn a_custom_designator_can_be_filtered_on() {
+        let buf = Buf::new();
+        let subscriber = tracing_subscriber::registry().with(
+            fmt::layer()
+                .json()
+                .flatten_event(true)
+                .with_writer(buf.clone())
+                .with_filter(Designators::parse(Some("c-scheduler=info")).unwrap()),
+        );
+        tracing::subscriber::with_default(subscriber, || {
+            crate::info!(custom!("scheduler"), "kept");
+            crate::info!(AUTH, "dropped");
+        });
+        let out = buf.string();
+        assert!(out.contains("kept"), "{out}");
+        assert!(!out.contains("dropped"), "{out}");
+    }
+
+    /// The §1.3d trap, inverted. Before R28 a module-scoped RUST_LOG matched
+    /// nothing because the target was a designator, and the service went
+    /// silent with no error. It must now work exactly as tracing intends.
+    #[test]
+    fn a_module_scoped_rust_log_now_selects_this_crates_events() {
+        let buf = Buf::new();
+        let subscriber = tracing_subscriber::registry().with(
+            fmt::layer()
+                .json()
+                .flatten_event(true)
+                .with_writer(buf.clone())
+                .with_filter(EnvFilter::new("common_logging=info")),
+        );
+        tracing::subscriber::with_default(subscriber, || {
+            crate::info!(AUTH, "visible by module path");
+        });
+        assert!(
+            buf.string().contains("visible by module path"),
+            "a module-scoped RUST_LOG must select events again"
+        );
     }
 }

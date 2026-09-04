@@ -8,8 +8,6 @@ use strum::{AsRefStr, EnumString, VariantNames};
 use tracing::field::Empty;
 use tracing::Span;
 
-use crate::designator::HTTP;
-
 /// The request-field vocabulary. Each name is written once, in `serialize`;
 /// `request_span` declares them and format.rs reads them back through the same
 /// declaration, so the two can no longer drift (CODESTYLE 4.5).
@@ -32,8 +30,16 @@ pub fn gen_reqid() -> String {
     format!("{:08x}{:04x}", nanos as u32, (n & 0xffff) as u32)
 }
 
+/// R28 HAZARD, NOT YET RESOLVED — read before setting a module-scoped
+/// `RUST_LOG`. This span's target is now this crate's module path, not a
+/// designator, so `RUST_LOG=my_service=debug` does NOT enable it. The span is
+/// then never created, `enter()` does nothing, and every event inside loses
+/// `reqid` and `actor` — silently, since the events themselves still emit.
+/// A bare level (`RUST_LOG=debug`, and the fleet's unset default) is
+/// unaffected. Making the span take the CALLER's module path means turning
+/// this function into a macro, which is an API break for every adopter.
 pub fn request_span(reqid: &str) -> Span {
-    tracing::info_span!(target: HTTP, "request", reqid = reqid, actor = Empty)
+    tracing::info_span!("request", reqid = reqid, actor = Empty)
 }
 
 pub fn set_actor(span: &Span, actor: &str) {

@@ -34,8 +34,8 @@ to the published crate and rewrites your lockfile to say so. Run
 
 ## Use
 
-One call at the top of `main` (reads `LOG_FORMAT` + `DEPLOYMENT_TYPE` +
-`RUST_LOG`):
+One call at the top of `main` (reads `LOG_FORMAT`, `DEPLOYMENT_TYPE`,
+`RUST_LOG` and `LOG_DESIGNATORS`):
 
 ```rust
 fn main() {
@@ -45,7 +45,7 @@ fn main() {
 ```
 
 Emit with a **designator** (§8.3) as the first argument — it becomes the
-tracing target:
+event's `designator` field:
 
 ```rust
 use common_logging::{info, warn, AUTH, UPSTREAM};
@@ -87,7 +87,7 @@ Common vocabulary — prefer it, it covers most events:
 | `BUSINESS` (`business`) | domain logic |
 | `UPSTREAM` (`upstream`) | calls to another service (IdP, DB, remote API) |
 | `STORAGE` (`storage`) | persistence / caches / files |
-| `HTTP` (`http`) | request lifecycle (the request span's target) |
+| `HTTP` (`http`) | request lifecycle |
 
 ### Custom designators
 
@@ -95,7 +95,7 @@ A project MAY add its own where the common set genuinely doesn't fit, via the
 `c-` helper (a compile-time `&'static str`):
 
 ```rust
-info!(common_logging::custom!("scheduler"), run_id = %id, "run started");  // target "c-scheduler"
+info!(common_logging::custom!("scheduler"), run_id = %id, "run started");  // designator "c-scheduler"
 ```
 
 The `c-` prefix keeps project vocabulary visually distinct from stand
@@ -119,6 +119,27 @@ cron-viewer (`c-scheduler`, run-lifecycle); les-registry maps onto
 
 `DEPLOYMENT_TYPE=prod|dev` (default `dev`) sets the default verbosity (`info`
 vs `debug`) when `RUST_LOG` is unset; `RUST_LOG` overrides.
+
+## Filtering: two independent axes
+
+The designator is an event FIELD, not the tracing target, so the two axes do
+not compete for one slot. An event must pass BOTH.
+
+| variable | selects on | example |
+|---|---|---|
+| `RUST_LOG` | module path — standard tracing | `RUST_LOG=my_service=debug,sqlx=warn` |
+| `LOG_DESIGNATORS` | designator | `LOG_DESIGNATORS=upstream=debug,business=info` |
+
+`LOG_DESIGNATORS` takes `designator=level` pairs and an optional bare level
+covering the designators not named (`LOG_DESIGNATORS=warn,auth=debug`). Unset
+means everything passes — it has to, or setting only `RUST_LOG` would AND
+itself to nothing.
+
+An unknown designator or level is REFUSED rather than ignored, since a filter
+that silently matches nothing is the defect this variable exists to remove. On
+a value that will not parse, `init()` falls back to passing everything and
+logs an error saying so: a mistake here must never SILENCE output. A service
+wanting refuse-to-boot instead calls `Designators::parse` itself.
 
 ## Test
 

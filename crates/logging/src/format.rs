@@ -150,20 +150,30 @@ where
             .format(&Rfc3339)
             .map_err(|_| fmt::Error)?;
         let (reqid, actor) = lookup_ctx(ctx, event);
+
+        // R28: the designator is an event FIELD now, not the target. The
+        // target is the module path again, so it is `RUST_LOG`'s business and
+        // does not appear in this column.
+        let mut rendered = EventFields::default();
+        event.record(&mut rendered);
+
         write!(
             writer,
             "{ts} {} {} {}:{} {} [{}] ",
             meta.level().as_str(),
-            meta.target(),
+            rendered.designator.as_deref().unwrap_or("-"),
             meta.file().unwrap_or("?"),
             meta.line().unwrap_or(0),
             reqid.as_deref().unwrap_or("-"),
             actor.as_deref().unwrap_or("-"),
         )?;
 
-        ctx.format_fields(writer.by_ref(), event)?;
+        write!(writer, "{}", rendered.message.as_deref().unwrap_or(""))?;
+        for (name, value) in &rendered.fields {
+            write!(writer, " {name}={value}")?;
+        }
 
-        let mut seen = event_field_names(event);
+        let mut seen: Vec<&'static str> = rendered.fields.iter().map(|(n, _)| *n).collect();
         let mut retained: Vec<(&'static str, String)> = Vec::new();
         if let Some(scope) = ctx.event_scope() {
             for span in scope {
@@ -193,18 +203,69 @@ where
     }
 }
 
-fn event_field_names(event: &Event<'_>) -> Vec<&'static str> {
-    struct Names(Vec<&'static str>);
-    impl Visit for Names {
-        fn record_debug(&mut self, field: &Field, _: &dyn fmt::Debug) {
-            if field.name() != "message" {
-                self.0.push(field.name());
-            }
+/// An event split into the three things the human line renders separately:
+/// the designator column, the message, and the remaining fields. The
+/// designator is pulled OUT rather than left in the field list, or it would
+/// print twice — once as the column and once as `designator=auth`.
+#[derive(Default)]
+struct EventFields {
+    designator: Option<String>,
+    message: Option<String>,
+    fields: Vec<(&'static str, String)>,
+}
+
+impl EventFields {
+    fn put(&mut self, name: &'static str, value: String) {
+        match name {
+            MESSAGE => self.message = Some(value),
+            n if n == crate::designator::FIELD => self.designator = Some(value),
+            _ => self.fields.push((name, value)),
         }
     }
-    let mut names = Names(Vec::new());
-    event.record(&mut names);
-    names.0
+}
+
+const MESSAGE: &str = "message";
+
+impl Visit for EventFields {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        // The message and the designator are rendered bare; everything else
+        // keeps the quoting the span-field renderer uses, so one line does not
+        // quote the same value two different ways.
+        let name = field.name();
+        if name == MESSAGE || name == crate::designator::FIELD {
+            self.put(name, value.to_owned());
+        } else {
+            self.put(name, format!("{value:?}"));
+        }
+    }
+
+    fn record_i64(&mut self, field: &Field, value: i64) {
+        self.put(field.name(), value.to_string());
+    }
+
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        self.put(field.name(), value.to_string());
+    }
+
+    fn record_f64(&mut self, field: &Field, value: f64) {
+        self.put(field.name(), value.to_string());
+    }
+
+    fn record_bool(&mut self, field: &Field, value: bool) {
+        self.put(field.name(), value.to_string());
+    }
+
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        let name = field.name();
+        let rendered = format!("{value:?}");
+        if name == MESSAGE || name == crate::designator::FIELD {
+            // `%`-captured and literal values arrive here already quoted or
+            // not depending on the capture sigil; the column wants neither.
+            self.put(name, rendered.trim_matches('"').to_owned());
+        } else {
+            self.put(name, rendered);
+        }
+    }
 }
 
 fn lookup_ctx<S, N>(
