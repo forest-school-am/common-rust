@@ -4,21 +4,33 @@ The Les stand's shared logging crate — the single owner of CODESTYLE.md §8
 mechanics, so nothing drifts per repo. Every Les binary and library depends on
 it, `common-oidc` included (which logs through here, not raw `tracing`).
 
-- **Version:** `0.1.1` · **Toolchain:** Rust 1.98.0.
+- **Version:** `0.3.0` · **Toolchain:** Rust 1.98.0.
+- Member of the `common-rust` workspace (`crates/logging`), alongside
+  `common-templating` and `common-oidc`.
 
 ## Depend on it
+
+Consumer manifests declare a git dependency:
 
 ```toml
 [dependencies]
 common-logging = { git = "https://github.com/forest-school-am/common-rust-logging.git", tag = "v0.1.1" }
 ```
 
-Local work resolves through the shared cargo patch: symlink
-`/mnt/host/workspace/Les/cargo-patch.toml` to `<repo>/.cargo/config.toml`
-(gitignored, opt-in per repo — never at the workspace root, CODESTYLE §11.2a).
-The symlink is REQUIRED SETUP, not a guarded condition: without it a plain
-`cargo build` silently resolves to the published crate and rewrites your
-lockfile to say so.
+**That URL and tag are documentation, not a pin, and no such remote exists** —
+nothing in this fleet is pushed (R21), and `common-rust` has no remote at all.
+The tag predates the workspace merge; do not reason about behaviour from it.
+
+What actually resolves the dependency is the single shared cargo patch at
+`/mnt/host/workspace/Les/.cargo/config.toml` (R22a/R22b), which redirects the
+URL above to this workspace. Cargo walks up from the build directory and MERGES
+that file, so it already applies to every repo under `Les/`: there is nothing to
+symlink, and no repo may keep a `.cargo/config.toml` of its own. You therefore
+always build whatever `common-rust` currently is.
+
+A missing or wrong path in that file does not fail — cargo silently falls back
+to the published crate and rewrites your lockfile to say so. Run
+`sh stand/check-cargo-patch.sh` if a build behaves oddly.
 
 ## Use
 

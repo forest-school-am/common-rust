@@ -8,12 +8,23 @@ directory. Used only by services that serve assets — kept SEPARATE from
 
 ## Layout
 - `src/lib.rs` — `Builder` (boot validation + pins), `AssetCache`
-  (`render` / `static_file`), `RenderError`, `sha256`, and the test suite.
+  (`render` / `render_ctx` / `static_file`), `RenderError`, `sha256`, and the
+  test suite.
+- `src/invalidation.rs` — the `Invalidation` strategies behind
+  `TEMPLATE_INVALIDATION`, their `OPTIONS` help text, and the `Watch` that arms
+  dnotify/inotify. Anything about NOTICING a change on disk goes here; anything
+  about turning a template into bytes stays in lib.rs.
 
 ## Invariants
 - Two cache modes, both invalidate on the next request after their key
   changes: `render` on (mtime, params), `static_file` on (mtime). Editing a
   served file on disk MUST take effect without a restart.
+- A third entry point, `render_ctx`, is NOT cached: it takes a `Serialize`
+  context for data-driven pages (§9.4 exempts them) and is the only one that
+  resolves `{% extends %}` / `{% include %}`, through a path loader. It decides
+  staleness via `TEMPLATE_INVALIDATION` (default `per-request`, unrecognised
+  value refuses to start) — that option governs `render_ctx` ALONE; `render`
+  and `static_file` key on mtime and never consult it.
 - Boot validation (§9.6): bad dir / missing / unparseable required template
   refuses to boot — never a render-time surprise.
 - Integrity pins (§9.7b/§9.8): a pinned file's sha256 is verified at boot AND
@@ -30,8 +41,9 @@ directory. Used only by services that serve assets — kept SEPARATE from
   elsewhere.
 
 ## Run / test
-`nix develop --impure -c cargo test` (frozen 1.98.0;
-`CARGO_TARGET_DIR=/home/dev/.cache/common-templating-target`). Library only.
+`nix develop --impure -c cargo test` at the WORKSPACE root (frozen 1.98.0; the
+flake sets `CARGO_TARGET_DIR=/home/dev/.cache/common-rust-target` for all three
+members). Library only; `cargo build` is the build path (R11(a)).
 
 ## Stand context
 Implements DECISIONS.md R6 / CODESTYLE.md §9.7–§9.8. First consumers:

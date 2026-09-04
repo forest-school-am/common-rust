@@ -27,12 +27,14 @@ included. Change here ripples fleet-wide — treat the output contract as public
   `&'static str` (so `custom!` uses `concat!`, and consts are `&str`).
 - `actor` renders `-` until `set_actor`; `reqid` is per request.
 - No network, no IO clients — this crate stays dependency-light (tracing,
-  tracing-subscriber, time). Adding a dep here taxes the whole fleet.
+  tracing-subscriber, time, and strum + strum_macros/heck for the §4.5
+  declare-once mechanism, R17a). Adding a dep here taxes the whole fleet.
 
 ## Run / test
-`nix develop --impure -c cargo test` (frozen 1.98.0 toolchain;
-`CARGO_TARGET_DIR=/home/dev/.cache/common-logging-target`). No binary — library
-only; nothing to `nix build`.
+`nix develop --impure -c cargo test` at the WORKSPACE root (frozen 1.98.0
+toolchain; the flake sets `CARGO_TARGET_DIR=/home/dev/.cache/common-rust-target`
+for all three members). No binary — library only; `cargo build` is the build
+path (R11(a)), there is no `nix build`.
 
 ## Stand context
 Implements DECISIONS.md R6 / CODESTYLE.md §8. Builds are serialized under R4's

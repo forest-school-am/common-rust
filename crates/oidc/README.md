@@ -7,8 +7,10 @@ re-login, a downward-closure group gate, and a served browser shim for the
 401→re-auth contract. No app login/logout buttons — logout lives only at
 authentik.
 
-- **Version:** `0.2.2`
+- **Version:** `0.3.0`
 - **Toolchain:** Rust 1.98.0 (workspace standard).
+- Member of the `common-rust` workspace (`crates/oidc`); `common-logging` and
+  `common-templating` are workspace siblings, not git deps, as of 0.3.0.
 - **Depends on** the stand crates `common-logging` (§8 logging) and `common-templating`
   (§9 asset rendering).
 
@@ -33,44 +35,39 @@ authentik.
 common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.2" }
 ```
 
-**Use the `https` URL, never `git@github.com:`.** Dependency fetches happen in
-places that have no SSH key, no agent and no `known_hosts`: Docker build
-containers and nix fixed-output derivations. Measured on the stand — an https
-clone of a tag inside `docker build` succeeds, the `git@` form fails with
-"Host key verification failed". The repos are public, so https needs no
-credentials at all. (Pushing to `origin` from a dev machine still uses the
-`git@` remote; that is a different URL and is unaffected.)
+**That URL and tag are documentation, not a pin, and no such remote exists** —
+nothing in this fleet is pushed (R21), and `common-rust` has no remote at all.
+The tag predates the workspace merge; do not reason about behaviour from it.
 
-This crate's own two dependencies (`common-logging`, `common-templating`) are
-declared the same way, and **must** be: a git dependency is checked out
-standalone, so a `../sibling` path dep inside a published crate resolves to
-nothing and every consumer fails at *resolution* with `no matching package
-named ...`. That is what v0.2.0 shipped with; v0.2.1 is the packaging fix and
-is otherwise identical.
+What actually resolves the dependency is the single shared cargo patch at
+`/mnt/host/workspace/Les/.cargo/config.toml` (R22a/R22b), which redirects the
+URL above to `common-rust/crates/oidc`. Cargo walks up from the build directory
+and MERGES that file, so it already applies to every repo under `Les/`: there is
+nothing to symlink, and no repo may keep a `.cargo/config.toml` of its own. You
+therefore always build whatever `common-rust` currently is.
 
-Do **not** use the stub-remote + `[patch]` form: cargo 1.98 contacts the
-patched-away nonexistent git source whenever the resolver actually runs (any
-dependency change), fails on credentials, and poisons the cached git db
-(`--offline` then breaks too) — reproduced during R5 dep removals. It is also
-simply unnecessary now that the remote exists.
+A missing or wrong path in that file does not fail — cargo silently falls back
+to the published crate and rewrites your lockfile to say so. Run
+`sh stand/check-cargo-patch.sh` if a build behaves oddly. Note also that
+`cargo ... --locked` is unusable fleet-wide under this patch (unused-record
+ordering is non-deterministic); that is a lock-check failure, not a build
+failure, and is not to be "fixed".
 
-**nix build:** `buildRustPackage` fetches git deps itself, but each one needs
-an entry in `cargoLock.outputHashes`, keyed by `<name>-<version>` as it
-appears in your `Cargo.lock`. Consuming this crate means adding three entries,
-not one — this crate plus the two it pulls in transitively:
+Since 0.3.0 this crate's own two dependencies (`common-logging`,
+`common-templating`) are workspace siblings by path, not git deps — the three
+crates share one workspace, so a member cannot drift from a sibling's
+transitive pick.
 
-```nix
-cargoLock = {
-  lockFile = ./Cargo.lock;
-  outputHashes = {
-    "common-oidc-0.2.1" = "sha256-…";
-    "common-logging-0.1.1" = "sha256-…";
-    "common-templating-0.1.2" = "sha256-…";
-  };
-};
-```
+**Building:** `cargo build` is the build path (R11(a)); `nix build` is not used
+for these crates, and the flake provides the dev shell only. Build inside
+`nix develop --impure`.
 
-`nix build` prints the expected hash on first failure; paste it in and rebuild.
+**For push day, when a remote does exist:** declare it as an `https` URL, never
+`git@github.com:`. Dependency fetches happen in places that have no SSH key, no
+agent and no `known_hosts` — Docker build containers, nix fixed-output
+derivations. Measured on the stand: an https clone of a tag inside
+`docker build` succeeds, the `git@` form fails with "Host key verification
+failed". See `PUSH-MIGRATION.md`.
 
 ## 1. Backends with browser users (BFF)
 
