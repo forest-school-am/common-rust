@@ -26,8 +26,10 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! Pins are per-file: pinning a page that `extends` a base does not cover the
-//! base. Pin every file whose content matters.
+//! One render reads exactly one file. Templates cannot reference each other —
+//! there is no `extends` or `include` — so a file's own mtime is a complete
+//! statement about whether its output is stale, and a pin on it covers
+//! everything that output depends on.
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
@@ -37,10 +39,6 @@ use std::time::SystemTime;
 
 use minijinja::{AutoEscape, Environment};
 use sha2::{Digest, Sha256};
-
-mod invalidation;
-use invalidation::Watch;
-pub use invalidation::{Invalidation, OPTIONS as INVALIDATION_OPTIONS};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
@@ -56,8 +54,6 @@ pub enum RenderError {
     Io(String, String),
     #[error("render of {0} failed: {1}")]
     Render(String, String),
-    #[error("cannot arm template invalidation: {0}")]
-    Invalidation(String),
     #[error("unsafe asset name (path traversal / escape rejected): {0}")]
     UnsafeName(String),
 }
@@ -82,25 +78,17 @@ fn autoescape(name: &str) -> AutoEscape {
     }
 }
 
-struct CtxEnv {
-    env: Environment<'static>,
-    loads: u64,
-}
-
 pub struct AssetCache {
     root: PathBuf,
     canonical_root: PathBuf,
     env: Environment<'static>,
-    ctx_env: RwLock<CtxEnv>,
     pins: HashMap<String, [u8; 32]>,
-    watch: Watch,
     entries: RwLock<HashMap<String, Entry>>,
 }
 
 pub struct Builder {
     root: PathBuf,
     required: Vec<String>,
-    invalidation: Invalidation,
     pins: HashMap<String, [u8; 32]>,
 }
 
@@ -109,7 +97,6 @@ impl Builder {
         Self {
             root: root.into(),
             required: Vec::new(),
-            invalidation: Invalidation::PerRequest,
             pins: HashMap::new(),
         }
     }
@@ -119,16 +106,11 @@ impl Builder {
         self
     }
 
-    /// Selects the strategy. Unset is `PerRequest`; see
-    /// `INVALIDATION_OPTIONS` for what each one does on this stand.
-    pub fn invalidation(mut self, strategy: Invalidation) -> Self {
-        self.invalidation = strategy;
-        self
-    }
-
-    /// Pins are per-file: a pinned template that `extends` or `include`s an
-    /// unpinned one gets no coverage of that dependency. Pin every file whose
-    /// content matters.
+    /// The hash is verified when the file is LOADED — at boot, and again on
+    /// the next request after its mtime changes — not on every render. One
+    /// render touches exactly one file, so a load-time check covers everything
+    /// that file can affect (§9.7b). Stated here because this is where someone
+    /// deciding to pin something will read it.
     pub fn pin(mut self, name: impl Into<String>, expected_sha256: [u8; 32]) -> Self {
         let name = name.into();
         self.pins.insert(name.clone(), expected_sha256);
@@ -144,24 +126,16 @@ impl Builder {
             .root
             .canonicalize()
             .map_err(|e| RenderError::Io(self.root.display().to_string(), e.to_string()))?;
+        // Holds no templates: it carries the autoescape policy and mints
+        // one-shot templates in `render`. Read-only after this point, which is
+        // why it needs no lock.
         let mut env = Environment::new();
         env.set_auto_escape_callback(autoescape);
 
-        let mut ctx_env = Environment::new();
-        ctx_env.set_auto_escape_callback(autoescape);
-        ctx_env.set_loader(minijinja::path_loader(&canonical_root));
-
-        let watch =
-            Watch::arm(self.invalidation, &canonical_root).map_err(RenderError::Invalidation)?;
         let cache = AssetCache {
             root: self.root,
             canonical_root,
             env,
-            ctx_env: RwLock::new(CtxEnv {
-                env: ctx_env,
-                loads: 0,
-            }),
-            watch,
             pins: self.pins,
             entries: RwLock::new(HashMap::new()),
         };
@@ -291,57 +265,6 @@ impl AssetCache {
             );
         }
         Ok(out)
-    }
-
-    /// `extends`/`include` targets reach minijinja through the path loader,
-    /// which never calls `read_verified` — so a pin on a base template held
-    /// only until boot finished. Every pin is re-checked on every render.
-    fn verify_all_pins(&self) -> Result<(), RenderError> {
-        for (pinned, expected) in &self.pins {
-            let path = self.safe_path(pinned)?;
-            self.read_verified(&path, pinned, Some(expected))?;
-        }
-        Ok(())
-    }
-
-    pub fn render_ctx<S: serde::Serialize>(
-        &self,
-        name: &str,
-        ctx: &S,
-    ) -> Result<String, RenderError> {
-        let path = self.safe_path(name)?;
-        let _ = self.read_verified(&path, name, self.pins.get(name))?;
-        self.verify_all_pins()?;
-
-        // Consulted once per render: a kernel strategy CONSUMES what it reports.
-        if !self.watch.stale() {
-            let g = self.ctx_env.read().unwrap_or_else(|e| e.into_inner());
-            return self.ctx_render(&g.env, name, ctx);
-        }
-
-        let mut g = self.ctx_env.write().unwrap_or_else(|e| e.into_inner());
-        g.loads += 1;
-        // Everything, not a subtree: no partial-invalidation bookkeeping and
-        // no chance of a stale sibling.
-        g.env.clear_templates();
-        self.ctx_render(&g.env, name, ctx)
-    }
-
-    fn ctx_render<S: serde::Serialize>(
-        &self,
-        env: &Environment<'static>,
-        name: &str,
-        ctx: &S,
-    ) -> Result<String, RenderError> {
-        let tmpl = env.get_template(name).map_err(|e| {
-            if e.kind() == minijinja::ErrorKind::TemplateNotFound {
-                RenderError::Missing(name.to_owned())
-            } else {
-                RenderError::Parse(name.to_owned(), e.to_string())
-            }
-        })?;
-        tmpl.render(minijinja::value::Value::from_serialize(ctx))
-            .map_err(|e| RenderError::Render(name.to_owned(), e.to_string()))
     }
 
     pub fn static_file(&self, name: &str) -> Result<Arc<[u8]>, RenderError> {
@@ -510,90 +433,36 @@ mod tests {
         ));
     }
 
+    /// The positive half of R29/R30. `multi_template` is off, so a template
+    /// that tries to reference another is a PARSE error — and because
+    /// `require_template` parses at boot, an adopter who reaches for `extends`
+    /// finds out at startup rather than on the request that renders it.
+    ///
+    /// This pins the feature decision rather than merely stating it: a
+    /// Cargo.toml regression re-enabling `multi_template` makes this build
+    /// succeed and the test fail.
     #[test]
-    fn render_ctx_takes_structured_context_and_iterates() {
-        let d = tmpdir();
-        write(
-            &d,
-            "list.html",
-            "{% for t in tasks %}<li>{{ t.name }}</li>{% endfor %}",
-        );
-        let c = Builder::new(&d)
-            .require_template("list.html")
-            .build()
-            .unwrap();
-        #[derive(serde::Serialize)]
-        struct Ctx {
-            tasks: Vec<Row>,
+    fn boot_refuses_a_template_using_a_removed_construct() {
+        for construct in ["{% extends \"base.html\" %}", "{% include \"part.html\" %}"] {
+            let d = tmpdir();
+            write(&d, "page.html", construct);
+            assert!(
+                matches!(
+                    Builder::new(&d).require_template("page.html").build(),
+                    Err(RenderError::Parse(..))
+                ),
+                "{construct} must be refused at BUILD, not at render"
+            );
         }
-        #[derive(serde::Serialize)]
-        struct Row {
-            name: String,
-        }
-        let out = c
-            .render_ctx(
-                "list.html",
-                &Ctx {
-                    tasks: vec![Row { name: "a".into() }, Row { name: "<b>".into() }],
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            out, "<li>a</li><li>&lt;b&gt;</li>",
-            "iteration + autoescape"
-        );
-    }
 
-    #[test]
-    fn render_ctx_supports_extends_and_edits_without_restart() {
+        // The control: ordinary substitution still parses, so the test above
+        // is detecting the removed construct and not a broken parser.
         let d = tmpdir();
-        write(&d, "base.html", "[{% block body %}{% endblock %}]");
-        write(
-            &d,
-            "page.html",
-            "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}",
-        );
-        let c = Builder::new(&d)
-            .require_template("page.html")
+        write(&d, "fine.html", "hello {{ name }}");
+        assert!(Builder::new(&d)
+            .require_template("fine.html")
             .build()
-            .unwrap();
-        #[derive(serde::Serialize)]
-        struct Ctx {
-            n: u32,
-        }
-        assert_eq!(c.render_ctx("page.html", &Ctx { n: 1 }).unwrap(), "[1]");
-        std::thread::sleep(Duration::from_millis(5));
-        write(&d, "base.html", "({% block body %}{% endblock %})");
-        bump_mtime(&d, "base.html");
-        assert_eq!(
-            c.render_ctx("page.html", &Ctx { n: 2 }).unwrap(),
-            "(2)",
-            "template edits must take effect without restart on the uncached path"
-        );
-    }
-
-    #[test]
-    fn render_ctx_verifies_pins_and_reports_missing() {
-        let d = tmpdir();
-        write(&d, "pinned.html", "ok {{ x }}");
-        let good = sha256(b"ok {{ x }}");
-        let c = Builder::new(&d).pin("pinned.html", good).build().unwrap();
-        #[derive(serde::Serialize)]
-        struct Ctx {
-            x: u32,
-        }
-        assert_eq!(c.render_ctx("pinned.html", &Ctx { x: 7 }).unwrap(), "ok 7");
-        std::thread::sleep(Duration::from_millis(5));
-        write(&d, "pinned.html", "tampered {{ x }}");
-        bump_mtime(&d, "pinned.html");
-        assert!(matches!(
-            c.render_ctx("pinned.html", &Ctx { x: 7 }),
-            Err(RenderError::PinMismatch(_))
-        ));
-        assert!(matches!(
-            c.render_ctx("absent.html", &Ctx { x: 7 }),
-            Err(RenderError::Missing(_))
-        ));
+            .is_ok());
     }
 
     #[test]
@@ -635,10 +504,6 @@ mod tests {
                 matches!(c.render(bad, &[]), Err(RenderError::UnsafeName(_))),
                 "render({bad:?}) not rejected"
             );
-            assert!(
-                matches!(c.render_ctx(bad, &()), Err(RenderError::UnsafeName(_))),
-                "render_ctx({bad:?}) not rejected"
-            );
         }
     }
 
@@ -676,134 +541,5 @@ mod tests {
             c.render("absent.js.jinja", &[]),
             Err(RenderError::Missing(_))
         ));
-    }
-
-    #[test]
-    fn pinned_base_template_is_verified_on_every_render_not_just_at_boot() {
-        #[derive(serde::Serialize)]
-        struct Ctx {
-            n: u32,
-        }
-        let d = tmpdir();
-        let base = "BASE {% block body %}{% endblock %}";
-        let page = "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}";
-        write(&d, "base.html", base);
-        write(&d, "page.html", page);
-        let bs: [u8; 32] = Sha256::digest(base.as_bytes()).into();
-        let pg: [u8; 32] = Sha256::digest(page.as_bytes()).into();
-        let c = Builder::new(&d)
-            .pin("page.html", pg)
-            .pin("base.html", bs)
-            .build()
-            .unwrap();
-        assert_eq!(c.render_ctx("page.html", &Ctx { n: 1 }).unwrap(), "BASE 1");
-
-        write(&d, "base.html", "TAMPERED {% block body %}{% endblock %}");
-        bump_mtime(&d, "base.html");
-        assert!(
-            matches!(c.render_ctx("page.html", &Ctx { n: 1 }), Err(RenderError::PinMismatch(n)) if n == "base.html"),
-            "tampering a pinned base template must fail the render"
-        );
-
-        write(&d, "base.html", base);
-        bump_mtime(&d, "base.html");
-        assert_eq!(c.render_ctx("page.html", &Ctx { n: 2 }).unwrap(), "BASE 2");
-    }
-
-    #[test]
-    fn invalidation_parses_strictly_and_round_trips() {
-        assert_eq!(Invalidation::parse(None).unwrap(), Invalidation::PerRequest);
-        for s in ["per-request", "dnotify", "inotify"] {
-            let v = Invalidation::parse(Some(s)).expect("valid strategy");
-            assert_eq!(
-                v.as_str(),
-                s,
-                "as_str must round-trip the accepted spelling"
-            );
-        }
-        for bad in ["", "PerRequest", "per_request", "notify", "true"] {
-            let e = Invalidation::parse(Some(bad)).expect_err("must refuse");
-            assert!(
-                e.contains("per-request") && e.contains("dnotify"),
-                "unhelpful: {e}"
-            );
-        }
-    }
-
-    #[test]
-    fn options_help_states_what_a_chooser_needs() {
-        for s in ["per-request", "dnotify", "inotify"] {
-            assert!(INVALIDATION_OPTIONS.contains(s), "help omits {s}");
-        }
-        // The two measured facts that change which option a person picks.
-        assert!(
-            INVALIDATION_OPTIONS.contains("DOES NOT WORK ON 9p"),
-            "help must say plainly that inotify does not work on 9p"
-        );
-    }
-
-    #[test]
-    fn per_request_reloads_every_render_and_a_kernel_watch_does_not() {
-        let mk = |strategy| {
-            let d = tmpdir();
-            write(&d, "base.html", "<b>{% block body %}{% endblock %}</b>");
-            write(
-                &d,
-                "page.html",
-                "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}",
-            );
-            let c = Builder::new(&d).invalidation(strategy).build().ok()?;
-            for i in 0..3 {
-                c.render_ctx("page.html", &BTreeMap::from([("n", i)]))
-                    .unwrap();
-            }
-            let n = c.ctx_env.read().unwrap().loads;
-            Some(n)
-        };
-        assert_eq!(
-            mk(Invalidation::PerRequest),
-            Some(3),
-            "per-request must rebuild every render"
-        );
-        // dnotify may be unavailable on a kernel without CONFIG_DNOTIFY; that
-        // is a property of the host, not of the code under test.
-        if let Some(loads) = mk(Invalidation::Dnotify) {
-            assert!(
-                loads <= 1,
-                "a kernel watch must not rebuild while nothing changed: {loads}"
-            );
-        }
-    }
-
-    #[test]
-    fn dnotify_sees_an_edit_to_an_extended_base() {
-        let d = tmpdir();
-        write(&d, "base.html", "<b>v1 {% block body %}{% endblock %}</b>");
-        write(
-            &d,
-            "page.html",
-            "{% extends \"base.html\" %}{% block body %}{{ n }}{% endblock %}",
-        );
-        let c = match Builder::new(&d).invalidation(Invalidation::Dnotify).build() {
-            Ok(c) => c,
-            // A kernel without CONFIG_DNOTIFY cannot run this; that is a
-            // property of the host, not a failure of the code under test.
-            Err(RenderError::Invalidation(e)) => {
-                eprintln!("skipped: dnotify unavailable here ({e})");
-                return;
-            }
-            Err(e) => panic!("unexpected build failure: {e}"),
-        };
-        let ctx = BTreeMap::from([("n", 7)]);
-        assert_eq!(c.render_ctx("page.html", &ctx).unwrap(), "<b>v1 7</b>");
-
-        write(&d, "base.html", "<b>v2 {% block body %}{% endblock %}</b>");
-        bump_mtime(&d, "base.html");
-        std::thread::sleep(Duration::from_millis(150));
-        assert_eq!(
-            c.render_ctx("page.html", &ctx).unwrap(),
-            "<b>v2 7</b>",
-            "an edit to a BASE template must be picked up — editing the child was always caught"
-        );
     }
 }

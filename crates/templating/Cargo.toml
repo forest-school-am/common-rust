@@ -6,19 +6,21 @@ license.workspace = true
 description = "Shared template + static-asset rendering for Les services: minijinja + an mtime/params-keyed asset cache over a validated dir"
 
 [dependencies]
-# "loader": render_ctx resolves {% extends %}/{% include %} through a
-# per-call path_loader over the validated asset dir for data-driven pages.
-minijinja = { version = "2", features = ["loader"] }
-# the render_ctx context bound; no derive needed here.
-serde.workspace = true
+# default-features off sheds `multi_template` (R29/R30): templates cannot
+# reference each other, so one render reads one file and its mtime is exact.
+# `loader` goes with it — it existed to resolve extends/include.
+# `serde` is KEPT: `Template::render<S: Serialize>` is an unconditional bound,
+# and minijinja depends on serde non-optionally regardless, so dropping the
+# feature would buy no dependency and only deprecate `Environment::new`.
+minijinja = { version = "2", default-features = false, features = [
+    "builtins",
+    "debug",
+    "serde",
+] }
 # integrity pins for served logic / library templates.
 sha2.workspace = true
 thiserror.workspace = true
-# raw fcntl(F_NOTIFY) and inotify: the `notify` crate does not offer dnotify.
-libc = "0.2"
 
 [dev-dependencies]
 # set mtimes forward to test cache invalidation deterministically
 filetime = "0.2"
-# derive for render_ctx test contexts
-serde = { workspace = true, features = ["derive"] }

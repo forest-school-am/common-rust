@@ -61,12 +61,14 @@ an `Arc` in your `AppState`.
 |---|---|---|
 | `render(name, params)` | (mtime, params) | minijinja templates with config baked in |
 | `static_file(name)` | (mtime) | completely static served files |
-| `render_ctx(name, &ctx)` | not cached | data-driven pages: a `Serialize` context, `{% extends %}`/`{% include %}` |
 
-`render_ctx` is the §9.4 exemption — per-request domain data (lists, tables,
-histories) renders fresh every time, because keying a cache on serialized
-per-request data is pure waste. It is also the only entry point that resolves
-`{% extends %}` and `{% include %}`, through a path loader over the asset dir.
+EXACTLY TWO SHAPES, and the crate must not grow a third (§9.4). Templates cannot
+reference each other — there is no `extends` or `include` — so one render reads
+one file and its own mtime is a complete statement about staleness. A service
+needing per-request domain data owns its own engine or does not server-render;
+pre-rendering rows to HTML strings in Rust to fit this API is a §9.1 violation
+rather than a workaround, and being tempted by it is the signal that the
+service needs its own engine.
 
 - **Boot validation (§9.6):** the asset dir must exist and every required
   template must be present and parse — `Builder::build` refuses otherwise. The
@@ -77,23 +79,6 @@ per-request data is pure waste. It is also the only entry point that resolves
   for logic the server also enforces (dual-use assets) and for library
   templates that must not drift from the crate version. Produce the constant
   with `common_templating::sha256(bytes)`.
-
-## Template invalidation (`TEMPLATE_INVALIDATION`)
-
-`render_ctx` keeps parsed templates in a minijinja environment, so it needs to
-be told when one changed on disk. `Builder::invalidation` selects how; unset is
-`per-request`, and an unrecognised value refuses to start. **This option governs
-`render_ctx` only** — `render` and `static_file` key on mtime and never consult
-it.
-
-| value | how |
-|---|---|
-| `per-request` (default) | clear the environment on every render; the only strategy that cannot silently degrade, at the cost of a reparse per render |
-| `dnotify` | per-directory kernel events via raw `fcntl(F_NOTIFY)`; the kernel option that WORKS on this stand's 9p share |
-| `inotify` | per-inode kernel events; **does not work on 9p** — the watch succeeds and then stays silent forever |
-
-`common_templating::INVALIDATION_OPTIONS` is the help text for this option as
-data (§10.0f) — print it from your `--help` rather than restating the table.
 
 ## Untrusted names (§9.5b)
 
