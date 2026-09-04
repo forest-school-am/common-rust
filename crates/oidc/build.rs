@@ -45,10 +45,16 @@ fn main() {
         format!("pub(crate) const COMMON_OIDC_JS_SHA256: [u8; 32] = [{bytes_list}];\n"),
     )
     .unwrap();
+    // The path list is emitted alongside the state so the runtime refusal can
+    // NAME the paths that were checked instead of restating them. Restating
+    // them is how the message ends up describing a different set from the one
+    // examined — which it briefly did, listing three of these four.
+    let source_list = ARTIFACT_SOURCES.map(|p| format!("{p:?}")).join(", ");
     std::fs::write(
         PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("source_state.rs"),
         format!(
-            "pub(crate) const CRATE_SOURCE_STATE: SourceState = {};\n",
+            "pub(crate) const CRATE_SOURCE_STATE: SourceState = {};\n\
+             pub(crate) const ARTIFACT_SOURCES: &[&str] = &[{source_list}];\n",
             source_state()
         ),
     )
