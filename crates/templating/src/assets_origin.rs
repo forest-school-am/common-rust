@@ -118,6 +118,11 @@ mod tests {
                 "a path or trailing slash is present",
             ),
             ("https://assets.dev.local:8021", "a port is present"),
+            ("https://assets.dev.local:8443", "a port is present"),
+            (
+                "https://assets.dev.local/?v=1",
+                "a path or trailing slash is present",
+            ),
             (
                 "https://user:pw@assets.dev.local",
                 "credentials are present",
