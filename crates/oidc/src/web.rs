@@ -137,7 +137,7 @@ impl OidcState {
 
         let deadline = retry::Deadline::starting_now();
 
-        match retry::within(&deadline, || {
+        let rejected = match retry::within(&deadline, || {
             self.client
                 .principal_from_access_token(&session.access_token)
         })
@@ -153,8 +153,8 @@ impl OidcState {
                 self.store.remove(&sid).await;
                 return None;
             }
-            Err(Upstream::Rejected(_)) => {}
-        }
+            Err(Upstream::Rejected(why)) => why,
+        };
 
         if let Some(rt) = &session.refresh_token {
             if let Ok(tokens) = retry::within(&deadline, || self.client.refresh(rt)).await {
@@ -181,6 +181,7 @@ impl OidcState {
 
         common_logging::info!(
             common_logging::AUTH,
+            reason = %rejected,
             "session tokens rejected by the IdP — destroying local session"
         );
         self.store.remove(&sid).await;
