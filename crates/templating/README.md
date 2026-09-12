@@ -62,13 +62,12 @@ an `Arc` in your `AppState`.
 | `render(name, params)` | (mtime, params) | minijinja templates with config baked in |
 | `static_file(name)` | (mtime) | completely static served files |
 
-EXACTLY TWO SHAPES, and the crate must not grow a third (§9.4). Templates cannot
-reference each other — there is no `extends` or `include` — so one render reads
-one file and its own mtime is a complete statement about staleness. A service
-needing per-request domain data owns its own engine or does not server-render;
-pre-rendering rows to HTML strings in Rust to fit this API is a §9.1 violation
-rather than a workaround, and being tempted by it is the signal that the
-service needs its own engine.
+EXACTLY TWO SHAPES, and the crate must not grow a third (§9.4). Single-file
+templates are NOT enforced; hot-reload reloads modified templates only. A
+service needing per-request domain data owns its own engine or does not
+server-render; pre-rendering rows to HTML strings in Rust to fit this API is a
+§9.1 violation rather than a workaround, and being tempted by it is the signal
+that the service needs its own engine.
 
 - **Boot validation (§9.6):** the asset dir must exist and every required
   template must be present and parse — `Builder::build` refuses otherwise. The

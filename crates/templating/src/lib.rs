@@ -20,10 +20,6 @@
 //! assert_eq!(&*assets.static_file("logic.js")?, logic.as_bytes());
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
-//!
-//! One render reads exactly one file: templates cannot reference each other,
-//! so a file's own mtime is a complete statement about whether its output is
-//! stale, and a pin on it covers everything that output depends on.
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};

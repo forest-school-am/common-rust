@@ -16,10 +16,8 @@ directory. Used only by services that serve assets — kept SEPARATE from
   changes: `render` on (mtime, params), `static_file` on (mtime). Editing a
   served file on disk MUST take effect without a restart.
 - EXACTLY TWO entry points and the crate MUST NOT grow a third (§9.4, R30).
-  `multi_template` is off, so templates cannot reference each other: one render
-  reads one file and its own mtime is a complete staleness signal. A service
-  needing per-request domain data owns its own engine. `boot_refuses_a_template_using_a_removed_construct`
-  pins the feature decision — re-enabling `multi_template` fails it.
+  Single-file templates are NOT enforced; hot-reload reloads modified templates
+  only. A service needing per-request domain data owns its own engine.
 - Boot validation (§9.6): bad dir / missing / unparseable required template
   refuses to boot — never a render-time surprise.
 - Integrity pins (§9.7b/§9.8): a pinned file's sha256 is verified at boot AND
