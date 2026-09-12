@@ -21,6 +21,10 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+mod assets_origin;
+
+pub use assets_origin::{AssetsOrigin, PARAM as ASSETS_ORIGIN_PARAM};
+
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};

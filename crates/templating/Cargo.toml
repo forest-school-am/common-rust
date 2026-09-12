@@ -14,8 +14,15 @@ minijinja = { version = "2", default-features = false, features = [
     "debug",
     "serde",
 ] }
+common-logging.workspace = true
+http = "1"
+tower-http = { version = "0.6", default-features = false, features = ["set-header"] }
 sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+axum = "0.8"
 filetime = "0.2"
+http-body-util = "0.1"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tower = { version = "0.5", features = ["util"] }

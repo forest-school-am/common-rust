@@ -80,6 +80,43 @@ that the service needs its own engine.
   templates that must not drift from the crate version. Produce the constant
   with `common_templating::sha256(bytes)`.
 
+## The asset origin (§12.6)
+
+The origin, its CSP and its template parameter come from here, so no service
+composes them:
+
+```rust
+let origin = common_templating::AssetsOrigin::from_env(deployment)
+    .unwrap_or_else(|r| common_logging::refuse!(r));   // your module, your log line
+
+let app = Router::new()
+    .route("/", get(index))
+    .layer(origin.as_ref().map(|o| o.csp_layer()).unwrap());
+
+// in the handler, as an ordinary §9.5 substitution parameter:
+let html = assets.render("index.html", &[origin.param()])?;
+```
+
+```html
+<script type="module" src="{{ assets_origin }}/common-ui@<hash>/common-ui.js"
+        integrity="sha384-…" crossorigin="anonymous"></script>
+```
+
+`ASSETS_ORIGIN` is `https://<host>` and nothing else — no path, port, trailing
+slash, credentials, query or fragment. Anything else is a boot refusal naming
+the variable, the value, what was accepted, and which rule it broke. It is
+**prod-required**: unset is `None` under `DEPLOYMENT_TYPE=dev` and a refusal
+under prod.
+
+The header is §12.2's value, with no `unsafe-*` and the origin in both
+`script-src` and `style-src`:
+
+```
+default-src 'self'; script-src 'self' <origin>; style-src 'self' <origin>;
+img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self';
+form-action 'self'; frame-ancestors 'none'
+```
+
 ## Untrusted names (§9.5b)
 
 Asset names are treated as untrusted input — an adopter that serves a bundle by

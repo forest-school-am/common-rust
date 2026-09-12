@@ -34,6 +34,21 @@ directory. Used only by services that serve assets — kept SEPARATE from
 - Scope is SERVED content only (§9.7a); embedded non-served data is fine
   elsewhere.
 
+- THE ASSET ORIGIN IS THIS CRATE'S (§12.6), not each service's: one option
+  `ASSETS_ORIGIN` (unprefixed, like the common-logging options), one refusal
+  shape, one CSP value, one `{{ assets_origin }}`. `AssetsOrigin::parse`
+  RETURNS a `common_logging::Refusal` rather than refusing itself — the SERVICE
+  calls `refuse!`, so the line carries the service's module path (§1.3b).
+  Accepts `https://<host>` and nothing else: no path, port, trailing slash,
+  credentials, query or fragment, and the `detail` field says which rule the
+  value broke. Prod-required: unset is `Ok(None)` under dev and a refusal under
+  prod. `csp_layer()` and `param()` hang off a PRESENT origin, so a service
+  without one cannot half-wire itself.
+- The CSP is §12.2's normative string, asserted literally in both the unit test
+  and the served-response test. No `unsafe-*`, and
+  `object-src`/`base-uri`/`form-action`/`frame-ancestors` are spelled out
+  because they do NOT fall back to `default-src`.
+
 ## Run / test
 `nix develop --impure -c cargo test` at the WORKSPACE root (frozen 1.98.0; the
 flake sets `CARGO_TARGET_DIR=/home/dev/.cache/common-rust-target` for all three
