@@ -116,7 +116,7 @@ async fn a_served_page_carries_the_csp_and_the_substituted_origin() {
         csp,
         "default-src 'self'; script-src 'self' https://assets.dev.local; \
          style-src 'self' https://assets.dev.local; img-src 'self' data:; connect-src 'self'; \
-         object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+         object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
     );
 
     let html = String::from_utf8(body).unwrap();
@@ -157,7 +157,7 @@ async fn the_layer_never_emits_an_unsafe_directive() {
         "object-src 'none'",
         "base-uri 'self'",
         "form-action 'self'",
-        "frame-ancestors 'none'",
+        "frame-ancestors 'self'",
     ] {
         assert!(
             csp.contains(required),

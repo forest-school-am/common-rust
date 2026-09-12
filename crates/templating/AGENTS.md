@@ -48,6 +48,21 @@ directory. Used only by services that serve assets — kept SEPARATE from
   and the served-response test. No `unsafe-*`, and
   `object-src`/`base-uri`/`form-action`/`frame-ancestors` are spelled out
   because they do NOT fall back to `default-src`.
+- `frame-ancestors` is `'self'`, NOT `'none'`. `'none'` refuses same-origin
+  framing as well as cross-origin, which blanks les-forms' editor preview
+  (it frames its own `/render?preview=1`) and breaks cron's 360px harness,
+  which measures inside a same-origin iframe because headless Firefox will not
+  size a window below ~500px. `'self'` still refuses every cross-origin framer,
+  which is the clickjacking threat the directive exists for.
+- EACH DIRECTIVE NEEDS A CONSUMER THAT EXERCISES IT, and one that nothing
+  exercises is unverified rather than safe. Two defects arrived this way: this
+  crate has no page that frames another, so `'none'` passed every test here;
+  and common-ui's CSP check served its CSS same-origin, so cross-origin
+  `style-src` is still unexercised until les-forms' pages load the theme for
+  real. Who exercises what today: `script-src`/`style-src` cross-origin →
+  les-forms (pending), `frame-ancestors` same-origin → les-forms' preview and
+  cron's harness, `form-action` → les-forms and cron, `connect-src` → the
+  picker's remote source, `img-src data:` → nothing yet.
 
 ## Run / test
 `nix develop --impure -c cargo test` at the WORKSPACE root (frozen 1.98.0; the

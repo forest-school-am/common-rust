@@ -67,7 +67,7 @@ impl AssetsOrigin {
         format!(
             "default-src 'self'; script-src 'self' {origin}; style-src 'self' {origin}; \
              img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; \
-             form-action 'self'; frame-ancestors 'none'",
+             form-action 'self'; frame-ancestors 'self'",
             origin = self.0
         )
     }
@@ -185,12 +185,30 @@ mod tests {
             "default-src 'self'; script-src 'self' https://assets.dev.local; \
              style-src 'self' https://assets.dev.local; img-src 'self' data:; \
              connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; \
-             frame-ancestors 'none'"
+             frame-ancestors 'self'"
         );
         assert!(
             !origin.csp().contains("unsafe"),
             "no unsafe-* directive may ever appear: {}",
             origin.csp()
+        );
+    }
+
+    #[test]
+    fn the_csp_permits_same_origin_framing() {
+        let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
+            .unwrap()
+            .unwrap();
+        let csp = origin.csp();
+        assert!(
+            csp.contains("frame-ancestors 'self'"),
+            "a page must be able to frame its own origin — les-forms' editor frames \
+             /render?preview=1 and cron's 360px harness measures inside a same-origin \
+             iframe, and BOTH go blank under 'none': {csp}"
+        );
+        assert!(
+            !csp.contains("frame-ancestors 'none'"),
+            "'none' refuses same-origin framing as well as cross-origin: {csp}"
         );
     }
 

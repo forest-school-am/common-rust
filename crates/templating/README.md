@@ -114,7 +114,7 @@ The header is §12.2's value, with no `unsafe-*` and the origin in both
 ```
 default-src 'self'; script-src 'self' <origin>; style-src 'self' <origin>;
 img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self';
-form-action 'self'; frame-ancestors 'none'
+form-action 'self'; frame-ancestors 'self'
 ```
 
 ## Untrusted names (§9.5b)
