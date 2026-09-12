@@ -66,7 +66,7 @@ impl AssetsOrigin {
     pub fn csp(&self) -> String {
         format!(
             "default-src 'self'; script-src 'self' {origin}; style-src 'self' {origin}; \
-             img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; \
+             img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; \
              form-action 'self'; frame-ancestors 'self'",
             origin = self.0
         )
@@ -183,7 +183,7 @@ mod tests {
         assert_eq!(
             origin.csp(),
             "default-src 'self'; script-src 'self' https://assets.dev.local; \
-             style-src 'self' https://assets.dev.local; img-src 'self' data:; \
+             style-src 'self' https://assets.dev.local; img-src 'self'; \
              connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; \
              frame-ancestors 'self'"
         );

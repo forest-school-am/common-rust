@@ -62,7 +62,9 @@ directory. Used only by services that serve assets — kept SEPARATE from
   real. Who exercises what today: `script-src`/`style-src` cross-origin →
   les-forms (pending), `frame-ancestors` same-origin → les-forms' preview and
   cron's harness, `form-action` → les-forms and cron, `connect-src` → the
-  picker's remote source, `img-src data:` → nothing yet.
+  picker's remote source. `data:` was dropped from `img-src` under this rule —
+  nothing in les-forms, cron or common-ui uses it — and comes back when a page
+  ships an inline image.
 
 ## Run / test
 `nix develop --impure -c cargo test` at the WORKSPACE root (frozen 1.98.0; the
