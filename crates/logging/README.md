@@ -136,12 +136,36 @@ means everything passes — it has to, or setting only `RUST_LOG` would AND
 itself to nothing.
 
 An unknown designator or level is REFUSED rather than ignored, since a filter
-that silently matches nothing is the defect this variable exists to remove. On
-a value that will not parse, `init()` falls back to passing everything and
-logs an error saying so: a mistake here must never SILENCE output. A service
-wanting refuse-to-boot instead calls `Designators::parse` itself.
+that silently matches nothing is the defect this variable exists to remove.
+
+## Set-but-invalid refuses to start (R50)
+
+All four variables behave the same way. **Unset** means the documented default.
+**Set to something unrecognised** means the process does not start:
+
+| variable | unset | set-but-invalid |
+|---|---|---|
+| `LOG_FORMAT` | `json` | refuses |
+| `DEPLOYMENT_TYPE` | `dev` | refuses |
+| `RUST_LOG` | `info` under prod, `debug` under dev | refuses |
+| `LOG_DESIGNATORS` | everything passes | refuses |
+
+The refusal names the variable, the value you set and what would have been
+accepted, and goes to **stderr with a non-zero exit** — stderr because `init()`
+runs before any subscriber exists, so a `tracing` event would go nowhere:
+
+```
+$ LOG_FORMAT=bogus ./my-service
+common-logging: refusing to start — LOG_FORMAT="bogus" is not valid — expected
+one of ["human", "json"] (unset means json). …
+```
+
+A service that wants to handle the refusal itself rather than exit calls
+`LogConfig::from_env()` (or `Format`/`Deployment::from_env`, or
+`Designators::parse`) and gets the message as an `Err`.
 
 ## Test
 
-`cargo test` — pure config-matrix tests plus literal-shape tests for both
-output formats and the `c-` designator behavior (no network).
+`cargo test` — one refuse/default test per environment variable, plus
+literal-shape tests for both output formats and the `c-` designator behaviour
+(no network).

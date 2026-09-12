@@ -4,6 +4,7 @@
 use std::str::FromStr;
 
 use strum::{AsRefStr, Display, EnumString, VariantNames};
+use tracing_subscriber::EnvFilter;
 
 use crate::filter::Designators;
 
@@ -13,6 +14,27 @@ pub enum Format {
     Human,
     #[strum(serialize = "json")]
     Json,
+}
+
+impl Format {
+    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+        let Some(text) = value else {
+            return Ok(Format::Json);
+        };
+        Format::from_str(text).map_err(|_| {
+            format!(
+                "LOG_FORMAT={text:?} is not valid — expected one of {:?} \
+                 (unset means json). Refusing rather than defaulting (R50): \
+                 coming up in the other format silently changes every line a \
+                 downstream parser reads.",
+                Format::VARIANTS
+            )
+        })
+    }
+
+    pub fn from_env() -> Result<Self, String> {
+        Self::parse(std::env::var("LOG_FORMAT").ok().as_deref())
+    }
 }
 
 /// Only the logging verbosity default is decided from this here; the
@@ -59,13 +81,9 @@ impl LogConfig {
         deployment_type: Option<&str>,
         rust_log: Option<&str>,
         log_designators: Option<&str>,
-    ) -> (Self, Option<String>) {
-        let format = log_format
-            .and_then(|s| Format::from_str(s).ok())
-            .unwrap_or(Format::Json);
-        let deployment = deployment_type
-            .and_then(|s| Deployment::from_str(s).ok())
-            .unwrap_or(Deployment::Dev);
+    ) -> Result<Self, String> {
+        let format = Format::parse(log_format)?;
+        let deployment = Deployment::parse(deployment_type)?;
         let filter = match rust_log {
             Some(s) if !s.is_empty() => s.to_owned(),
             _ => match deployment {
@@ -73,22 +91,17 @@ impl LogConfig {
                 Deployment::Dev => "debug".to_owned(),
             },
         };
-        let (designators, complaint) = match Designators::parse(log_designators) {
-            Ok(d) => (d, None),
-            Err(why) => (Designators::permissive(), Some(why)),
+        let resolved = Self {
+            format,
+            deployment,
+            filter,
+            designators: Designators::parse(log_designators)?,
         };
-        (
-            Self {
-                format,
-                deployment,
-                filter,
-                designators,
-            },
-            complaint,
-        )
+        resolved.env_filter()?;
+        Ok(resolved)
     }
 
-    pub fn from_env() -> (Self, Option<String>) {
+    pub fn from_env() -> Result<Self, String> {
         let get = |k: &str| std::env::var(k).ok();
         Self::resolve(
             get("LOG_FORMAT").as_deref(),
@@ -97,85 +110,147 @@ impl LogConfig {
             get("LOG_DESIGNATORS").as_deref(),
         )
     }
+
+    /// `RUST_LOG` is a filter DSL rather than a set of spellings, so only
+    /// tracing can say whether a value parses. Built here so `resolve` and
+    /// `init_with` refuse identically and the message is written once.
+    pub fn env_filter(&self) -> Result<EnvFilter, String> {
+        EnvFilter::try_new(&self.filter).map_err(|e| {
+            format!(
+                "RUST_LOG={:?} is not a valid tracing filter: {e}. Expected \
+                 comma-separated directives such as \"info\", \
+                 \"my_crate=debug\" or \"my_crate::module=trace,sqlx=warn\" \
+                 (unset means \"info\" under DEPLOYMENT_TYPE=prod, \"debug\" \
+                 under dev). Refusing rather than defaulting (R50).",
+                self.filter
+            )
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn format_defaults_to_json_including_unknown() {
-        assert_eq!(
-            LogConfig::resolve(None, None, None, None).0.format,
-            Format::Json
+    fn ok(
+        format: Option<&str>,
+        deployment: Option<&str>,
+        rust_log: Option<&str>,
+        designators: Option<&str>,
+    ) -> LogConfig {
+        LogConfig::resolve(format, deployment, rust_log, designators).expect("must resolve")
+    }
+
+    /// The refusal has to name all three things an operator needs, and a
+    /// message is the part nobody checks: the VARIABLE, the VALUE they set,
+    /// and what would have been accepted.
+    fn assert_refusal(msg: &str, variable: &str, value: &str, accepted: &str) {
+        assert!(msg.contains(variable), "must name {variable}: {msg}");
+        assert!(
+            msg.contains(&format!("{value:?}")),
+            "must quote the rejected value {value:?}: {msg}"
         );
-        assert_eq!(
-            LogConfig::resolve(Some("json"), None, None, None).0.format,
-            Format::Json
-        );
-        assert_eq!(
-            LogConfig::resolve(Some("HUMAN"), None, None, None).0.format,
-            Format::Json
-        );
-        assert_eq!(
-            LogConfig::resolve(Some("bogus"), None, None, None).0.format,
-            Format::Json
-        );
-        assert_eq!(
-            LogConfig::resolve(Some("human"), None, None, None).0.format,
-            Format::Human
+        assert!(
+            msg.contains(accepted),
+            "must name what is accepted ({accepted}): {msg}"
         );
     }
 
     #[test]
-    fn deployment_defaults_to_dev_including_unknown() {
+    fn log_format_defaults_to_json_unset_and_refuses_anything_it_does_not_know() {
+        assert_eq!(ok(None, None, None, None).format, Format::Json);
+        assert_eq!(ok(Some("json"), None, None, None).format, Format::Json);
+        assert_eq!(ok(Some("human"), None, None, None).format, Format::Human);
+
+        for bad in ["HUMAN", "Human", "Json", "bogus", ""] {
+            let msg = LogConfig::resolve(Some(bad), None, None, None)
+                .expect_err("set-but-invalid LOG_FORMAT must refuse, not degrade to json");
+            assert_refusal(&msg, "LOG_FORMAT", bad, r#"["human", "json"]"#);
+        }
+    }
+
+    #[test]
+    fn deployment_type_defaults_to_dev_unset_and_refuses_anything_it_does_not_know() {
+        assert_eq!(ok(None, None, None, None).deployment, Deployment::Dev);
         assert_eq!(
-            LogConfig::resolve(None, None, None, None).0.deployment,
+            ok(None, Some("dev"), None, None).deployment,
             Deployment::Dev
         );
         assert_eq!(
-            LogConfig::resolve(None, Some("dev"), None, None)
-                .0
-                .deployment,
-            Deployment::Dev
-        );
-        assert_eq!(
-            LogConfig::resolve(None, Some("bogus"), None, None)
-                .0
-                .deployment,
-            Deployment::Dev
-        );
-        assert_eq!(
-            LogConfig::resolve(None, Some("prod"), None, None)
-                .0
-                .deployment,
+            ok(None, Some("prod"), None, None).deployment,
             Deployment::Prod
         );
+
+        for bad in ["PROD", "Prod", "production", "prd", ""] {
+            let msg = LogConfig::resolve(None, Some(bad), None, None)
+                .expect_err("set-but-invalid DEPLOYMENT_TYPE must refuse, not degrade to dev");
+            assert_refusal(&msg, "DEPLOYMENT_TYPE", bad, r#"["prod", "dev"]"#);
+        }
+    }
+
+    #[test]
+    fn rust_log_refuses_a_filter_tracing_cannot_parse() {
+        for bad in [
+            "=",
+            "=info",
+            "foo=notalevel",
+            "a=b=c",
+            "foo=99",
+            "[[[",
+            "!!!",
+            " ",
+        ] {
+            let msg = LogConfig::resolve(None, None, Some(bad), None)
+                .expect_err("a malformed RUST_LOG must refuse, not fall back to \"info\"");
+            assert_refusal(&msg, "RUST_LOG", bad, "my_crate=debug");
+        }
+
+        for fine in [
+            "info",
+            "bogus",
+            "my_crate=debug",
+            "foo::bar=trace,sqlx=warn",
+        ] {
+            assert_eq!(
+                ok(None, None, Some(fine), None).filter,
+                fine,
+                "{fine} is a valid tracing filter and must be taken verbatim"
+            );
+        }
+    }
+
+    #[test]
+    fn log_designators_passes_everything_unset_and_refuses_a_value_it_does_not_know() {
+        assert_eq!(
+            ok(None, None, None, None).designators,
+            Designators::permissive()
+        );
+
+        for (bad, accepted) in [
+            ("nonsense=info", "auth"),
+            ("athu=debug", "auth"),
+            ("auth=verbose", "trace"),
+        ] {
+            let msg = LogConfig::resolve(None, None, None, Some(bad))
+                .expect_err("set-but-invalid LOG_DESIGNATORS must refuse, not pass everything");
+            assert!(
+                msg.contains("LOG_DESIGNATORS"),
+                "must name the variable: {msg}"
+            );
+            assert!(msg.contains(accepted), "must name what is accepted: {msg}");
+        }
     }
 
     #[test]
     fn filter_uses_rust_log_else_deployment_default() {
         assert_eq!(
-            LogConfig::resolve(None, Some("prod"), Some("mycrate=trace"), None)
-                .0
-                .filter,
+            ok(None, Some("prod"), Some("mycrate=trace"), None).filter,
             "mycrate=trace"
         );
-        assert_eq!(
-            LogConfig::resolve(None, Some("prod"), Some(""), None)
-                .0
-                .filter,
-            "info"
-        );
-        assert_eq!(
-            LogConfig::resolve(None, Some("prod"), None, None).0.filter,
-            "info"
-        );
-        assert_eq!(
-            LogConfig::resolve(None, Some("dev"), None, None).0.filter,
-            "debug"
-        );
-        assert_eq!(LogConfig::resolve(None, None, None, None).0.filter, "debug");
+        assert_eq!(ok(None, Some("prod"), Some(""), None).filter, "info");
+        assert_eq!(ok(None, Some("prod"), None, None).filter, "info");
+        assert_eq!(ok(None, Some("dev"), None, None).filter, "debug");
+        assert_eq!(ok(None, None, None, None).filter, "debug");
     }
 
     #[test]
@@ -188,26 +263,12 @@ mod tests {
 
     #[test]
     fn the_two_filter_axes_do_not_touch_each_other() {
-        let (cfg, complaint) =
-            LogConfig::resolve(None, None, Some("mycrate=debug"), Some("auth=trace"));
+        let cfg = ok(None, None, Some("mycrate=debug"), Some("auth=trace"));
         assert_eq!(cfg.filter, "mycrate=debug");
         assert_eq!(
             cfg.designators,
             Designators::parse(Some("auth=trace")).unwrap()
         );
-        assert!(complaint.is_none());
-    }
-
-    #[test]
-    fn an_unparseable_designator_filter_passes_everything_and_complains() {
-        let (cfg, complaint) = LogConfig::resolve(None, None, None, Some("nonsense=info"));
-        assert_eq!(
-            cfg.designators,
-            Designators::permissive(),
-            "a bad filter must not silence anything"
-        );
-        let complaint = complaint.expect("the operator must be told");
-        assert!(complaint.contains("nonsense"), "{complaint}");
     }
 
     #[test]

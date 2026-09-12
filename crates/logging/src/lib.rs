@@ -26,25 +26,29 @@ pub use filter::Designators;
 pub use span::__reqid;
 pub use span::{gen_reqid, set_actor};
 
+use tracing_subscriber::fmt;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{fmt, EnvFilter};
 
 pub fn init() {
-    let (cfg, complaint) = LogConfig::from_env();
-    init_with(cfg);
-    if let Some(why) = complaint {
-        crate::error!(
-            AUTH,
-            reason = %why,
-            "LOG_DESIGNATORS was not understood — every designator is passing; \
-             the filter you set is NOT in effect"
-        );
+    match LogConfig::from_env() {
+        Ok(cfg) => init_with(cfg),
+        Err(why) => refuse(&why),
     }
 }
 
+/// Stderr is the only channel there is: this runs before any subscriber
+/// exists, so a `tracing` event would go nowhere.
+fn refuse(why: &str) -> ! {
+    eprintln!("common-logging: refusing to start — {why}");
+    std::process::exit(1);
+}
+
 pub fn init_with(cfg: LogConfig) {
-    let env = EnvFilter::try_new(&cfg.filter).unwrap_or_else(|_| EnvFilter::new("info"));
+    let env = match cfg.env_filter() {
+        Ok(env) => env,
+        Err(why) => refuse(&why),
+    };
     let designators = cfg.designators;
     match cfg.format {
         Format::Json => {
@@ -84,6 +88,7 @@ mod tests {
     use std::io;
     use std::sync::{Arc, Mutex};
     use tracing_subscriber::fmt::MakeWriter;
+    use tracing_subscriber::EnvFilter;
 
     #[derive(Clone)]
     struct Buf(Arc<Mutex<Vec<u8>>>);

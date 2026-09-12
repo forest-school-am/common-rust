@@ -10,8 +10,9 @@ included. Change here ripples fleet-wide — treat the output contract as public
 - `src/lib.rs` — public API + `init`/`init_with` (builds the subscriber);
   inline format/designator tests.
 - `src/config.rs` — `LogConfig::resolve` (pure `LOG_FORMAT`/`DEPLOYMENT_TYPE`/
-  `RUST_LOG`/`LOG_DESIGNATORS` → format/deployment/filter/designators) + matrix
-  tests.
+  `RUST_LOG`/`LOG_DESIGNATORS` → `Result<LogConfig, String>`) + one
+  refuse/default test per variable. `env_filter()` is the `RUST_LOG` check, and
+  it lives here so `resolve` and `init_with` refuse with the same message.
 - `src/filter.rs` — `Designators`, the `LOG_DESIGNATORS` axis: parsing,
   validation, and the `Filter` impl that reads the designator FIELD. Anything
   about which events pass goes here; what a designator means stays in
@@ -26,8 +27,13 @@ included. Change here ripples fleet-wide — treat the output contract as public
 - Human layout is EXACTLY `timestamp level designator file:row reqid [actor]
   message`, single-space separated, one line per event. The literal-shape
   tests lock it.
-- Default format is `json`; unknown `LOG_FORMAT` degrades to json (logging
-  must always come up). Default `DEPLOYMENT_TYPE` is `dev`.
+- SET-BUT-INVALID REFUSES TO START (R50, canon §4.4y): all four of
+  `LOG_FORMAT`, `DEPLOYMENT_TYPE`, `RUST_LOG` and `LOG_DESIGNATORS`. Unset is a
+  documented default (`json`, `dev`, deployment-derived, pass-everything); set
+  to something unrecognised is a refusal naming the variable, the value and the
+  accepted spellings, on STDERR with a non-zero exit — stderr because `init()`
+  runs before any subscriber exists, so a `tracing` event would go nowhere.
+  "Logging must always come up" is WITHDRAWN; it was never the user's.
 - The designator is an event FIELD, never the tracing target (R28). The target
   is the module path, so `RUST_LOG` behaves as standard tracing. Designators
   must stay compile-time `&'static str` (so `custom!` uses `concat!`).
@@ -35,9 +41,6 @@ included. Change here ripples fleet-wide — treat the output contract as public
   `LOG_DESIGNATORS` (designator). Unset `LOG_DESIGNATORS` must pass
   EVERYTHING, or the two ANDs resolve to silence. An event with no designator
   — anything from a dependency — always passes the designator axis.
-- An unparseable `LOG_DESIGNATORS` fails OPEN and complains. This is the one
-  place a bad value must never silence output; that silence is the defect R28
-  removed.
 - `request_span!` is a MACRO and must stay one (R28): it has to expand at the
   CALL SITE so the span carries the adopter's module path. As a function it
   carried common-logging's, and a service-scoped `RUST_LOG` then silently
