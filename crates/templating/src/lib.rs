@@ -64,14 +64,6 @@ enum Entry {
     },
 }
 
-fn autoescape(name: &str) -> AutoEscape {
-    if name.ends_with(".html") || name.ends_with(".htm") {
-        AutoEscape::Html
-    } else {
-        AutoEscape::None
-    }
-}
-
 pub struct AssetCache {
     root: PathBuf,
     canonical_root: PathBuf,
@@ -115,8 +107,10 @@ impl Builder {
             .root
             .canonicalize()
             .map_err(|e| RenderError::Io(self.root.display().to_string(), e.to_string()))?;
+        // minijinja's own default callback escapes `.html`/`.htm`/`.xml`, so
+        // having no escaping has to be said explicitly rather than left unset.
         let mut env = Environment::new();
-        env.set_auto_escape_callback(autoescape);
+        env.set_auto_escape_callback(|_| AutoEscape::None);
 
         let cache = AssetCache {
             root: self.root,
@@ -430,15 +424,19 @@ mod tests {
     }
 
     #[test]
-    fn html_autoescapes_but_js_does_not() {
+    fn parameters_are_injected_verbatim_whatever_the_file_type() {
         let d = tmpdir();
         write(&d, "p.html", "<b>{{ v }}</b>");
+        write(&d, "safe.html", "<b>{{ v | safe }}</b>");
         write(&d, "p.js.jinja", "x = {{ v }}");
         let c = Builder::new(&d).build().unwrap();
-        assert_eq!(
-            &*c.render("p.html", &[("v", "<x>")]).unwrap(),
-            "<b>&lt;x&gt;</b>"
-        );
+        for name in ["p.html", "safe.html"] {
+            assert_eq!(
+                &*c.render(name, &[("v", "<x>")]).unwrap(),
+                "<b><x></b>",
+                "{name}: this loader injects string parameters, it does not escape them"
+            );
+        }
         assert_eq!(
             &*c.render("p.js.jinja", &[("v", "<x>")]).unwrap(),
             "x = <x>"

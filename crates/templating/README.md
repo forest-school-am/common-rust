@@ -73,7 +73,11 @@ service needs its own engine.
 - **Boot validation (§9.6):** the asset dir must exist and every required
   template must be present and parse — `Builder::build` refuses otherwise. The
   asset dir is a classified config option in the host service.
-- **Autoescape (§9.3):** on for `.html`/`.htm`, off for JS/text.
+- **No escaping.** This loader injects string parameters into whatever the file
+  already is; escaping is not its job. minijinja's own default callback would
+  escape `.html`/`.htm`/`.xml`, so `AutoEscape::None` is set explicitly — a
+  parameter reaches the output verbatim in every file type, and a `| safe`
+  filter in a template is a no-op rather than a necessity.
 - **Integrity pins (§9.7b / §9.8):** `pin(name, sha256)` verifies a file's
   content hash at boot AND on every reload, refusing to serve on mismatch —
   for logic the server also enforces (dual-use assets) and for library
