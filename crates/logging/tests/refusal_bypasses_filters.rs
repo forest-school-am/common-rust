@@ -75,8 +75,11 @@ fn unfiltered_the_probe_emits_both_lines_in_order() {
 fn the_refusal_survives_every_adversarial_filter_and_the_ordinary_line_does_not() {
     for env in [
         vec![("RUST_LOG", "some_other=debug")],
+        vec![("RUST_LOG", "off")],
         vec![("LOG_DESIGNATORS", "business=info")],
         vec![("LOG_DESIGNATORS", "c-scheduler=debug")],
+        vec![("LOG_DESIGNATORS", "off")],
+        vec![("RUST_LOG", "off"), ("LOG_DESIGNATORS", "off")],
         vec![
             ("RUST_LOG", "some_other=debug"),
             ("LOG_DESIGNATORS", "business=info"),
