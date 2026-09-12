@@ -1,12 +1,47 @@
 //! What the logging environment says: formats, deployment class, filters.
 //! Resolution and parsing only — nothing here writes a log line.
 
+use std::fmt;
 use std::str::FromStr;
 
 use strum::{AsRefStr, Display, EnumString, VariantNames};
 use tracing_subscriber::EnvFilter;
 
 use crate::filter::Designators;
+
+pub(crate) const DEFAULT_FILTER: &str = "info";
+
+const RUST_LOG_ACCEPTED: &str = "comma-separated tracing directives such as \
+     \"info\", \"my_crate=debug\" or \"my_crate::module=trace,sqlx=warn\" \
+     (unset means \"info\" under DEPLOYMENT_TYPE=prod, \"debug\" under dev)";
+
+/// A rejected configuration value, held as PARTS rather than prose: the
+/// refusal is emitted as an ordinary log line with these as fields (R50a), so
+/// a reader that already parses this crate's output needs nothing new.
+/// `Display` renders the same parts as a sentence for callers that want one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub variable: &'static str,
+    pub value: String,
+    pub accepted: String,
+    pub detail: Option<String>,
+}
+
+impl fmt::Display for Refusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}={:?} is not valid — expected {}",
+            self.variable, self.value, self.accepted
+        )?;
+        match &self.detail {
+            Some(detail) => write!(f, " ({detail})"),
+            None => Ok(()),
+        }
+    }
+}
+
+impl std::error::Error for Refusal {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, Display, EnumString, VariantNames)]
 pub enum Format {
@@ -17,22 +52,19 @@ pub enum Format {
 }
 
 impl Format {
-    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+    pub fn parse(value: Option<&str>) -> Result<Self, Refusal> {
         let Some(text) = value else {
             return Ok(Format::Json);
         };
-        Format::from_str(text).map_err(|_| {
-            format!(
-                "LOG_FORMAT={text:?} is not valid — expected one of {:?} \
-                 (unset means json). Refusing rather than defaulting (R50): \
-                 coming up in the other format silently changes every line a \
-                 downstream parser reads.",
-                Format::VARIANTS
-            )
+        Format::from_str(text).map_err(|_| Refusal {
+            variable: "LOG_FORMAT",
+            value: text.to_owned(),
+            accepted: format!("one of {:?} (unset means json)", Format::VARIANTS),
+            detail: None,
         })
     }
 
-    pub fn from_env() -> Result<Self, String> {
+    pub fn from_env() -> Result<Self, Refusal> {
         Self::parse(std::env::var("LOG_FORMAT").ok().as_deref())
     }
 }
@@ -48,21 +80,19 @@ pub enum Deployment {
 }
 
 impl Deployment {
-    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+    pub fn parse(value: Option<&str>) -> Result<Self, Refusal> {
         let Some(text) = value else {
             return Ok(Deployment::Dev);
         };
-        Deployment::from_str(text).map_err(|_| {
-            format!(
-                "DEPLOYMENT_TYPE={text:?} is not valid — expected one of {:?} \
-                 (unset means dev). Refusing rather than defaulting: a typo here would \
-                 silently enable dev-only behaviour under a prod deployment.",
-                Deployment::VARIANTS
-            )
+        Deployment::from_str(text).map_err(|_| Refusal {
+            variable: "DEPLOYMENT_TYPE",
+            value: text.to_owned(),
+            accepted: format!("one of {:?} (unset means dev)", Deployment::VARIANTS),
+            detail: None,
         })
     }
 
-    pub fn from_env() -> Result<Self, String> {
+    pub fn from_env() -> Result<Self, Refusal> {
         Self::parse(std::env::var("DEPLOYMENT_TYPE").ok().as_deref())
     }
 }
@@ -81,7 +111,7 @@ impl LogConfig {
         deployment_type: Option<&str>,
         rust_log: Option<&str>,
         log_designators: Option<&str>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, Refusal> {
         let format = Format::parse(log_format)?;
         let deployment = Deployment::parse(deployment_type)?;
         let filter = match rust_log {
@@ -101,7 +131,7 @@ impl LogConfig {
         Ok(resolved)
     }
 
-    pub fn from_env() -> Result<Self, String> {
+    pub fn from_env() -> Result<Self, Refusal> {
         let get = |k: &str| std::env::var(k).ok();
         Self::resolve(
             get("LOG_FORMAT").as_deref(),
@@ -114,17 +144,27 @@ impl LogConfig {
     /// `RUST_LOG` is a filter DSL rather than a set of spellings, so only
     /// tracing can say whether a value parses. Built here so `resolve` and
     /// `init_with` refuse identically and the message is written once.
-    pub fn env_filter(&self) -> Result<EnvFilter, String> {
-        EnvFilter::try_new(&self.filter).map_err(|e| {
-            format!(
-                "RUST_LOG={:?} is not a valid tracing filter: {e}. Expected \
-                 comma-separated directives such as \"info\", \
-                 \"my_crate=debug\" or \"my_crate::module=trace,sqlx=warn\" \
-                 (unset means \"info\" under DEPLOYMENT_TYPE=prod, \"debug\" \
-                 under dev). Refusing rather than defaulting (R50).",
-                self.filter
-            )
+    pub fn env_filter(&self) -> Result<EnvFilter, Refusal> {
+        EnvFilter::try_new(&self.filter).map_err(|e| Refusal {
+            variable: "RUST_LOG",
+            value: self.filter.clone(),
+            accepted: RUST_LOG_ACCEPTED.to_owned(),
+            detail: Some(e.to_string()),
         })
+    }
+}
+
+/// What `init()` brings logging up as when the environment is refused (R50a):
+/// the JSON default, ignoring whatever was set. Deliberately `info` rather
+/// than dev's `debug` — a process about to exit should say one thing.
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            format: Format::Json,
+            deployment: Deployment::Dev,
+            filter: DEFAULT_FILTER.to_owned(),
+            designators: Designators::permissive(),
+        }
     }
 }
 
@@ -141,18 +181,16 @@ mod tests {
         LogConfig::resolve(format, deployment, rust_log, designators).expect("must resolve")
     }
 
-    /// The refusal has to name all three things an operator needs, and a
-    /// message is the part nobody checks: the VARIABLE, the VALUE they set,
-    /// and what would have been accepted.
-    fn assert_refusal(msg: &str, variable: &str, value: &str, accepted: &str) {
-        assert!(msg.contains(variable), "must name {variable}: {msg}");
+    /// The refusal is emitted as FIELDS, so the fields are what a test checks:
+    /// the variable, the value the operator set, and what would have been
+    /// accepted. Checking only the rendered sentence would pass a line whose
+    /// fields were empty.
+    fn assert_refusal(r: &Refusal, variable: &str, value: &str, accepted: &str) {
+        assert_eq!(r.variable, variable, "wrong variable in {r:?}");
+        assert_eq!(r.value, value, "must carry the rejected value: {r:?}");
         assert!(
-            msg.contains(&format!("{value:?}")),
-            "must quote the rejected value {value:?}: {msg}"
-        );
-        assert!(
-            msg.contains(accepted),
-            "must name what is accepted ({accepted}): {msg}"
+            r.accepted.contains(accepted),
+            "must name what is accepted ({accepted}): {r:?}"
         );
     }
 
@@ -163,9 +201,9 @@ mod tests {
         assert_eq!(ok(Some("human"), None, None, None).format, Format::Human);
 
         for bad in ["HUMAN", "Human", "Json", "bogus", ""] {
-            let msg = LogConfig::resolve(Some(bad), None, None, None)
+            let r = LogConfig::resolve(Some(bad), None, None, None)
                 .expect_err("set-but-invalid LOG_FORMAT must refuse, not degrade to json");
-            assert_refusal(&msg, "LOG_FORMAT", bad, r#"["human", "json"]"#);
+            assert_refusal(&r, "LOG_FORMAT", bad, r#"["human", "json"]"#);
         }
     }
 
@@ -182,9 +220,9 @@ mod tests {
         );
 
         for bad in ["PROD", "Prod", "production", "prd", ""] {
-            let msg = LogConfig::resolve(None, Some(bad), None, None)
+            let r = LogConfig::resolve(None, Some(bad), None, None)
                 .expect_err("set-but-invalid DEPLOYMENT_TYPE must refuse, not degrade to dev");
-            assert_refusal(&msg, "DEPLOYMENT_TYPE", bad, r#"["prod", "dev"]"#);
+            assert_refusal(&r, "DEPLOYMENT_TYPE", bad, r#"["prod", "dev"]"#);
         }
     }
 
@@ -200,9 +238,14 @@ mod tests {
             "!!!",
             " ",
         ] {
-            let msg = LogConfig::resolve(None, None, Some(bad), None)
+            let r = LogConfig::resolve(None, None, Some(bad), None)
                 .expect_err("a malformed RUST_LOG must refuse, not fall back to \"info\"");
-            assert_refusal(&msg, "RUST_LOG", bad, "my_crate=debug");
+            assert_refusal(&r, "RUST_LOG", bad, "my_crate=debug");
+            assert!(
+                r.detail.is_some(),
+                "RUST_LOG is a DSL, so tracing's own parse error is the only \
+                 thing that says WHERE it is wrong: {r:?}"
+            );
         }
 
         for fine in [
@@ -226,18 +269,14 @@ mod tests {
             Designators::permissive()
         );
 
-        for (bad, accepted) in [
-            ("nonsense=info", "auth"),
-            ("athu=debug", "auth"),
-            ("auth=verbose", "trace"),
+        for (bad, offender, accepted) in [
+            ("nonsense=info", "nonsense", "auth"),
+            ("athu=debug", "athu", "auth"),
+            ("auth=verbose", "verbose", "trace"),
         ] {
-            let msg = LogConfig::resolve(None, None, None, Some(bad))
+            let r = LogConfig::resolve(None, None, None, Some(bad))
                 .expect_err("set-but-invalid LOG_DESIGNATORS must refuse, not pass everything");
-            assert!(
-                msg.contains("LOG_DESIGNATORS"),
-                "must name the variable: {msg}"
-            );
-            assert!(msg.contains(accepted), "must name what is accepted: {msg}");
+            assert_refusal(&r, "LOG_DESIGNATORS", offender, accepted);
         }
     }
 
@@ -271,13 +310,42 @@ mod tests {
         );
     }
 
+    /// `Display` is the half a consumer wrapping this in its own error type
+    /// sees (mint does exactly that), so the rendering is pinned as well as
+    /// the fields.
     #[test]
-    fn the_refusal_renders_the_values_as_an_array() {
-        let msg = Deployment::parse(Some("prd")).unwrap_err();
-        assert!(
-            msg.contains(r#"expected one of ["prod", "dev"] (unset means dev)"#),
-            "values must read as a delimited array inside the prose: {msg}"
+    fn the_rendered_refusal_names_the_variable_the_value_and_the_array() {
+        let rendered = Deployment::parse(Some("prd")).unwrap_err().to_string();
+        assert_eq!(
+            rendered,
+            r#"DEPLOYMENT_TYPE="prd" is not valid — expected one of ["prod", "dev"] (unset means dev)"#
         );
+    }
+
+    #[test]
+    fn the_rendered_refusal_appends_a_detail_when_there_is_one() {
+        let rendered = LogConfig::resolve(None, None, Some("="), None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            rendered.starts_with(r#"RUST_LOG="=" is not valid — expected comma-separated"#),
+            "{rendered}"
+        );
+        assert!(
+            rendered.ends_with("(invalid filter directive)"),
+            "tracing's own error must survive into the rendering: {rendered}"
+        );
+    }
+
+    #[test]
+    fn the_refusal_fallback_config_is_the_documented_default() {
+        let d = LogConfig::default();
+        assert_eq!(d.format, Format::Json);
+        assert_eq!(d.deployment, Deployment::Dev);
+        assert_eq!(d.filter, "info");
+        assert_eq!(d.designators, Designators::permissive());
+        d.env_filter()
+            .expect("the fallback filter must itself be valid, or init() cannot refuse");
     }
 }
 
@@ -304,9 +372,12 @@ mod deployment_tests {
 
     #[test]
     fn the_refusal_names_every_accepted_spelling() {
-        let msg = Deployment::parse(Some("prd")).unwrap_err();
+        let r = Deployment::parse(Some("prd")).unwrap_err();
         for value in Deployment::VARIANTS {
-            assert!(msg.contains(value), "refusal must name {value:?}: {msg}");
+            assert!(
+                r.accepted.contains(value),
+                "refusal must name {value:?}: {r:?}"
+            );
         }
     }
 }

@@ -150,19 +150,29 @@ All four variables behave the same way. **Unset** means the documented default.
 | `RUST_LOG` | `info` under prod, `debug` under dev | refuses |
 | `LOG_DESIGNATORS` | everything passes | refuses |
 
-The refusal names the variable, the value you set and what would have been
-accepted, and goes to **stderr with a non-zero exit** — stderr because `init()`
-runs before any subscriber exists, so a `tracing` event would go nowhere:
+**The refusal is a log line, not prose on stderr (R50a).** Logging still comes
+up — as `LogConfig::default()`: JSON, `info`, everything passing, ignoring
+whatever was set — emits exactly ONE `ERROR` line in the same shape as every
+other line, then exits 1. The parts are FIELDS, so anything already parsing
+this crate's output can read a refusal with no special case:
 
 ```
-$ LOG_FORMAT=bogus ./my-service
-common-logging: refusing to start — LOG_FORMAT="bogus" is not valid — expected
-one of ["human", "json"] (unset means json). …
+$ LOG_FORMAT=bogus ./my-service ; echo "exit=$?"
+{"timestamp":"…","level":"ERROR","message":"refusing to start: the logging
+environment is invalid","designator":"auth","variable":"LOG_FORMAT",
+"value":"bogus","accepted":"one of [\"human\", \"json\"] (unset means json)",
+"detail":"-","target":"common_logging"}
+exit=1
 ```
+
+`detail` carries the underlying parser's own error where there is one — for
+`RUST_LOG` that is tracing's message, which is the only thing that says WHERE
+the filter is wrong — and `-` where there is none, as `reqid`/`actor` do.
 
 A service that wants to handle the refusal itself rather than exit calls
 `LogConfig::from_env()` (or `Format`/`Deployment::from_env`, or
-`Designators::parse`) and gets the message as an `Err`.
+`Designators::parse`) and gets a [`Refusal`] as the `Err`: the same parts as
+fields, and `Display` renders them as one sentence.
 
 ## Test
 

@@ -11,7 +11,10 @@ use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::{Context, Filter};
 
+use crate::config::Refusal;
 use crate::designator::{CUSTOM_PREFIX, FIELD, STAND};
+
+const LEVELS: [&str; 6] = ["trace", "debug", "info", "warn", "error", "off"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Designators {
@@ -28,7 +31,7 @@ impl Designators {
         }
     }
 
-    pub fn parse(value: Option<&str>) -> Result<Self, String> {
+    pub fn parse(value: Option<&str>) -> Result<Self, Refusal> {
         let Some(text) = value.map(str::trim).filter(|t| !t.is_empty()) else {
             return Ok(Self::permissive());
         };
@@ -51,7 +54,7 @@ impl Designators {
         Ok(out)
     }
 
-    pub fn from_env() -> Result<Self, String> {
+    pub fn from_env() -> Result<Self, Refusal> {
         Self::parse(std::env::var("LOG_DESIGNATORS").ok().as_deref())
     }
 
@@ -69,25 +72,28 @@ impl Designators {
     }
 }
 
-fn parse_level(text: &str) -> Result<LevelFilter, String> {
-    LevelFilter::from_str(text).map_err(|_| {
-        format!(
-            "LOG_DESIGNATORS: {text:?} is not a level — expected one of \
-             \"trace\", \"debug\", \"info\", \"warn\", \"error\" or \"off\""
-        )
+fn parse_level(text: &str) -> Result<LevelFilter, Refusal> {
+    LevelFilter::from_str(text).map_err(|_| Refusal {
+        variable: "LOG_DESIGNATORS",
+        value: text.to_owned(),
+        accepted: format!("a level, one of {LEVELS:?}"),
+        detail: None,
     })
 }
 
-fn check_designator(name: &str) -> Result<(), String> {
+fn check_designator(name: &str) -> Result<(), Refusal> {
     if STAND.contains(&name) || name.starts_with(CUSTOM_PREFIX) {
         return Ok(());
     }
-    Err(format!(
-        "LOG_DESIGNATORS: {name:?} is not a designator — expected one of {STAND:?}, \
-         or a project designator carrying the {CUSTOM_PREFIX:?} prefix. Refusing rather \
-         than ignoring it: a filter that silently matches nothing is the failure this \
-         variable exists to remove."
-    ))
+    Err(Refusal {
+        variable: "LOG_DESIGNATORS",
+        value: name.to_owned(),
+        accepted: format!(
+            "a designator, one of {STAND:?}, or a project designator carrying \
+             the {CUSTOM_PREFIX:?} prefix"
+        ),
+        detail: None,
+    })
 }
 
 #[derive(Default)]
@@ -179,29 +185,37 @@ mod tests {
 
     #[test]
     fn a_misspelled_designator_is_refused_not_ignored() {
-        for bad in ["athu=debug", "AUTH=debug", "scheduler=debug", "=debug"] {
-            let err = Designators::parse(Some(bad)).expect_err("must refuse");
+        for (bad, offender) in [
+            ("athu=debug", "athu"),
+            ("AUTH=debug", "AUTH"),
+            ("scheduler=debug", "scheduler"),
+            ("=debug", ""),
+        ] {
+            let r = Designators::parse(Some(bad)).expect_err("must refuse");
+            assert_eq!(r.variable, "LOG_DESIGNATORS");
+            assert_eq!(r.value, offender, "must name the offending item: {r:?}");
             assert!(
-                err.contains("is not a designator"),
-                "unhelpful refusal for {bad:?}: {err}"
+                r.accepted.contains("designator"),
+                "must say a designator was expected: {r:?}"
             );
         }
     }
 
     #[test]
-    fn a_bad_level_is_refused_and_the_message_names_the_valid_ones() {
-        let err = Designators::parse(Some("auth=verbose")).expect_err("must refuse");
-        assert!(err.contains("is not a level"), "{err}");
+    fn a_bad_level_is_refused_and_the_refusal_names_the_valid_ones() {
+        let r = Designators::parse(Some("auth=verbose")).expect_err("must refuse");
+        assert_eq!(r.variable, "LOG_DESIGNATORS");
+        assert_eq!(r.value, "verbose");
         for level in ["trace", "debug", "info", "warn", "error", "off"] {
-            assert!(err.contains(level), "refusal must name {level}: {err}");
+            assert!(r.accepted.contains(level), "must name {level}: {r:?}");
         }
     }
 
     #[test]
     fn the_refusal_names_every_stand_designator() {
-        let err = Designators::parse(Some("nope=info")).expect_err("must refuse");
+        let r = Designators::parse(Some("nope=info")).expect_err("must refuse");
         for name in ["auth", "business", "upstream", "storage", "http"] {
-            assert!(err.contains(name), "refusal must name {name}: {err}");
+            assert!(r.accepted.contains(name), "must name {name}: {r:?}");
         }
     }
 }

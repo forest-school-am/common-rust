@@ -29,11 +29,18 @@ included. Change here ripples fleet-wide — treat the output contract as public
   tests lock it.
 - SET-BUT-INVALID REFUSES TO START (R50, canon §4.4y): all four of
   `LOG_FORMAT`, `DEPLOYMENT_TYPE`, `RUST_LOG` and `LOG_DESIGNATORS`. Unset is a
-  documented default (`json`, `dev`, deployment-derived, pass-everything); set
-  to something unrecognised is a refusal naming the variable, the value and the
-  accepted spellings, on STDERR with a non-zero exit — stderr because `init()`
-  runs before any subscriber exists, so a `tracing` event would go nowhere.
-  "Logging must always come up" is WITHDRAWN; it was never the user's.
+  documented default (`json`, `dev`, deployment-derived, pass-everything).
+  "Logging must always come up" as a reason to DEGRADE a bad value is
+  WITHDRAWN; it was never the user's.
+- THE REFUSAL IS A LOG LINE, NOT PROSE ON STDERR (R50a). Logging still comes
+  up — as `LogConfig::default()`, the JSON default, ignoring whatever was set —
+  emits exactly ONE ERROR line in the same shape as every other line, with
+  `variable`, `value`, `accepted` and `detail` as FIELDS, then exits 1. So a
+  reader that already parses this crate's output needs nothing new, which is
+  the whole point. `Refusal` carries those parts; its `Display` renders them as
+  a sentence for a consumer wrapping it in its own error type.
+  `Designators::permissive()` is what the fallback uses — that is why it exists
+  and it is NOT a degrade path.
 - The designator is an event FIELD, never the tracing target (R28). The target
   is the module path, so `RUST_LOG` behaves as standard tracing. Designators
   must stay compile-time `&'static str` (so `custom!` uses `concat!`).

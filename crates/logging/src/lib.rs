@@ -19,38 +19,60 @@ mod span;
 
 pub use tracing;
 
-pub use config::{Deployment, Format, LogConfig};
+pub use config::{Deployment, Format, LogConfig, Refusal};
 pub use designator::{AUTH, BUSINESS, HTTP, STORAGE, UPSTREAM};
 pub use filter::Designators;
 #[doc(hidden)]
 pub use span::__reqid;
 pub use span::{gen_reqid, set_actor};
 
-use tracing_subscriber::fmt;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{fmt, EnvFilter};
 
 pub fn init() {
     match LogConfig::from_env() {
         Ok(cfg) => init_with(cfg),
-        Err(why) => refuse(&why),
+        Err(refusal) => refuse(refusal),
     }
 }
 
-/// Stderr is the only channel there is: this runs before any subscriber
-/// exists, so a `tracing` event would go nowhere.
-fn refuse(why: &str) -> ! {
-    eprintln!("common-logging: refusing to start — {why}");
+pub fn init_with(cfg: LogConfig) {
+    match cfg.env_filter() {
+        Ok(env) => install(cfg.format, env, cfg.designators),
+        Err(refusal) => refuse(refusal),
+    }
+}
+
+/// Bad config still brings logging UP (R50a) — in the JSON default, ignoring
+/// whatever was set — so the refusal is one ordinary line with the parts as
+/// fields rather than prose on a channel nothing else uses.
+///
+/// `process::exit` runs no destructors, so the writer is flushed explicitly.
+/// Measured, rather than assumed: tracing's stdout writer already flushes per
+/// event, piped or not, so this is insurance against a buffered writer being
+/// configured later — not what makes the line appear today.
+fn refuse(refusal: Refusal) -> ! {
+    let fallback = LogConfig::default();
+    install(
+        fallback.format,
+        EnvFilter::builder().parse_lossy(&fallback.filter),
+        fallback.designators,
+    );
+    crate::error!(
+        AUTH,
+        variable = refusal.variable,
+        value = %refusal.value,
+        accepted = %refusal.accepted,
+        detail = refusal.detail.as_deref().unwrap_or("-"),
+        "refusing to start: the logging environment is invalid"
+    );
+    let _ = std::io::Write::flush(&mut std::io::stdout());
     std::process::exit(1);
 }
 
-pub fn init_with(cfg: LogConfig) {
-    let env = match cfg.env_filter() {
-        Ok(env) => env,
-        Err(why) => refuse(&why),
-    };
-    let designators = cfg.designators;
-    match cfg.format {
+fn install(format: Format, env: EnvFilter, designators: Designators) {
+    match format {
         Format::Json => {
             tracing_subscriber::registry()
                 .with(
@@ -88,7 +110,6 @@ mod tests {
     use std::io;
     use std::sync::{Arc, Mutex};
     use tracing_subscriber::fmt::MakeWriter;
-    use tracing_subscriber::EnvFilter;
 
     #[derive(Clone)]
     struct Buf(Arc<Mutex<Vec<u8>>>);
