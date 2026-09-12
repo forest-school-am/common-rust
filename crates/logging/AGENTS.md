@@ -36,11 +36,18 @@ included. Change here ripples fleet-wide — treat the output contract as public
   It is the user's own ruling, so no §8.3 operator confirmation. It is ORDINARY
   vocabulary on the designator axis, not an exemption: `LOG_DESIGNATORS` can
   filter it like any other.
-- THE REFUSAL IS A LOG LINE, NOT PROSE ON STDERR (R50a). Logging still comes
-  up — as `LogConfig::default()`, the JSON default, ignoring whatever was set —
-  emits exactly ONE ERROR `startup` line in the same shape as every other
-  line, with `variable`, `value`, `accepted` and `detail` as FIELDS, then
-  exits 1.
+- THE REFUSAL IS A LOG LINE, NOT PROSE ON STDERR (R50a/R52, canon §8.3a):
+  exactly ONE ERROR `startup` JSON line with `variable`, `value`, `accepted`
+  and `detail` as FIELDS, then exit 1. It IGNORES BOTH FILTER AXES — a refusal
+  `RUST_LOG` or `LOG_DESIGNATORS` can silence is not a refusal — so it is
+  written through a scoped unfiltered subscriber rather than the installed one,
+  and is always JSON whatever `LOG_FORMAT` says. Ordinary `startup` lines stay
+  filterable. Scope is `__refusal_line!` alone; do not widen it.
+  `tests/refusal_bypasses_filters.rs` spawns the `refusal_probe` binary —
+  a consumer in miniature, `init()` then `refuse!` from its own module —
+  because the window R52 closes only exists AFTER init() installed the real
+  filter, so an in-process test or one driving init()'s own refusal passes
+  either way.
 - The designator is an event FIELD, never the tracing target (R28). The target
   is the module path, so `RUST_LOG` behaves as standard tracing. Designators
   must stay compile-time `&'static str` (so `custom!` uses `concat!`).

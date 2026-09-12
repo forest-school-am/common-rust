@@ -24,7 +24,7 @@ pub use config::{Deployment, Format, LogConfig, Refusal};
 pub use designator::{AUTH, BUSINESS, HTTP, STARTUP, STORAGE, UPSTREAM};
 pub use filter::Designators;
 #[doc(hidden)]
-pub use refuse::{__ensure_subscriber, __exit_refused};
+pub use refuse::{__exit_refused, __unfiltered};
 #[doc(hidden)]
 pub use span::__reqid;
 pub use span::{gen_reqid, set_actor};

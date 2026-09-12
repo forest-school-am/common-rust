@@ -151,11 +151,10 @@ All four variables behave the same way. **Unset** means the documented default.
 | `RUST_LOG` | `info` under prod, `debug` under dev | refuses |
 | `LOG_DESIGNATORS` | everything passes | refuses |
 
-**The refusal is a log line, not prose on stderr (R50a).** Logging still comes
-up — as `LogConfig::default()`: JSON, `info`, everything passing, ignoring
-whatever was set — emits exactly ONE `ERROR` line in the same shape as every
-other line, then exits 1. The parts are FIELDS, so anything already parsing
-this crate's output can read a refusal with no special case:
+**The refusal is a log line, not prose on stderr (R50a/R52, §8.3a).** Exactly
+ONE `ERROR` JSON line in the same shape as every other line, then exit 1. The
+parts are FIELDS, so anything already parsing this crate's output can read a
+refusal with no special case:
 
 | field | |
 |---|---|
@@ -204,10 +203,11 @@ fn main() {
  "target":"my_service"}
 ```
 
-One limit worth knowing: a `RUST_LOG` scoped to some OTHER module, or a
-`LOG_DESIGNATORS` that excludes `startup`, still suppresses the line — the
-refusal is an ordinary event on both axes, not an exemption. The exit code is
-1 either way.
+**Neither filter axis can silence it (R52, §8.3a).** `RUST_LOG` scoped to
+another module and `LOG_DESIGNATORS` excluding `startup` both leave the
+refusal intact: it is written through a scoped unfiltered subscriber, so it is
+always JSON whatever `LOG_FORMAT` says. Ordinary `startup` events stay
+filterable like everything else.
 
 ## Test
 

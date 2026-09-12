@@ -341,14 +341,13 @@ mod tests {
     }
 
     #[test]
-    fn the_refusal_fallback_config_is_the_documented_default() {
+    fn the_documented_default_config_is_json_dev_info_and_permissive() {
         let d = LogConfig::default();
         assert_eq!(d.format, Format::Json);
         assert_eq!(d.deployment, Deployment::Dev);
         assert_eq!(d.filter, "info");
         assert_eq!(d.designators, Designators::permissive());
-        d.env_filter()
-            .expect("the fallback filter must itself be valid, or init() cannot refuse");
+        d.env_filter().expect("the default filter must be valid");
     }
 }
 

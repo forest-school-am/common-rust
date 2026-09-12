@@ -2,9 +2,8 @@
 //! the refusal path belongs here — bringing the subscriber up for a config
 //! that IS valid is lib.rs, and what makes a value invalid is config.rs.
 
-use tracing_subscriber::EnvFilter;
-
-use crate::config::LogConfig;
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
 
 /// ```no_run
 /// # let raw = "nope".to_string();
@@ -28,26 +27,29 @@ macro_rules! refuse {
 macro_rules! __refusal_line {
     ($refusal:expr) => {{
         let refusal: $crate::Refusal = $refusal;
-        $crate::__ensure_subscriber();
-        $crate::error!(
-            $crate::STARTUP,
-            variable = refusal.variable,
-            value = %refusal.value,
-            accepted = %refusal.accepted,
-            detail = refusal.detail.as_deref().unwrap_or("-"),
-            "refusing to start: invalid configuration"
-        );
+        $crate::__unfiltered(|| {
+            $crate::error!(
+                $crate::STARTUP,
+                variable = refusal.variable,
+                value = %refusal.value,
+                accepted = %refusal.accepted,
+                detail = refusal.detail.as_deref().unwrap_or("-"),
+                "refusing to start: invalid configuration"
+            );
+        });
     }};
 }
 
 #[doc(hidden)]
-pub fn __ensure_subscriber() {
-    let fallback = LogConfig::default();
-    crate::install(
-        fallback.format,
-        EnvFilter::builder().parse_lossy(&fallback.filter),
-        fallback.designators,
+pub fn __unfiltered(emit: impl FnOnce()) {
+    let subscriber = tracing_subscriber::registry().with(
+        fmt::layer()
+            .json()
+            .flatten_event(true)
+            .with_current_span(true)
+            .with_span_list(false),
     );
+    tracing::subscriber::with_default(subscriber, emit);
 }
 
 #[doc(hidden)]
