@@ -31,7 +31,12 @@ fn probe_is_newer_than_the_code_it_exercises() {
 fn run(env: &[(&str, &str)]) -> (Vec<serde_json::Value>, Option<i32>) {
     probe_is_newer_than_the_code_it_exercises();
     let mut cmd = Command::new(PROBE);
-    for key in ["RUST_LOG", "LOG_DESIGNATORS", "LOG_FORMAT", "DEPLOYMENT_TYPE"] {
+    for key in [
+        "RUST_LOG",
+        "LOG_DESIGNATORS",
+        "LOG_FORMAT",
+        "DEPLOYMENT_TYPE",
+    ] {
         cmd.env_remove(key);
     }
     for (key, value) in env {
@@ -42,7 +47,9 @@ fn run(env: &[(&str, &str)]) -> (Vec<serde_json::Value>, Option<i32>) {
     let lines = stdout
         .lines()
         .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("not one JSON line: {l:?}: {e}")))
+        .map(|l| {
+            serde_json::from_str(l).unwrap_or_else(|e| panic!("not one JSON line: {l:?}: {e}"))
+        })
         .collect();
     (lines, out.status.code())
 }
