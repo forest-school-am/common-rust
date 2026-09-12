@@ -1,16 +1,6 @@
 //! The crate's error types. Variants only; the mapping from error to HTTP
 //! response lives with the handlers in web.rs, and what to RETRY in retry.rs.
 
-/// Why an upstream call produced no identity. Two variants because the
-/// difference decides whether a session survives (R27):
-///
-/// `Rejected` is the IdP ANSWERING about this credential. It is a fact, it
-/// will not change on a second ask, and retrying it is both wrong and slow.
-///
-/// `Unreachable` is the ABSENCE of a usable answer — transport failure,
-/// timeout, a 5xx, or a body that would not parse. None of those say the
-/// credential is invalid, so treating them as a rejection would flatten an
-/// error into a different meaning (§3.3). They are the only thing retried.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Upstream {
     Rejected(String),

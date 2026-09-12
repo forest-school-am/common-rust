@@ -11,15 +11,13 @@ license = "MIT"
 common-logging = { path = "crates/logging", version = "0.3.0" }
 common-templating = { path = "crates/templating", version = "0.3.0" }
 
-# Shared by two or more members. One version here is the point of the merge:
-# a member cannot drift from a sibling's transitive pick.
+# Shared by two or more members.
 serde = "1"
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
 tracing = "0.1"
 tokio = "1"
-# default-features off + explicit rustls-tls is intentional: guarantees the
-# openidconnect->reqwest dep is rustls, never openssl, regardless of upstream
-# default changes (supply-chain: this workspace is openssl-free).
+# UNENFORCED (§11.1): nothing in the build fails if default-features comes back
+# on here — it would just pull openssl through reqwest, silently.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }

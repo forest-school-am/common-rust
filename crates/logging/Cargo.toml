@@ -14,12 +14,8 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "json",
     "registry",
 ] }
-# RFC3339 timestamps for the human format; small and well-tested.
 time = { version = "0.3", default-features = false, features = ["std", "formatting"] }
 
-# A value mirrored as a string outside the process is declared once and both
-# directions are generated from that declaration (CODESTYLE 4.5). strum is the
-# fleet mechanism for it; heck/strum_macros are the only new crates in the tree.
 strum = { version = "0.26", features = ["derive"] }
 
 [dev-dependencies]

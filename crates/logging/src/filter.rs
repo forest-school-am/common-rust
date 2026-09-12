@@ -1,11 +1,6 @@
 //! Which designators reach the output, and at what level. Selection only —
 //! what a designator MEANS belongs in designator.rs, how a line LOOKS in
 //! format.rs.
-//!
-//! This is the second, independent filtering axis (R28). `RUST_LOG` filters by
-//! module path, as standard tracing does; this filters by designator. Neither
-//! can express the other and neither overrides the other — an event must pass
-//! both.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -18,28 +13,14 @@ use tracing_subscriber::layer::{Context, Filter};
 
 use crate::designator::{CUSTOM_PREFIX, FIELD, STAND};
 
-/// Parsed `LOG_DESIGNATORS`.
-///
-/// UNSET MEANS EVERYTHING PASSES. Two filters ANDed together will silently
-/// resolve to nothing if either defaults to "deny", so the default here has to
-/// be permissive or configuring only `RUST_LOG` would go silent — which is the
-/// defect R28 exists to remove, rebuilt one layer over.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Designators {
-    /// Per-designator levels. `upstream=debug,business=info` must keep
-    /// working; it is the fleet's one real use of designator filtering
-    /// (searchbase/README.md), so an allowlist alone would be a capability
-    /// loss dressed as an improvement.
     rules: BTreeMap<String, LevelFilter>,
-    /// A bare level, applying to designators the rules do not name.
     default: Option<LevelFilter>,
-    /// Nothing configured at all.
     unset: bool,
 }
 
 impl Designators {
-    /// Everything passes. Also what an unparseable value degrades to — see
-    /// `LogConfig::resolve`.
     pub fn permissive() -> Self {
         Self {
             unset: true,
@@ -47,9 +28,6 @@ impl Designators {
         }
     }
 
-    /// Strict: an unrecognised designator or level is refused rather than
-    /// ignored. This is the one filter input the stand controls end to end,
-    /// and silently ignoring a misspelling is exactly the failure R28 removes.
     pub fn parse(value: Option<&str>) -> Result<Self, String> {
         let Some(text) = value.map(str::trim).filter(|t| !t.is_empty()) else {
             return Ok(Self::permissive());
@@ -77,9 +55,6 @@ impl Designators {
         Self::parse(std::env::var("LOG_DESIGNATORS").ok().as_deref())
     }
 
-    /// Whether an event carrying `designator` at `level` should be emitted.
-    /// An event with NO designator — anything from a dependency — is not this
-    /// filter's business and always passes; `RUST_LOG` is the axis for those.
     fn admits(&self, designator: Option<&str>, level: &tracing::Level) -> bool {
         if self.unset {
             return true;
@@ -115,9 +90,6 @@ fn check_designator(name: &str) -> Result<(), String> {
     ))
 }
 
-/// Pulls the designator out of an event's fields. `Filter::enabled` sees only
-/// `Metadata`, where field VALUES do not exist, which is why this filtering
-/// cannot be done there and `event_enabled` is used instead.
 #[derive(Default)]
 struct Read(Option<String>);
 
@@ -137,9 +109,9 @@ impl Visit for Read {
 }
 
 impl<S: Subscriber> Filter<S> for Designators {
-    /// Deliberately permissive: field values are not visible here, so a
-    /// verdict at this point could only ever be about the module path, which
-    /// is `RUST_LOG`'s axis and not this one.
+    /// `Filter::enabled` is handed only `Metadata`, which carries no field
+    /// VALUES, so the designator cannot be read here at all — hence the
+    /// verdict is deferred to `event_enabled`.
     fn enabled(&self, _meta: &Metadata<'_>, _cx: &Context<'_, S>) -> bool {
         true
     }
@@ -159,8 +131,6 @@ mod tests {
     use super::*;
     use tracing::Level;
 
-    /// Spellings are retyped rather than read off the declaration: a test that
-    /// reuses it asserts nothing (CODESTYLE 4.5).
     #[test]
     fn unset_and_empty_admit_everything() {
         for unset in [None, Some(""), Some("   ")] {
@@ -195,9 +165,6 @@ mod tests {
         assert!(!d.admits(Some("storage"), &Level::INFO));
     }
 
-    /// An event from a dependency carries no designator, so this axis has no
-    /// opinion on it — otherwise setting LOG_DESIGNATORS would silently mute
-    /// every library the service uses.
     #[test]
     fn events_without_a_designator_are_not_this_filters_business() {
         let d = Designators::parse(Some("auth=error")).unwrap();

@@ -7,9 +7,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use strum::{AsRefStr, EnumString, VariantNames};
 use tracing::Span;
 
-/// The request-field vocabulary. Each name is written once, in `serialize`;
-/// `request_span` declares them and format.rs reads them back through the same
-/// declaration, so the two can no longer drift (CODESTYLE 4.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, EnumString, VariantNames)]
 pub(crate) enum FixedField {
     #[strum(serialize = "reqid")]
@@ -29,19 +26,6 @@ pub fn gen_reqid() -> String {
     format!("{:08x}{:04x}", nanos as u32, (n & 0xffff) as u32)
 }
 
-/// Opens the request root span (§8.2), carrying `reqid` and `actor`.
-///
-/// A MACRO, NOT A FUNCTION, AND THAT IS LOAD-BEARING (R28). Since designators
-/// left `target`, a span's target is its module path — and for a function that
-/// is THIS crate's path, not the caller's. `RUST_LOG=my_service=debug` would
-/// then fail to enable the span, `enter()` would do nothing, and every event
-/// inside would lose `reqid` and `actor` while still emitting: silent, which is
-/// the failure R28 exists to abolish. Expanding at the call site gives the span
-/// the caller's module path, so a service-scoped `RUST_LOG` covers it.
-///
-/// `tests/request_span_callsite.rs` asserts this from OUTSIDE this crate; a
-/// test in here would carry common-logging's module path either way and so
-/// could not fail for the right reason.
 #[macro_export]
 macro_rules! request_span {
     ($reqid:expr) => {
@@ -53,9 +37,6 @@ macro_rules! request_span {
     };
 }
 
-/// Deref-coercion point. A macro has no function boundary to coerce at, so
-/// `request_span!(&reqid)` with a `String` would otherwise have to spell the
-/// conversion at every call site.
 #[doc(hidden)]
 pub fn __reqid(reqid: &str) -> &str {
     reqid
@@ -69,8 +50,6 @@ pub fn set_actor(span: &Span, actor: &str) {
 mod tests {
     use super::*;
 
-    /// Spelled out rather than read off the declaration: a test that reuses it
-    /// asserts nothing (CODESTYLE 4.5).
     #[test]
     fn the_vocabulary_spells_the_names_request_span_declares() {
         assert_eq!(FixedField::ReqId.as_ref(), "reqid");

@@ -1,10 +1,5 @@
-//! Shared in-app OIDC for stand apps: browser sessions handled server-side
-//! (web.rs), the protocol itself (client.rs), and the bearer path below for
-//! APIs that are called with an access token rather than a cookie.
-//!
-//! Identity comes from userinfo on every request — ID tokens are never
-//! verified, so a revoked session stops working immediately rather than at
-//! token expiry:
+//! Crate root: the module tree and the public surface. A new capability gets
+//! its own module here; nothing that decides anything belongs in this file.
 //!
 //! ```no_run
 //! use common_oidc::BearerValidator;
@@ -19,9 +14,6 @@
 //! # Ok(())
 //! # }
 //! ```
-//!
-//! Gate on group UUIDs, never on names — `Principal::require_group` takes a
-//! `Uuid` for that reason.
 
 mod bearer;
 mod client;

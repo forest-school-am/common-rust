@@ -29,40 +29,14 @@ const FLOW_COOKIE: &str = "oidc_flow";
 pub const REAUTH_HEADER: &str = "X-Common-OIDC-Reauth";
 const SHIM_TEMPLATE: &str = "common-oidc.js.jinja";
 
-/// Reduce a post-login redirect target to a same-origin relative reference,
-/// or to `/`. This is the open-redirect guard.
-///
-/// RESOLVE, do not pattern-match. A prefix test answers "does this look
-/// relative", which is not the question — the question is "where does a
-/// browser END UP". Those differ: `/\evil.example` and `/<TAB>/evil.example`
-/// both look relative and both land on `evil.example`, because the WHATWG URL
-/// parser folds `\` to `/` and strips tab/CR/LF before resolving. So the value
-/// is resolved against a fixed base and the resulting ORIGIN is compared;
-/// anything that moved origin is discarded.
-///
-/// The re-serialised path is then prefix-checked as well, because resolution
-/// NORMALISES: `/..//evil.example` resolves same-origin but its path is
-/// `//evil.example`, which would leave the origin all over again once emitted
-/// into a `Location` header. Each half covers the other's blind spot.
-///
-/// Applied where `next` ENTERS, at `/oidc/login`, and again where it is USED.
-/// The stored value cannot currently be tampered with — the flow lives in the
-/// flow store and the browser holds only an opaque id — so the second
-/// application is redundant today and deliberately kept: it is the layer that
-/// still holds if a later change ever puts flow data back in the client's
-/// hands.
+/// The browser reading our `Location` header is a WHATWG URL parser: it folds
+/// `\` to `/` and strips tab/CR/LF BEFORE resolving, so a prefix test cannot
+/// answer where a value lands. Hence resolve-then-compare-origin.
 fn safe_next(raw: Option<&str>) -> String {
     fn resolve(raw: &str) -> Option<String> {
-        // Absolute-path form only, which is what the shim ever sends
-        // (`location.pathname + search + hash`). Resolution alone would also
-        // accept `a/b` and rewrite it to `/a/b`; that is same-origin and
-        // harmless, but it widens the contract for no caller that exists.
         if !raw.starts_with('/') {
             return None;
         }
-        // Opaque, unreachable base: `next` is only ever emitted as a relative
-        // reference, so the host here is never used for anything but the
-        // origin comparison.
         let base = Url::parse("https://next.invalid/").ok()?;
         let resolved = base.join(raw).ok()?;
         if resolved.origin() != base.origin() {
@@ -127,12 +101,9 @@ impl OidcState {
         })
     }
 
-    /// Replace the default in-memory flow store. Needed only where logins must
-    /// survive a restart or be shared across replicas — the callback lands on
-    /// whichever instance the browser reaches, and an in-memory flow is
-    /// invisible to the others. The same constraint already applies to
-    /// [`SessionStore`], so a deployment that has solved it for sessions
-    /// solves it here the same way.
+    /// The default store is per-process, so a callback landing on a different
+    /// replica than the login sees no flow. Replacing it is how a multi-replica
+    /// or restart-surviving deployment fixes that; nothing here detects it.
     pub fn with_flow_store(mut self, flows: impl FlowStore) -> Self {
         self.flows = Arc::new(flows);
         self
@@ -164,9 +135,6 @@ impl OidcState {
             .to_owned();
         let session = self.store.get(&sid).await?;
 
-        // ONE budget for the whole resolution (R27). A userinfo call, a
-        // refresh and a second userinfo each starting their own would let a
-        // single request spend ninety seconds upstream.
         let deadline = retry::Deadline::starting_now();
 
         match retry::within(&deadline, || {
@@ -176,10 +144,6 @@ impl OidcState {
         .await
         {
             Ok(p) => return Some((p, session)),
-            // No usable answer within the budget. The IdP is gone rather than
-            // saying no, so the session is NOT destroyed on a guess — but
-            // R27 is fail-closed once the budget is spent, so the request is
-            // refused and the session ends.
             Err(Upstream::Unreachable(why)) => {
                 common_logging::warn!(
                     common_logging::AUTH,
@@ -189,8 +153,6 @@ impl OidcState {
                 self.store.remove(&sid).await;
                 return None;
             }
-            // The expected path for an expired access token: the IdP said no,
-            // which is what the refresh token exists for.
             Err(Upstream::Rejected(_)) => {}
         }
 
@@ -246,11 +208,9 @@ fn base_cookie<'a>(name: &'a str, value: String, config: &OidcConfig) -> Cookie<
     c
 }
 
-/// [`CookieJar::remove`] is not enough on its own — it only emits anything when
-/// the ORIGINAL cookie was in the request, so it is silently a no-op on a jar
-/// built from nothing. That is fine inside the extractor (the request carried
-/// the cookie) but wrong for [`OidcState::unauthorized_response`], which an
-/// adopter calls without a jar. Caught by the parity test, not by review.
+/// [`CookieJar::remove`] emits a header only when the ORIGINAL cookie was in
+/// the request, so on a jar built from nothing it is silently a no-op — which
+/// is what [`OidcState::unauthorized_response`] hands it.
 fn expiring_removal(name: &str) -> Cookie<'static> {
     Cookie::parse(format!("{name}=; Path=/; Max-Age=0"))
         .map(|c| c.into_owned())
@@ -263,10 +223,6 @@ fn removal_cookie(name: &str) -> Cookie<'static> {
     c
 }
 
-/// The browser receives an opaque id and nothing else; the CSRF state, the
-/// PKCE verifier and the redirect target stay in the flow store. Generated
-/// like a session id — two v4 UUIDs, 256 bits — because it is the only thing
-/// binding a callback to the login that started it.
 fn new_flow_id() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
@@ -347,9 +303,6 @@ async fn callback(
         Some(id) => oidc.flows.get(id).await,
         None => None,
     };
-    // An id naming no live flow is indistinguishable from no id at all: the
-    // browser cannot mint one the store will recognise, so an unknown value is
-    // an expired or already-finished login, not a signal.
     let Some(flow) = flow else {
         return start_login(&oidc, jar, "/".into(), true, false).await;
     };
@@ -460,10 +413,6 @@ where
 mod safe_next_tests {
     use super::safe_next;
 
-    /// Every value here LOOKS relative and a prefix check passes it, but a
-    /// WHATWG parser — which is what the browser reading our `Location`
-    /// header is — resolves each one onto another origin. Verified against
-    /// `url::Url::join` before being written down, not assumed.
     #[test]
     fn values_that_look_relative_but_change_origin_are_refused() {
         for hostile in [
@@ -500,9 +449,6 @@ mod safe_next_tests {
 mod flow_cookie_tests {
     use super::*;
 
-    /// Replaces `flow_wire`, which pinned the single-letter JSON keys of a
-    /// cookie that no longer carries a payload. What matters now is the
-    /// opposite property: that the cookie carries NOTHING but an opaque id.
     #[test]
     fn the_cookie_value_is_opaque_and_reveals_no_flow_data() {
         let id = new_flow_id();

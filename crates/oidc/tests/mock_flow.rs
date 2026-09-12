@@ -1,3 +1,8 @@
+//! End-to-end flows against a mock IdP over real sockets: the router, the
+//! session lifecycle and the cookie surface. Schedule arithmetic belongs in
+//! `retry`'s virtual-time tests; anything only a real authentik can answer
+//! belongs in live_canary.rs.
+
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -28,8 +33,6 @@ struct Mock {
     userinfo_calls: AtomicUsize,
     refresh_calls: AtomicUsize,
     exchange_calls: AtomicUsize,
-    /// Accept the request and never answer — the failure mode §6.1 exists
-    /// for, and the one a refused connection does NOT reproduce.
     hang_userinfo: std::sync::atomic::AtomicBool,
 }
 
@@ -190,12 +193,9 @@ fn get_req(path: &str, cookies: &str, html: bool) -> Request<Body> {
     b.body(Body::empty()).unwrap()
 }
 
-/// The per-attempt timeout is only worth anything if it CANCELS a real hung
-/// call. `reqwest::Client` here sets no timeout of its own, so the whole bound
-/// rests on `tokio::time::timeout` dropping the in-flight future — asserted
-/// against a socket that accepts and never answers, not inferred from the code
-/// shape. The budget arithmetic is proven separately in virtual time
-/// (`retry::tests`); this covers the half virtual time cannot: real I/O.
+/// The `reqwest::Client` under test sets NO timeout of its own — if it ever
+/// gains one this stops testing the crate's own cancellation and starts
+/// passing for reqwest's reason.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_hung_upstream_is_actually_cancelled_not_merely_wrapped() {
     let (base, mock) = spawn_mock().await;
@@ -222,9 +222,6 @@ async fn a_hung_upstream_is_actually_cancelled_not_merely_wrapped() {
     );
 }
 
-/// S3, at the level that matters: an IdP blip must NOT log anyone out. Before
-/// R27 the first failed userinfo — for any reason, including a hang — deleted
-/// the session, so an outage was indistinguishable from a revoked token.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_transient_outage_does_not_end_the_session() {
     let (base, mock) = spawn_mock().await;
@@ -232,7 +229,6 @@ async fn a_transient_outage_does_not_end_the_session() {
     let (store, sid) = seed_session("at-live", None).await;
     let app = app(oidc_state(&base, store).await);
 
-    // Hang the first attempt; recover while the second is in flight.
     mock.hang_userinfo.store(true, Ordering::SeqCst);
     let recovering = mock.clone();
     tokio::spawn(async move {
@@ -475,9 +471,6 @@ async fn serves_shim_and_login_route() {
         )
         .await
         .unwrap();
-    // `next` is server-side now, so the sanitised value cannot be read off the
-    // cookie — it is asserted where it becomes observable, by finishing the
-    // login and seeing where the browser is sent.
     let flow_cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie");
     let state = state_from_location(&resp);
     let resp = app
@@ -512,18 +505,6 @@ fn state_from_location(resp: &axum::http::Response<Body>) -> String {
         .find(|(k, _)| k == "state")
         .map(|(_, v)| v.into_owned())
         .expect("authorize URL carries state")
-}
-
-fn hex_encode_test(s: &str) -> String {
-    s.bytes().map(|b| format!("{b:02x}")).collect()
-}
-
-/// What an attacker who can set a cookie for this origin actually has: the
-/// flow cookie carries no MAC, so every field is theirs to choose. Built here
-/// by hand rather than through the crate, with the wire keys spelled out.
-fn forged_flow_cookie(state: &str, next: &str) -> String {
-    let json = format!(r#"{{"s":"{state}","v":"forged-verifier","n":"{next}","i":false}}"#);
-    format!("oidc_flow={}", hex_encode_test(&json))
 }
 
 fn hex_decode_test(s: &str) -> String {
@@ -588,9 +569,8 @@ async fn full_login_loop_and_interactive_escalation() {
         "loop breaker: no second escalation"
     );
 
-    // A fresh flow for the remaining two checks: the escalation above
-    // SUPERSEDED the first one, and a superseded flow is now genuinely gone
-    // rather than still decodable from a self-contained cookie.
+    // The escalation above superseded the first flow, so the remaining checks
+    // need one that is still live.
     let resp = app.clone().oneshot(get_req("/me", "", true)).await.unwrap();
     let flow_cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie set");
     let state = state_from_location(&resp);
@@ -633,10 +613,6 @@ async fn full_login_loop_and_interactive_escalation() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
-/// The property this whole design exists for, asserted against the real
-/// Set-Cookie header rather than against the struct: the browser is handed an
-/// opaque id, and the CSRF state, the PKCE verifier and the redirect target
-/// stay on the server.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_flow_cookie_carries_no_secrets() {
     let (base, _mock) = spawn_mock().await;
@@ -664,8 +640,6 @@ async fn the_flow_cookie_carries_no_secrets() {
         value.chars().all(|c| c.is_ascii_hexdigit()),
         "cookie value must be opaque: {value:?}"
     );
-    // Whatever the value is, it must not decode to anything structured — the
-    // old form was hex-encoded JSON and looked equally opaque at a glance.
     let decoded = hex_decode_test(value);
     assert!(
         !decoded.contains('{') && !decoded.contains(':'),
@@ -673,18 +647,11 @@ async fn the_flow_cookie_carries_no_secrets() {
     );
 }
 
-/// Replaces `a_next_from_the_flow_cookie_cannot_leave_the_origin`, which
-/// forged the cookie payload to steer the post-login redirect. That attack is
-/// no longer expressible — the cookie carries an opaque id and the flow lives
-/// server-side — so the property to assert is the stronger one: a payload the
-/// attacker writes names no flow and therefore does NOTHING.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_forged_flow_cookie_is_inert() {
     let (base, mock) = spawn_mock().await;
     let app = app(oidc_state(&base, MemoryStore::default()).await);
 
-    // Byte-for-byte the old attack: the pre-store wire form, hex-encoded,
-    // naming an off-origin `next` and a state the attacker also supplies.
     let payload = r#"{"s":"forged-state","v":"forged-verifier","n":"//evil.example","i":false}"#;
     let forged = format!(
         "oidc_flow={}",
@@ -728,8 +695,6 @@ async fn a_forged_flow_cookie_is_inert() {
         "no token exchange may happen for a flow the server never issued"
     );
 
-    // And the id space is not guessable-by-shape either: a plausible-looking
-    // opaque id that was never issued is equally inert.
     let resp = app
         .oneshot(get_req(
             "/oidc/callback?code=goodcode&state=forged-state",

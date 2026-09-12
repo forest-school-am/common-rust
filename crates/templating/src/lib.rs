@@ -2,11 +2,6 @@
 //! safety. Everything here is about turning a template plus parameters into
 //! bytes; nothing here decides what to serve or when.
 //!
-//! An asset cache is built once at boot. `require_template` makes a missing
-//! file a startup failure rather than a 500 on first request; `pin` adds an
-//! integrity hash so a copy that has drifted from the one this binary was
-//! built against is detected:
-//!
 //! ```
 //! use common_templating::Builder;
 //! use sha2::{Digest, Sha256};
@@ -26,10 +21,9 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! One render reads exactly one file. Templates cannot reference each other —
-//! there is no `extends` or `include` — so a file's own mtime is a complete
-//! statement about whether its output is stale, and a pin on it covers
-//! everything that output depends on.
+//! One render reads exactly one file: templates cannot reference each other,
+//! so a file's own mtime is a complete statement about whether its output is
+//! stale, and a pin on it covers everything that output depends on.
 
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
@@ -106,11 +100,6 @@ impl Builder {
         self
     }
 
-    /// The hash is verified when the file is LOADED — at boot, and again on
-    /// the next request after its mtime changes — not on every render. One
-    /// render touches exactly one file, so a load-time check covers everything
-    /// that file can affect (§9.7b). Stated here because this is where someone
-    /// deciding to pin something will read it.
     pub fn pin(mut self, name: impl Into<String>, expected_sha256: [u8; 32]) -> Self {
         let name = name.into();
         self.pins.insert(name.clone(), expected_sha256);
@@ -126,9 +115,6 @@ impl Builder {
             .root
             .canonicalize()
             .map_err(|e| RenderError::Io(self.root.display().to_string(), e.to_string()))?;
-        // Holds no templates: it carries the autoescape policy and mints
-        // one-shot templates in `render`. Read-only after this point, which is
-        // why it needs no lock.
         let mut env = Environment::new();
         env.set_auto_escape_callback(autoescape);
 
@@ -158,20 +144,8 @@ impl Builder {
 }
 
 impl AssetCache {
-    /// Resolve an untrusted asset `name` to a filesystem path that is proven to
-    /// stay under the asset root. Rejects absolute paths and any
-    /// non-`Normal`/`CurDir` component (`..`, root, prefix) BEFORE touching the
-    /// filesystem, then canonicalizes and requires containment under
-    /// `canonical_root` — which catches a symlink INSIDE the root pointing out
-    /// (the component check alone would not). `Ok` therefore always means
-    /// "safe AND real": a name that does not resolve to an existing file
-    /// returns `Missing` here rather than an unvalidated path, so no caller
-    /// ever touches a path safe_path hasn't cleared. This also closes the
-    /// intermediate-symlink gap by construction — a `link/newfile` where
-    /// `link` escapes the root but `newfile` is absent is `Missing`, never a
-    /// path a later read would follow out. (`canonicalize` is realpath: a
-    /// permissions error surfaces as `Io`, so `NotFound` genuinely means
-    /// absent.)
+    /// `canonicalize` is realpath, so a permissions error surfaces as `Io` and
+    /// `NotFound` genuinely means absent.
     fn safe_path(&self, name: &str) -> Result<PathBuf, RenderError> {
         let rel = Path::new(name);
         for component in rel.components() {
@@ -182,7 +156,7 @@ impl AssetCache {
         }
         match self.root.join(rel).canonicalize() {
             Ok(real) if real.starts_with(&self.canonical_root) => Ok(real),
-            Ok(_) => Err(RenderError::UnsafeName(name.to_owned())), // symlink escaped the root
+            Ok(_) => Err(RenderError::UnsafeName(name.to_owned())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 Err(RenderError::Missing(name.to_owned()))
             }
@@ -433,14 +407,6 @@ mod tests {
         ));
     }
 
-    /// The positive half of R29/R30. `multi_template` is off, so a template
-    /// that tries to reference another is a PARSE error — and because
-    /// `require_template` parses at boot, an adopter who reaches for `extends`
-    /// finds out at startup rather than on the request that renders it.
-    ///
-    /// This pins the feature decision rather than merely stating it: a
-    /// Cargo.toml regression re-enabling `multi_template` makes this build
-    /// succeed and the test fail.
     #[test]
     fn boot_refuses_a_template_using_a_removed_construct() {
         for construct in ["{% extends \"base.html\" %}", "{% include \"part.html\" %}"] {
@@ -455,8 +421,6 @@ mod tests {
             );
         }
 
-        // The control: ordinary substitution still parses, so the test above
-        // is detecting the removed construct and not a broken parser.
         let d = tmpdir();
         write(&d, "fine.html", "hello {{ name }}");
         assert!(Builder::new(&d)

@@ -59,10 +59,6 @@ type OidcCore = Client<
     EndpointSet,    // userinfo
 >;
 
-/// Only 401 and 403 are the IdP saying no about the TOKEN. A 5xx, a body that
-/// will not parse and a failed claims check are all the IdP failing to answer
-/// usefully — none of them asserts the credential is invalid, so none may
-/// destroy a session on its own (§3.3). They retry, and the budget decides.
 fn classify_userinfo<RE>(e: UserInfoError<RE>) -> Upstream
 where
     RE: std::error::Error + 'static,
@@ -138,8 +134,9 @@ impl OidcClient {
         let token_url = endpoint("token_endpoint", &back)?;
         let userinfo_url = endpoint("userinfo_endpoint", &back)?;
 
-        // ID tokens are never verified (identity comes from userinfo, per
-        // request) — issuer and jwks are only structural here.
+        // No ID token is ever verified — identity comes from userinfo on every
+        // request, so a revoked session stops working immediately rather than
+        // at token expiry. The issuer and the empty jwks are structural only.
         let core: OidcCore = Client::new(
             ClientId::new(config.client_id.clone()),
             IssuerUrl::from_url(config.issuer.clone()),
@@ -211,8 +208,6 @@ impl OidcClient {
             .request_async(&self.http)
             .await
             .map_err(|e| match e {
-                // The IdP answered about this refresh token — `invalid_grant`
-                // is the revoked/expired case, and it is a fact.
                 RequestTokenError::ServerResponse(r) => Upstream::Rejected(r.to_string()),
                 other => Upstream::Unreachable(other.to_string()),
             })?;
@@ -243,9 +238,6 @@ impl OidcClient {
             claims.email().map(|e| e.as_str().to_owned()),
             &claims.additional_claims().effective_groups,
         )
-        // The IdP answered and the answer was about this token's subject, so
-        // this is a rejection rather than an outage: retrying cannot change a
-        // `sub` that is not a UUID.
         .map_err(Upstream::Rejected)
     }
 }

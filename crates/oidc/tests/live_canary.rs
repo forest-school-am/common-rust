@@ -1,3 +1,8 @@
+//! Live assertions against a real authentik (§7.4): the load-bearing
+//! assumptions about the IdP that only the IdP can answer. Env-gated, so it is
+//! a no-op without the stand. Anything provable against a mock belongs in
+//! mock_flow.rs.
+
 use serde_json::{json, Value};
 use url::Url;
 
@@ -286,7 +291,6 @@ async fn effective_groups_is_a_downward_closure_never_an_upward_one() {
         g("search-users").await,
     );
 
-    // ops is a parent of dev-junior; dev-junior's only parents are dev and ops.
     e.user = "dave".into();
     let mut dave = groups_of(&e).await;
     dave.sort();

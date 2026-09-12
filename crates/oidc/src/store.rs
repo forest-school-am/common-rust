@@ -16,12 +16,6 @@ pub struct Session {
     pub created: SystemTime,
 }
 
-/// A login in flight: what the callback needs to finish a flow it did not
-/// start. Every field here is something the browser MUST NOT choose — `state`
-/// is a CSRF token whose only security property is that the server remembers
-/// it, `verifier` is the PKCE secret, `next` is a redirect target, and
-/// `interactive_tried` is the loop breaker. The browser gets an opaque id and
-/// none of this.
 #[derive(Clone)]
 pub struct FlowState {
     pub state: String,
@@ -31,9 +25,6 @@ pub struct FlowState {
     pub created: SystemTime,
 }
 
-/// Hand-written so `?flow` in a log line cannot print the PKCE verifier or the
-/// CSRF token. Deriving `Debug` here would put both in any event that captures
-/// the struct.
 impl std::fmt::Debug for FlowState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlowState")
@@ -54,9 +45,6 @@ pub trait FlowStore: Send + Sync + 'static {
     fn remove(&self, id: &str) -> BoxFuture<'_, ()>;
 }
 
-/// Flows are short-lived by nature — a login either completes or is abandoned
-/// within minutes — so the default expiry is far shorter than a session's, and
-/// abandoned ones are swept rather than accumulating.
 pub struct MemoryFlowStore {
     flows: Mutex<HashMap<String, FlowState>>,
     max_age: Duration,
@@ -238,10 +226,6 @@ mod tests {
         assert!(s.get("live").await.is_some());
     }
 
-    /// The struct holds the PKCE verifier and the CSRF token. `?flow` in any
-    /// event must not print either — the spellings are written out here rather
-    /// than read off the struct so the test still fails if the field values
-    /// start reaching the formatter.
     #[test]
     fn debug_redacts_the_secrets_but_keeps_the_diagnostics() {
         let rendered = format!("{:?}", flow(SystemTime::now()));

@@ -22,9 +22,6 @@ pub struct OidcConfig {
 }
 
 impl OidcConfig {
-    /// `cookie_name` is required rather than defaulted: a session cookie is
-    /// browser-visible and per-application, and a default nobody chose is a
-    /// name nobody re-reads. Pass the owning app's own name.
     pub fn new(
         issuer: Url,
         client_id: impl Into<String>,
@@ -48,10 +45,11 @@ impl OidcConfig {
         }
     }
 
-    /// DO NOT call this until the deployment's authentik is confirmed to
-    /// revoke refresh tokens at logout — run `tests/live_canary.rs` green
-    /// first. Without it, a logged-out identity can be resurrected via the
-    /// refresh token for its whole validity (see ruling v5 and the canary).
+    /// UNENFORCED PRECONDITION: call this only where the deployment's
+    /// authentik is known to revoke refresh tokens at logout. Where it does
+    /// not, a logged-out identity can be resurrected through the refresh token
+    /// for the whole of its validity. `tests/live_canary.rs` is both the check
+    /// and the record of the last answer (R2).
     pub fn request_refresh_tokens(mut self) -> Self {
         if !self.scopes.iter().any(|s| s == "offline_access") {
             self.scopes.push("offline_access".into());

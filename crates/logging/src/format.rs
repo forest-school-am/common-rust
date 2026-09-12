@@ -151,9 +151,6 @@ where
             .map_err(|_| fmt::Error)?;
         let (reqid, actor) = lookup_ctx(ctx, event);
 
-        // R28: the designator is an event FIELD now, not the target. The
-        // target is the module path again, so it is `RUST_LOG`'s business and
-        // does not appear in this column.
         let mut rendered = EventFields::default();
         event.record(&mut rendered);
 
@@ -203,10 +200,6 @@ where
     }
 }
 
-/// An event split into the three things the human line renders separately:
-/// the designator column, the message, and the remaining fields. The
-/// designator is pulled OUT rather than left in the field list, or it would
-/// print twice — once as the column and once as `designator=auth`.
 #[derive(Default)]
 struct EventFields {
     designator: Option<String>,
@@ -228,9 +221,6 @@ const MESSAGE: &str = "message";
 
 impl Visit for EventFields {
     fn record_str(&mut self, field: &Field, value: &str) {
-        // The message and the designator are rendered bare; everything else
-        // keeps the quoting the span-field renderer uses, so one line does not
-        // quote the same value two different ways.
         let name = field.name();
         if name == MESSAGE || name == crate::designator::FIELD {
             self.put(name, value.to_owned());
@@ -259,8 +249,6 @@ impl Visit for EventFields {
         let name = field.name();
         let rendered = format!("{value:?}");
         if name == MESSAGE || name == crate::designator::FIELD {
-            // `%`-captured and literal values arrive here already quoted or
-            // not depending on the capture sigil; the column wants neither.
             self.put(name, rendered.trim_matches('"').to_owned());
         } else {
             self.put(name, rendered);
