@@ -1,7 +1,7 @@
-//! Assertions about `request_span!` that can only be made from OUTSIDE
-//! common-logging: a test inside it carries common-logging's own module path
-//! either way and so cannot fail. A property observable from within the crate
-//! belongs in `src/span.rs`'s own tests.
+//! The §1.3b macros — `request_span!`, `refuse!` — asserted from OUTSIDE
+//! common-logging, because a test inside it carries common-logging's own
+//! module path either way and so cannot fail. A property observable from
+//! within the crate belongs in that module's own tests.
 
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -125,5 +125,59 @@ fn an_owned_reqid_records_as_a_plain_string() {
         v["span"]["reqid"], owned,
         "an owned reqid must reach the span as a plain string, not a Debug \
          rendering of one: {line}"
+    );
+}
+
+#[test]
+fn a_refusal_line_carries_the_callers_module_and_the_startup_designator() {
+    let buf = Buf::new();
+    tracing::subscriber::with_default(
+        json_subscriber("request_span_callsite=debug", buf.clone()),
+        || {
+            common_logging::__refusal_line!(common_logging::Refusal::new(
+                "REGISTRY_BIND",
+                "not-an-address",
+                "a socket address such as \"0.0.0.0:8080\"",
+            ));
+        },
+    );
+    let out = buf.string();
+    let line = out.lines().next().expect("the refusal must emit");
+    let v: serde_json::Value = serde_json::from_str(line).expect("valid json");
+
+    assert_eq!(
+        v["target"], "request_span_callsite",
+        "a refusal must carry the CALLER's module, or the documented \
+         RUST_LOG=my_service=debug filters out the only line a failed boot \
+         ever prints: {line}"
+    );
+    assert_eq!(v["level"], "ERROR");
+    assert_eq!(v["designator"], "startup");
+    assert_eq!(v["variable"], "REGISTRY_BIND");
+    assert_eq!(v["value"], "not-an-address");
+    assert!(
+        v["accepted"]
+            .as_str()
+            .is_some_and(|a| a.contains("0.0.0.0:8080")),
+        "the accepted form is the operator's only instruction: {line}"
+    );
+    assert_eq!(v["detail"], "-", "an absent detail renders as - like actor");
+
+    let elsewhere = Buf::new();
+    tracing::subscriber::with_default(
+        json_subscriber("common_logging=debug", elsewhere.clone()),
+        || {
+            common_logging::__refusal_line!(common_logging::Refusal::new(
+                "REGISTRY_BIND",
+                "not-an-address",
+                "a socket address",
+            ));
+        },
+    );
+    assert!(
+        elsewhere.string().is_empty(),
+        "a filter naming common-logging must NOT be what surfaces a \
+         consumer's refusal; if it does, `refuse!` became a function: {}",
+        elsewhere.string()
     );
 }

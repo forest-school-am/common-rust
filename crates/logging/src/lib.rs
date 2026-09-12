@@ -20,7 +20,7 @@ mod span;
 pub use tracing;
 
 pub use config::{Deployment, Format, LogConfig, Refusal};
-pub use designator::{AUTH, BUSINESS, HTTP, STORAGE, UPSTREAM};
+pub use designator::{AUTH, BUSINESS, HTTP, STARTUP, STORAGE, UPSTREAM};
 pub use filter::Designators;
 #[doc(hidden)]
 pub use span::__reqid;
@@ -33,40 +33,84 @@ use tracing_subscriber::{fmt, EnvFilter};
 pub fn init() {
     match LogConfig::from_env() {
         Ok(cfg) => init_with(cfg),
-        Err(refusal) => refuse(refusal),
+        Err(refusal) => crate::refuse!(refusal),
     }
 }
 
 pub fn init_with(cfg: LogConfig) {
     match cfg.env_filter() {
         Ok(env) => install(cfg.format, env, cfg.designators),
-        Err(refusal) => refuse(refusal),
+        Err(refusal) => crate::refuse!(refusal),
     }
 }
 
-/// Bad config still brings logging UP (R50a) — in the JSON default, ignoring
-/// whatever was set — so the refusal is one ordinary line with the parts as
-/// fields rather than prose on a channel nothing else uses.
+/// Emits a refusal as one `startup` line with the parts as FIELDS (R50a/R51)
+/// and exits 1. For a service's OWN boot refusals: call it from `main` instead
+/// of returning an error nothing renders.
 ///
-/// `process::exit` runs no destructors, so the writer is flushed explicitly.
-/// Measured, rather than assumed: tracing's stdout writer already flushes per
-/// event, piped or not, so this is insurance against a buffered writer being
-/// configured later — not what makes the line appear today.
-fn refuse(refusal: Refusal) -> ! {
+/// A MACRO, NOT A FUNCTION, AND THAT IS LOAD-BEARING (§1.3b). A function here
+/// would stamp the event with THIS crate's module path, so an operator running
+/// the documented `RUST_LOG=my_service=debug` would filter the refusal out and
+/// the process would exit 1 having said nothing. Expanding at the call site
+/// gives the line the caller's own module.
+///
+/// ```no_run
+/// # let raw = "nope".to_string();
+/// let refusal = common_logging::Refusal::new(
+///     "REGISTRY_BIND",
+///     raw,
+///     "a socket address such as \"0.0.0.0:8080\"",
+/// );
+/// common_logging::refuse!(refusal);
+/// ```
+#[macro_export]
+macro_rules! refuse {
+    ($refusal:expr) => {{
+        $crate::__refusal_line!($refusal);
+        $crate::__exit_refused()
+    }};
+}
+
+/// The emitting half of [`refuse!`], split out so the §1.3b property can be
+/// asserted from another crate — `refuse!` itself exits, which no test can
+/// observe.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __refusal_line {
+    ($refusal:expr) => {{
+        let refusal: $crate::Refusal = $refusal;
+        $crate::__ensure_subscriber();
+        $crate::error!(
+            $crate::STARTUP,
+            variable = refusal.variable,
+            value = %refusal.value,
+            accepted = %refusal.accepted,
+            detail = refusal.detail.as_deref().unwrap_or("-"),
+            "refusing to start: invalid configuration"
+        );
+    }};
+}
+
+/// Brings logging up as [`LogConfig::default()`] if nothing has yet (R50a), so
+/// a refusal raised before or instead of `init()` is still rendered. A no-op
+/// once a subscriber exists, which is the usual case for a service refusing
+/// its own config after `init()` succeeded.
+#[doc(hidden)]
+pub fn __ensure_subscriber() {
     let fallback = LogConfig::default();
     install(
         fallback.format,
         EnvFilter::builder().parse_lossy(&fallback.filter),
         fallback.designators,
     );
-    crate::error!(
-        AUTH,
-        variable = refusal.variable,
-        value = %refusal.value,
-        accepted = %refusal.accepted,
-        detail = refusal.detail.as_deref().unwrap_or("-"),
-        "refusing to start: the logging environment is invalid"
-    );
+}
+
+/// `process::exit` runs no destructors, so the writer is flushed explicitly.
+/// Measured, rather than assumed: tracing's stdout writer already flushes per
+/// event, piped or not, so this is insurance against a buffered writer being
+/// configured later — not what makes the line appear today.
+#[doc(hidden)]
+pub fn __exit_refused() -> ! {
     let _ = std::io::Write::flush(&mut std::io::stdout());
     std::process::exit(1);
 }

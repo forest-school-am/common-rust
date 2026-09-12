@@ -27,6 +27,30 @@ pub struct Refusal {
     pub detail: Option<String>,
 }
 
+impl Refusal {
+    /// `variable` is `&'static str` because it names an environment variable,
+    /// which is a literal in the code that reads it, never runtime data.
+    pub fn new(
+        variable: &'static str,
+        value: impl Into<String>,
+        accepted: impl Into<String>,
+    ) -> Self {
+        Self {
+            variable,
+            value: value.into(),
+            accepted: accepted.into(),
+            detail: None,
+        }
+    }
+
+    /// The underlying parser's own message, where one exists — it is the only
+    /// part that says WHERE a value is wrong rather than that it is.
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+}
+
 impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

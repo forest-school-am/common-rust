@@ -32,10 +32,24 @@ included. Change here ripples fleet-wide — treat the output contract as public
   documented default (`json`, `dev`, deployment-derived, pass-everything).
   "Logging must always come up" as a reason to DEGRADE a bad value is
   WITHDRAWN; it was never the user's.
+- `STARTUP` is the sixth STAND designator (R51): startup checks — config,
+  classification, boot validation, the process deciding whether it comes up.
+  It is the user's own ruling, so no §8.3 operator confirmation. It is ORDINARY
+  vocabulary on the designator axis, not an exemption: `LOG_DESIGNATORS` can
+  filter it like any other.
+- `refuse!` is a MACRO and must stay one (§1.3b), for the same reason
+  `request_span!` is: it expands at the ADOPTER's call site so the refusal
+  carries the adopter's module path. As a function it carried
+  `common_logging`, and the documented `RUST_LOG=my_service=debug` then
+  filtered out the only line a failed boot prints — silently, exit 1 and no
+  output. `tests/request_span_callsite.rs` asserts this from outside the crate
+  (both directions: the caller's own filter surfaces the line, a
+  `common_logging`-scoped one does NOT).
 - THE REFUSAL IS A LOG LINE, NOT PROSE ON STDERR (R50a). Logging still comes
   up — as `LogConfig::default()`, the JSON default, ignoring whatever was set —
-  emits exactly ONE ERROR line in the same shape as every other line, with
-  `variable`, `value`, `accepted` and `detail` as FIELDS, then exits 1. So a
+  emits exactly ONE ERROR `startup` line in the same shape as every other
+  line, with `variable`, `value`, `accepted` and `detail` as FIELDS, then
+  exits 1. So a
   reader that already parses this crate's output needs nothing new, which is
   the whole point. `Refusal` carries those parts; its `Display` renders them as
   a sentence for a consumer wrapping it in its own error type.

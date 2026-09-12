@@ -178,6 +178,16 @@ mod tests {
     }
 
     #[test]
+    fn startup_is_stand_vocabulary_and_filterable_like_the_rest() {
+        let d = Designators::parse(Some("startup=error")).unwrap();
+        assert!(d.admits(Some("startup"), &Level::ERROR));
+        assert!(
+            !d.admits(Some("startup"), &Level::INFO),
+            "startup is an ordinary axis entry, not an exemption"
+        );
+    }
+
+    #[test]
     fn custom_designators_are_accepted_by_prefix() {
         let d = Designators::parse(Some("c-scheduler=debug")).unwrap();
         assert!(d.admits(Some("c-scheduler"), &Level::DEBUG));
@@ -214,7 +224,7 @@ mod tests {
     #[test]
     fn the_refusal_names_every_stand_designator() {
         let r = Designators::parse(Some("nope=info")).expect_err("must refuse");
-        for name in ["auth", "business", "upstream", "storage", "http"] {
+        for name in ["auth", "business", "upstream", "storage", "http", "startup"] {
             assert!(r.accepted.contains(name), "must name {name}: {r:?}");
         }
     }

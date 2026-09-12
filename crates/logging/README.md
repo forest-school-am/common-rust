@@ -88,6 +88,7 @@ Common vocabulary — prefer it, it covers most events:
 | `UPSTREAM` (`upstream`) | calls to another service (IdP, DB, remote API) |
 | `STORAGE` (`storage`) | persistence / caches / files |
 | `HTTP` (`http`) | request lifecycle |
+| `STARTUP` (`startup`) | startup checks: config, classification, boot validation — the process deciding whether it comes up |
 
 ### Custom designators
 
@@ -173,6 +174,48 @@ A service that wants to handle the refusal itself rather than exit calls
 `LogConfig::from_env()` (or `Format`/`Deployment::from_env`, or
 `Designators::parse`) and gets a [`Refusal`] as the `Err`: the same parts as
 fields, and `Display` renders them as one sentence.
+
+## Refusing your own boot (R51)
+
+A service's own boot refusals take the same shape — one `startup` line, then
+exit 1 — so build a `Refusal` and hand it to `refuse!`:
+
+```rust
+fn main() {
+    common_logging::init();
+
+    let bind = std::env::var("REGISTRY_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
+    let bind: std::net::SocketAddr = match bind.parse() {
+        Ok(addr) => addr,
+        Err(e) => common_logging::refuse!(
+            common_logging::Refusal::new(
+                "REGISTRY_BIND",
+                bind,
+                r#"a socket address such as "0.0.0.0:8080""#,
+            )
+            .with_detail(e.to_string())
+        ),
+    };
+    // …
+}
+```
+
+```
+{"level":"ERROR","message":"refusing to start: invalid configuration",
+ "designator":"startup","variable":"REGISTRY_BIND","value":"not-an-address",
+ "accepted":"a socket address such as \"0.0.0.0:8080\"","detail":"-",
+ "target":"my_service"}
+```
+
+**`refuse!` is a macro and has to be** (§1.3b): it expands at YOUR call site, so
+the line carries YOUR module path. As a function it would carry
+`common_logging`, and the documented `RUST_LOG=my_service=debug` would filter
+out the only line a failed boot ever prints.
+
+One limit worth knowing: a `RUST_LOG` scoped to some OTHER module, or a
+`LOG_DESIGNATORS` that excludes `startup`, still suppresses the line — the
+refusal is an ordinary event on both axes, not an exemption. The exit code is
+1 either way.
 
 ## Test
 

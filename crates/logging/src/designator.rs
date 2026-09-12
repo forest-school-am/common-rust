@@ -11,8 +11,9 @@ pub const BUSINESS: &str = "business";
 pub const UPSTREAM: &str = "upstream";
 pub const STORAGE: &str = "storage";
 pub const HTTP: &str = "http";
+pub const STARTUP: &str = "startup";
 
-pub const STAND: [&str; 5] = [AUTH, BUSINESS, UPSTREAM, STORAGE, HTTP];
+pub const STAND: [&str; 6] = [AUTH, BUSINESS, UPSTREAM, STORAGE, HTTP, STARTUP];
 
 pub const CUSTOM_PREFIX: &str = "c-";
 
