@@ -15,6 +15,7 @@ mod config;
 mod designator;
 mod filter;
 mod format;
+mod refuse;
 mod span;
 
 pub use tracing;
@@ -22,6 +23,8 @@ pub use tracing;
 pub use config::{Deployment, Format, LogConfig, Refusal};
 pub use designator::{AUTH, BUSINESS, HTTP, STARTUP, STORAGE, UPSTREAM};
 pub use filter::Designators;
+#[doc(hidden)]
+pub use refuse::{__ensure_subscriber, __exit_refused};
 #[doc(hidden)]
 pub use span::__reqid;
 pub use span::{gen_reqid, set_actor};
@@ -44,78 +47,7 @@ pub fn init_with(cfg: LogConfig) {
     }
 }
 
-/// Emits a refusal as one `startup` line with the parts as FIELDS (R50a/R51)
-/// and exits 1. For a service's OWN boot refusals: call it from `main` instead
-/// of returning an error nothing renders.
-///
-/// A MACRO, NOT A FUNCTION, AND THAT IS LOAD-BEARING (§1.3b). A function here
-/// would stamp the event with THIS crate's module path, so an operator running
-/// the documented `RUST_LOG=my_service=debug` would filter the refusal out and
-/// the process would exit 1 having said nothing. Expanding at the call site
-/// gives the line the caller's own module.
-///
-/// ```no_run
-/// # let raw = "nope".to_string();
-/// let refusal = common_logging::Refusal::new(
-///     "REGISTRY_BIND",
-///     raw,
-///     "a socket address such as \"0.0.0.0:8080\"",
-/// );
-/// common_logging::refuse!(refusal);
-/// ```
-#[macro_export]
-macro_rules! refuse {
-    ($refusal:expr) => {{
-        $crate::__refusal_line!($refusal);
-        $crate::__exit_refused()
-    }};
-}
-
-/// The emitting half of [`refuse!`], split out so the §1.3b property can be
-/// asserted from another crate — `refuse!` itself exits, which no test can
-/// observe.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __refusal_line {
-    ($refusal:expr) => {{
-        let refusal: $crate::Refusal = $refusal;
-        $crate::__ensure_subscriber();
-        $crate::error!(
-            $crate::STARTUP,
-            variable = refusal.variable,
-            value = %refusal.value,
-            accepted = %refusal.accepted,
-            detail = refusal.detail.as_deref().unwrap_or("-"),
-            "refusing to start: invalid configuration"
-        );
-    }};
-}
-
-/// Brings logging up as [`LogConfig::default()`] if nothing has yet (R50a), so
-/// a refusal raised before or instead of `init()` is still rendered. A no-op
-/// once a subscriber exists, which is the usual case for a service refusing
-/// its own config after `init()` succeeded.
-#[doc(hidden)]
-pub fn __ensure_subscriber() {
-    let fallback = LogConfig::default();
-    install(
-        fallback.format,
-        EnvFilter::builder().parse_lossy(&fallback.filter),
-        fallback.designators,
-    );
-}
-
-/// `process::exit` runs no destructors, so the writer is flushed explicitly.
-/// Measured, rather than assumed: tracing's stdout writer already flushes per
-/// event, piped or not, so this is insurance against a buffered writer being
-/// configured later — not what makes the line appear today.
-#[doc(hidden)]
-pub fn __exit_refused() -> ! {
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    std::process::exit(1);
-}
-
-fn install(format: Format, env: EnvFilter, designators: Designators) {
+pub(crate) fn install(format: Format, env: EnvFilter, designators: Designators) {
     match format {
         Format::Json => {
             tracing_subscriber::registry()
@@ -394,7 +326,7 @@ mod tests {
         });
         let v: serde_json::Value =
             serde_json::from_str(buf.string().lines().next().unwrap()).unwrap();
-        assert_eq!(v["designator"], "c-scheduler");
+        assert_eq!(v[designator::FIELD], "c-scheduler");
     }
 
     #[test]

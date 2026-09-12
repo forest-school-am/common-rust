@@ -23,11 +23,8 @@ directory. Used only by services that serve assets — kept SEPARATE from
 - Integrity pins (§9.7b/§9.8): a pinned file's sha256 is verified at boot AND
   on every reload; mismatch refuses to serve. Pins are for server-enforced
   logic and library templates that must not drift.
-- NO escaping, deliberately: string parameters are injected verbatim into every
-  file type. minijinja's default callback escapes `.html`/`.htm`/`.xml`, so
-  `AutoEscape::None` is set explicitly — deleting the callback would silently
-  restore escaping rather than remove it. `parameters_are_injected_verbatim_whatever_the_file_type`
-  pins this.
+- NO escaping (§9.3): string parameters are injected verbatim into every file
+  type. `parameters_are_injected_verbatim_whatever_the_file_type` pins it.
 - Asset names are UNTRUSTED (§9.5b): every name-taking method (render,
   static_file) routes through `safe_path` first — rejects absolute
   paths and any `..`/root/prefix component, then canonicalizes and requires

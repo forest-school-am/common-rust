@@ -157,18 +157,15 @@ whatever was set — emits exactly ONE `ERROR` line in the same shape as every
 other line, then exits 1. The parts are FIELDS, so anything already parsing
 this crate's output can read a refusal with no special case:
 
-```
-$ LOG_FORMAT=bogus ./my-service ; echo "exit=$?"
-{"timestamp":"…","level":"ERROR","message":"refusing to start: the logging
-environment is invalid","designator":"auth","variable":"LOG_FORMAT",
-"value":"bogus","accepted":"one of [\"human\", \"json\"] (unset means json)",
-"detail":"-","target":"common_logging"}
-exit=1
-```
-
-`detail` carries the underlying parser's own error where there is one — for
-`RUST_LOG` that is tracing's message, which is the only thing that says WHERE
-the filter is wrong — and `-` where there is none, as `reqid`/`actor` do.
+| field | |
+|---|---|
+| `level` | `ERROR` |
+| `designator` | `startup` |
+| `variable` | the environment variable that was rejected |
+| `value` | what it was set to |
+| `accepted` | what would have been accepted |
+| `detail` | the underlying parser's own error, or `-` — for `RUST_LOG` it is tracing's message, the only part that says WHERE the filter is wrong |
+| `target` | the module that raised it |
 
 A service that wants to handle the refusal itself rather than exit calls
 `LogConfig::from_env()` (or `Format`/`Deployment::from_env`, or
@@ -206,11 +203,6 @@ fn main() {
  "accepted":"a socket address such as \"0.0.0.0:8080\"","detail":"-",
  "target":"my_service"}
 ```
-
-**`refuse!` is a macro and has to be** (§1.3b): it expands at YOUR call site, so
-the line carries YOUR module path. As a function it would carry
-`common_logging`, and the documented `RUST_LOG=my_service=debug` would filter
-out the only line a failed boot ever prints.
 
 One limit worth knowing: a `RUST_LOG` scoped to some OTHER module, or a
 `LOG_DESIGNATORS` that excludes `startup`, still suppresses the line — the

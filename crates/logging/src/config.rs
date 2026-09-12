@@ -15,10 +15,6 @@ const RUST_LOG_ACCEPTED: &str = "comma-separated tracing directives such as \
      \"info\", \"my_crate=debug\" or \"my_crate::module=trace,sqlx=warn\" \
      (unset means \"info\" under DEPLOYMENT_TYPE=prod, \"debug\" under dev)";
 
-/// A rejected configuration value, held as PARTS rather than prose: the
-/// refusal is emitted as an ordinary log line with these as fields (R50a), so
-/// a reader that already parses this crate's output needs nothing new.
-/// `Display` renders the same parts as a sentence for callers that want one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     pub variable: &'static str,
@@ -28,8 +24,6 @@ pub struct Refusal {
 }
 
 impl Refusal {
-    /// `variable` is `&'static str` because it names an environment variable,
-    /// which is a literal in the code that reads it, never runtime data.
     pub fn new(
         variable: &'static str,
         value: impl Into<String>,
@@ -43,8 +37,6 @@ impl Refusal {
         }
     }
 
-    /// The underlying parser's own message, where one exists — it is the only
-    /// part that says WHERE a value is wrong rather than that it is.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
         self
@@ -165,9 +157,6 @@ impl LogConfig {
         )
     }
 
-    /// `RUST_LOG` is a filter DSL rather than a set of spellings, so only
-    /// tracing can say whether a value parses. Built here so `resolve` and
-    /// `init_with` refuse identically and the message is written once.
     pub fn env_filter(&self) -> Result<EnvFilter, Refusal> {
         EnvFilter::try_new(&self.filter).map_err(|e| Refusal {
             variable: "RUST_LOG",
@@ -178,9 +167,6 @@ impl LogConfig {
     }
 }
 
-/// What `init()` brings logging up as when the environment is refused (R50a):
-/// the JSON default, ignoring whatever was set. Deliberately `info` rather
-/// than dev's `debug` — a process about to exit should say one thing.
 impl Default for LogConfig {
     fn default() -> Self {
         Self {
@@ -205,10 +191,6 @@ mod tests {
         LogConfig::resolve(format, deployment, rust_log, designators).expect("must resolve")
     }
 
-    /// The refusal is emitted as FIELDS, so the fields are what a test checks:
-    /// the variable, the value the operator set, and what would have been
-    /// accepted. Checking only the rendered sentence would pass a line whose
-    /// fields were empty.
     fn assert_refusal(r: &Refusal, variable: &str, value: &str, accepted: &str) {
         assert_eq!(r.variable, variable, "wrong variable in {r:?}");
         assert_eq!(r.value, value, "must carry the rejected value: {r:?}");
@@ -334,9 +316,6 @@ mod tests {
         );
     }
 
-    /// `Display` is the half a consumer wrapping this in its own error type
-    /// sees (mint does exactly that), so the rendering is pinned as well as
-    /// the fields.
     #[test]
     fn the_rendered_refusal_names_the_variable_the_value_and_the_array() {
         let rendered = Deployment::parse(Some("prd")).unwrap_err().to_string();

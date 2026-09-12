@@ -710,6 +710,25 @@ async fn a_forged_flow_cookie_is_inert() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn unauthorized_response_clears_the_cookie_from_a_jar_it_was_never_in() {
+    let (base, _mock) = spawn_mock().await;
+    let oidc = oidc_state(&base, MemoryStore::default()).await;
+
+    let cookie = oidc
+        .unauthorized_response()
+        .headers()
+        .get(axum::http::header::SET_COOKIE)
+        .expect("an adopter calls this with no jar, so nothing was there to remove")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        cookie.to_lowercase().contains("max-age=0"),
+        "the removal has to be an expiry the browser acts on, not an absence: {cookie}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn unauthorized_response_matches_the_extractor_401() {
     let (base, _mock) = spawn_mock().await;
     let oidc = oidc_state(&base, MemoryStore::default()).await;

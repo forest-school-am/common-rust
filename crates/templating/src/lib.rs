@@ -103,8 +103,6 @@ impl Builder {
             .root
             .canonicalize()
             .map_err(|e| RenderError::Io(self.root.display().to_string(), e.to_string()))?;
-        // minijinja's own default callback escapes `.html`/`.htm`/`.xml`, so
-        // having no escaping has to be said explicitly rather than left unset.
         let mut env = Environment::new();
         env.set_auto_escape_callback(|_| AutoEscape::None);
 
@@ -134,8 +132,6 @@ impl Builder {
 }
 
 impl AssetCache {
-    /// `canonicalize` is realpath, so a permissions error surfaces as `Io` and
-    /// `NotFound` genuinely means absent.
     fn safe_path(&self, name: &str) -> Result<PathBuf, RenderError> {
         let rel = Path::new(name);
         for component in rel.components() {

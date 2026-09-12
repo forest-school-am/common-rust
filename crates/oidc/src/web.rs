@@ -29,9 +29,6 @@ const FLOW_COOKIE: &str = "oidc_flow";
 pub const REAUTH_HEADER: &str = "X-Common-OIDC-Reauth";
 const SHIM_TEMPLATE: &str = "common-oidc.js.jinja";
 
-/// The browser reading our `Location` header is a WHATWG URL parser: it folds
-/// `\` to `/` and strips tab/CR/LF BEFORE resolving, so a prefix test cannot
-/// answer where a value lands. Hence resolve-then-compare-origin.
 fn safe_next(raw: Option<&str>) -> String {
     fn resolve(raw: &str) -> Option<String> {
         if !raw.starts_with('/') {
@@ -209,9 +206,6 @@ fn base_cookie<'a>(name: &'a str, value: String, config: &OidcConfig) -> Cookie<
     c
 }
 
-/// [`CookieJar::remove`] emits a header only when the ORIGINAL cookie was in
-/// the request, so on a jar built from nothing it is silently a no-op — which
-/// is what [`OidcState::unauthorized_response`] hands it.
 fn expiring_removal(name: &str) -> Cookie<'static> {
     Cookie::parse(format!("{name}=; Path=/; Max-Age=0"))
         .map(|c| c.into_owned())

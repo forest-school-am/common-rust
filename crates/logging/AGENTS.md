@@ -9,10 +9,11 @@ included. Change here ripples fleet-wide — treat the output contract as public
 ## Layout
 - `src/lib.rs` — public API + `init`/`init_with` (builds the subscriber);
   inline format/designator tests.
+- `src/refuse.rs` — `refuse!`, `__refusal_line!` and the exit: the refusal
+  path only.
 - `src/config.rs` — `LogConfig::resolve` (pure `LOG_FORMAT`/`DEPLOYMENT_TYPE`/
-  `RUST_LOG`/`LOG_DESIGNATORS` → `Result<LogConfig, String>`) + one
-  refuse/default test per variable. `env_filter()` is the `RUST_LOG` check, and
-  it lives here so `resolve` and `init_with` refuse with the same message.
+  `RUST_LOG`/`LOG_DESIGNATORS` → `Result<LogConfig, Refusal>`) + one
+  refuse/default test per variable. `env_filter()` is the `RUST_LOG` check.
 - `src/filter.rs` — `Designators`, the `LOG_DESIGNATORS` axis: parsing,
   validation, and the `Filter` impl that reads the designator FIELD. Anything
   about which events pass goes here; what a designator means stays in
@@ -30,31 +31,16 @@ included. Change here ripples fleet-wide — treat the output contract as public
 - SET-BUT-INVALID REFUSES TO START (R50, canon §4.4y): all four of
   `LOG_FORMAT`, `DEPLOYMENT_TYPE`, `RUST_LOG` and `LOG_DESIGNATORS`. Unset is a
   documented default (`json`, `dev`, deployment-derived, pass-everything).
-  "Logging must always come up" as a reason to DEGRADE a bad value is
-  WITHDRAWN; it was never the user's.
 - `STARTUP` is the sixth STAND designator (R51): startup checks — config,
   classification, boot validation, the process deciding whether it comes up.
   It is the user's own ruling, so no §8.3 operator confirmation. It is ORDINARY
   vocabulary on the designator axis, not an exemption: `LOG_DESIGNATORS` can
   filter it like any other.
-- `refuse!` is a MACRO and must stay one (§1.3b), for the same reason
-  `request_span!` is: it expands at the ADOPTER's call site so the refusal
-  carries the adopter's module path. As a function it carried
-  `common_logging`, and the documented `RUST_LOG=my_service=debug` then
-  filtered out the only line a failed boot prints — silently, exit 1 and no
-  output. `tests/request_span_callsite.rs` asserts this from outside the crate
-  (both directions: the caller's own filter surfaces the line, a
-  `common_logging`-scoped one does NOT).
 - THE REFUSAL IS A LOG LINE, NOT PROSE ON STDERR (R50a). Logging still comes
   up — as `LogConfig::default()`, the JSON default, ignoring whatever was set —
   emits exactly ONE ERROR `startup` line in the same shape as every other
   line, with `variable`, `value`, `accepted` and `detail` as FIELDS, then
-  exits 1. So a
-  reader that already parses this crate's output needs nothing new, which is
-  the whole point. `Refusal` carries those parts; its `Display` renders them as
-  a sentence for a consumer wrapping it in its own error type.
-  `Designators::permissive()` is what the fallback uses — that is why it exists
-  and it is NOT a degrade path.
+  exits 1.
 - The designator is an event FIELD, never the tracing target (R28). The target
   is the module path, so `RUST_LOG` behaves as standard tracing. Designators
   must stay compile-time `&'static str` (so `custom!` uses `concat!`).
@@ -62,11 +48,11 @@ included. Change here ripples fleet-wide — treat the output contract as public
   `LOG_DESIGNATORS` (designator). Unset `LOG_DESIGNATORS` must pass
   EVERYTHING, or the two ANDs resolve to silence. An event with no designator
   — anything from a dependency — always passes the designator axis.
-- `request_span!` is a MACRO and must stay one (R28): it has to expand at the
-  CALL SITE so the span carries the adopter's module path. As a function it
-  carried common-logging's, and a service-scoped `RUST_LOG` then silently
-  dropped `reqid` from every line. `tests/request_span_callsite.rs` asserts
-  this from outside the crate, which is the only place it can be asserted.
+- `request_span!` and `refuse!` are MACROS and must stay macros (§1.3b): they
+  expand at the ADOPTER's call site, so the span and the refusal carry the
+  adopter's module path rather than this crate's.
+  `tests/request_span_callsite.rs` asserts both from outside the crate, which
+  is the only place either can be asserted.
 - `actor` renders `-` until `set_actor`; `reqid` is per request.
 - No network, no IO clients — this crate stays dependency-light (tracing,
   tracing-subscriber, time, and strum + strum_macros/heck for the §4.5

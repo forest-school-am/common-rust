@@ -1,7 +1,5 @@
-//! The §1.3b macros — `request_span!`, `refuse!` — asserted from OUTSIDE
-//! common-logging, because a test inside it carries common-logging's own
-//! module path either way and so cannot fail. A property observable from
-//! within the crate belongs in that module's own tests.
+//! The call-site macros, asserted from OUTSIDE common-logging because a test
+//! inside it cannot fail. Anything observable from within belongs in src/.
 
 use std::io;
 use std::sync::{Arc, Mutex};
