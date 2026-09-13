@@ -89,9 +89,16 @@ composes them:
 let origin = common_templating::AssetsOrigin::from_env(deployment)
     .unwrap_or_else(|r| common_logging::refuse!(r));   // your module, your log line
 
+// The POLICY is the shell's, not this crate's: it is the `csp` field of the
+// shell-markers.json you vendored from the prefix, with {{assets_origin}}
+// where the origin goes. Embed it in build.rs beside the shell itself — the
+// crate holding its own copy is what let `img-src 'self'` refuse the shell's
+// data: favicon with no CSP report and no failing test.
+const CSP: &str = /* build.rs: the `csp` field of your vendored shell-markers.json */;
+
 let app = Router::new()
     .route("/", get(index))
-    .layer(origin.as_ref().map(|o| o.csp_layer()).unwrap());
+    .layer(origin.as_ref().map(|o| o.csp_layer(CSP).unwrap()).unwrap());
 
 // in the handler, stamped into the built shell along with the config block:
 let config = common_templating::Config::new(&origin, "/oidc/login");

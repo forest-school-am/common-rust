@@ -7,6 +7,13 @@ use http::header::{HeaderName, HeaderValue, CONTENT_SECURITY_POLICY};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 pub const VARIABLE: &str = "ASSETS_ORIGIN";
+
+/// The one marker a declared policy must carry, so the origin this crate
+/// validated is the origin the policy names.
+const MARKER: &str = "{{assets_origin}}";
+const ACCEPTED_POLICY: &str =
+    "the `csp` field from the shell-markers.json you vendored, which contains \
+     {{assets_origin}} where the asset origin goes";
 const ACCEPTED: &str =
     "an https origin and nothing else, such as \"https://assets.dev.local\" — no path, \
      no port, no trailing slash, no credentials";
@@ -61,24 +68,41 @@ impl AssetsOrigin {
         &self.0
     }
 
-    /// `data:` is in `img-src` because the shell ships an inline SVG favicon,
-    /// which is not `'self'` and fails as an `EncodingError` on decode with no
-    /// CSP report of any kind — every byte-level test stays green and the icon
-    /// is simply absent.
-    pub fn csp(&self) -> String {
-        format!(
-            "default-src 'self'; script-src 'self' {origin}; style-src 'self' {origin}; \
-             img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; \
-             form-action 'self'; frame-ancestors 'self'",
-            origin = self.0
-        )
+    /// The policy the SHELL declares, with this origin substituted for
+    /// `{{assets_origin}}`.
+    ///
+    /// The text is the consumer's vendored `shell-markers.json` `csp` field,
+    /// not a copy held here. The shell is what dictates the policy — its asset
+    /// origin, its `data:` favicon — and while this crate held its own string
+    /// the two drifted: `img-src 'self'` refused the shell's inline favicon
+    /// with no CSP report and no failed request, so every byte-level test
+    /// stayed green and the icon was simply absent.
+    ///
+    /// Refuses a policy with no `{{assets_origin}}` in it rather than serving
+    /// one that silently admits nothing from the asset origin.
+    pub fn csp(&self, declared: &str) -> Result<String, Refusal> {
+        if !declared.contains(MARKER) {
+            return Err(
+                Refusal::new("shell-markers.json#csp", declared, ACCEPTED_POLICY)
+                    .with_detail(format!("no {MARKER} in the declared policy")),
+            );
+        }
+        Ok(declared.replace(MARKER, &self.0))
     }
 
-    pub fn csp_layer(&self) -> SetResponseHeaderLayer<HeaderValue> {
-        SetResponseHeaderLayer::overriding(
+    pub fn csp_layer(
+        &self,
+        declared: &str,
+    ) -> Result<SetResponseHeaderLayer<HeaderValue>, Refusal> {
+        let policy = self.csp(declared)?;
+        let value = HeaderValue::from_str(&policy).map_err(|_| {
+            Refusal::new("shell-markers.json#csp", declared, ACCEPTED_POLICY)
+                .with_detail("the policy has a character a header value cannot carry".to_owned())
+        })?;
+        Ok(SetResponseHeaderLayer::overriding(
             HeaderName::from(CONTENT_SECURITY_POLICY),
-            HeaderValue::from_str(&self.csp()).expect("an accepted origin makes a header value"),
-        )
+            value,
+        ))
     }
 }
 
@@ -173,22 +197,76 @@ mod tests {
         }
     }
 
+    /// The `csp` field as common-ui publishes it in shell-markers.json. A
+    /// test FIXTURE, deliberately spelled out: a consumer vendors these bytes
+    /// and this is the shape the crate must accept.
+    const DECLARED: &str = "default-src 'self'; script-src 'self' {{assets_origin}}; \
+                            style-src 'self' {{assets_origin}}; img-src 'self' data:; \
+                            connect-src 'self'; object-src 'none'; base-uri 'self'; \
+                            form-action 'self'; frame-ancestors 'self'";
+
     #[test]
-    fn the_csp_is_the_canon_value_with_the_origin_in_both_source_lists() {
+    fn the_declared_policy_is_emitted_with_the_origin_in_both_source_lists() {
         let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
             .unwrap()
             .unwrap();
+        let csp = origin.csp(DECLARED).unwrap();
         assert_eq!(
-            origin.csp(),
+            csp,
             "default-src 'self'; script-src 'self' https://assets.dev.local; \
              style-src 'self' https://assets.dev.local; img-src 'self' data:; \
              connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; \
              frame-ancestors 'self'"
         );
         assert!(
-            !origin.csp().contains("unsafe"),
-            "no unsafe-* directive may ever appear: {}",
-            origin.csp()
+            !csp.contains("unsafe"),
+            "no unsafe-* directive may ever appear: {csp}"
+        );
+        assert!(
+            !csp.contains("{{"),
+            "every marker must be substituted, or a directive names a literal \
+             marker and admits nothing: {csp}"
+        );
+    }
+
+    /// The policy is the SHELL's, so a crate that ignored the declared text
+    /// and emitted its own would pass every other test here while serving a
+    /// policy the shell does not ask for — which is the drift that cost
+    /// registry its favicon.
+    #[test]
+    fn the_emitted_policy_is_the_declared_one_and_not_a_copy_held_here() {
+        let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
+            .unwrap()
+            .unwrap();
+        let narrower = "default-src 'self'; img-src 'self'; frame-ancestors {{assets_origin}}";
+        assert_eq!(
+            origin.csp(narrower).unwrap(),
+            "default-src 'self'; img-src 'self'; frame-ancestors https://assets.dev.local",
+            "whatever the shell declares is what is served, verbatim but for \
+             the marker"
+        );
+    }
+
+    #[test]
+    fn a_policy_with_no_marker_is_refused_rather_than_served() {
+        let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
+            .unwrap()
+            .unwrap();
+        let refusal = origin
+            .csp("default-src 'self'; img-src 'self' data:")
+            .expect_err("a policy that never names the asset origin must be refused");
+        assert_eq!(refusal.variable, "shell-markers.json#csp");
+        assert!(
+            refusal
+                .detail
+                .as_deref()
+                .is_some_and(|d| d.contains("{{assets_origin}}")),
+            "the refusal must say what is missing: {refusal:?}"
+        );
+        assert!(
+            origin.csp_layer("default-src 'self'").is_err(),
+            "the layer must refuse the same policy the string form refuses, or \
+             a service gets a header the crate would not have returned"
         );
     }
 
@@ -202,7 +280,7 @@ mod tests {
         let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
             .unwrap()
             .unwrap();
-        let csp = origin.csp();
+        let csp = origin.csp(DECLARED).unwrap();
         let favicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>";
 
         let img_src = csp
@@ -232,7 +310,7 @@ mod tests {
         let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
             .unwrap()
             .unwrap();
-        let csp = origin.csp();
+        let csp = origin.csp(DECLARED).unwrap();
         assert!(
             csp.contains("frame-ancestors 'self'"),
             "a page must be able to frame its own origin — les-forms' editor frames \

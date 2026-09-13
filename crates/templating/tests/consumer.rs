@@ -50,7 +50,17 @@ fn app() -> Router {
     let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
         .expect("accepted")
         .expect("present");
-    let layer = origin.csp_layer();
+    /* The policy a consumer VENDORS, as build.rs would embed it from the
+    prefix's shell-markers.json. Spelled out here rather than read from a
+    file, because this test is the consumer and a consumer has these bytes
+    compiled in. */
+    let declared = "default-src 'self'; script-src 'self' {{assets_origin}}; \
+                    style-src 'self' {{assets_origin}}; img-src 'self' data:; \
+                    connect-src 'self'; object-src 'none'; base-uri 'self'; \
+                    form-action 'self'; frame-ancestors 'self'";
+    let layer = origin
+        .csp_layer(declared)
+        .expect("the vendored policy is accepted");
     let state = Arc::new(App {
         assets: Arc::new(assets),
         origin,
