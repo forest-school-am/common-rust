@@ -4,9 +4,6 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Shared in-app OIDC for stand apps: BFF sessions, per-request userinfo, server-side refresh"
-# Cargo derives the adopters' `DEP_COMMON_OIDC_ASSETS` from THIS value, not
-# from the package name: renaming it renames their env var.
-links = "common-oidc"
 
 [dependencies]
 common-logging.workspace = true
@@ -23,9 +20,6 @@ tokio = { workspace = true, features = ["sync", "time"] }
 tracing.workspace = true
 url = "2"
 uuid = { version = "1", features = ["v4"] }
-
-[build-dependencies]
-sha2.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "test-util"] }

@@ -1,8 +1,6 @@
 //! Configuration values and their defaults. Resolution and validation only —
 //! nothing here performs IO or decides a response.
 
-use std::path::PathBuf;
-
 use common_logging::Deployment;
 use url::Url;
 
@@ -17,7 +15,6 @@ pub struct OidcConfig {
     pub cookie_name: String,
     pub cookie_secure: bool,
     pub danger_accept_invalid_certs: bool,
-    pub assets_dir: PathBuf,
     pub deployment: Deployment,
 }
 
@@ -40,7 +37,6 @@ impl OidcConfig {
             cookie_name: cookie_name.into(),
             cookie_secure: true,
             danger_accept_invalid_certs: false,
-            assets_dir: PathBuf::from("assets"),
             deployment: Deployment::Dev,
         }
     }

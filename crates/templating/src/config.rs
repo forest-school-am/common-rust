@@ -10,7 +10,8 @@ use crate::AssetsOrigin;
 /// The one object page code reads on its first line. Per-request values belong
 /// here; there is no `/api/config` and no value passed through JS (R65).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[ts(export)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, rename_all = "camelCase")]
 pub struct Config {
     pub assets_origin: String,
     pub login_path: String,

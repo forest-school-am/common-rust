@@ -56,7 +56,7 @@ mod tests {
         let msg = dirty_source_refusal(Deployment::Prod, SourceState::Dirty { uncommitted: 1 })
             .expect("refusal");
         assert!(
-            msg.contains("src, templates, Cargo.toml, build.rs"),
+            msg.contains("src, Cargo.toml, build.rs"),
             "refusal must name exactly the checked paths: {msg}"
         );
     }

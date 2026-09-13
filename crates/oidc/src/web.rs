@@ -16,7 +16,6 @@ use url::Url;
 use uuid::Uuid;
 
 use common_logging::Deployment;
-use common_templating::AssetCache;
 
 use crate::client::OidcClient;
 use crate::config::OidcConfig;
@@ -27,8 +26,6 @@ use crate::store::{FlowState, FlowStore, MemoryFlowStore, Session, SessionStore}
 
 const FLOW_COOKIE: &str = "oidc_flow";
 pub const REAUTH_HEADER: &str = "X-Common-OIDC-Reauth";
-const SHIM_TEMPLATE: &str = "common-oidc.js.jinja";
-
 fn safe_next(raw: Option<&str>) -> String {
     fn resolve(raw: &str) -> Option<String> {
         if !raw.starts_with('/') {
@@ -58,7 +55,6 @@ pub struct OidcState {
     pub client: Arc<OidcClient>,
     pub store: Arc<dyn SessionStore>,
     pub flows: Arc<dyn FlowStore>,
-    pub assets: Arc<AssetCache>,
 }
 
 impl OidcState {
@@ -85,16 +81,10 @@ impl OidcState {
             );
         }
 
-        let assets = common_templating::Builder::new(&config.assets_dir)
-            .pin(SHIM_TEMPLATE, crate::COMMON_OIDC_JS_SHA256)
-            .build()
-            .map_err(|e| crate::OidcError::Assets(e.to_string()))?;
-
         Ok(Self {
             client: Arc::new(OidcClient::discover(config).await?),
             store: Arc::new(store),
             flows: Arc::new(MemoryFlowStore::default()),
-            assets: Arc::new(assets),
         })
     }
 
@@ -267,25 +257,15 @@ async fn login(
     start_login(&oidc, jar, next, silent, !silent).await
 }
 
-async fn client_js(State(oidc): State<OidcState>) -> Response {
-    let login_path = oidc.config().login_path.clone();
-    match oidc
-        .assets
-        .render(SHIM_TEMPLATE, &[("login_path", login_path.as_str())])
-    {
-        Ok(js) => (
-            [
-                (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
-                (header::CACHE_CONTROL, "no-store"),
-            ],
-            js.to_string(),
-        )
-            .into_response(),
-        Err(e) => {
-            common_logging::error!(common_logging::UPSTREAM, error = %e, "serving common-oidc.js failed");
-            (StatusCode::INTERNAL_SERVER_ERROR, "shim unavailable").into_response()
-        }
-    }
+async fn client_js() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+        ],
+        crate::SHIM_JS,
+    )
+        .into_response()
 }
 
 async fn callback(

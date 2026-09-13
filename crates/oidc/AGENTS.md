@@ -17,10 +17,10 @@ contract. No login/logout UI — logout lives only at authentik.
   `SessionStore`/`MemoryStore` for established sessions, `FlowStore`/
   `MemoryFlowStore` for logins in flight.
 - `src/web.rs` — router, `Principal` extractor, and the `resolve_session` seam.
-- `templates/common-oidc.js.jinja` — the served 401→silent-relogin shim, an
-  on-disk template (§9.2a), never embedded.
-- `build.rs` — derives the shim's integrity pin, publishes the template dir as
-  `DEP_COMMON_OIDC_ASSETS`, and records the crate's clean/dirty source state.
+- `src/common-oidc.ts` — the served 401→silent-relogin shim. TypeScript in
+  erasable syntax; a new browser behaviour goes here, never into a service.
+- `build.rs` — strips the shim into `OUT_DIR` with esbuild and records the
+  crate's clean/dirty source state.
 - `tests/mock_flow.rs` — offline mock-authentik integration tests.
 - `tests/live_canary.rs` — §7.4 canary: the instant-logout acceptance test.
 
@@ -55,11 +55,24 @@ up (its `common-oidc-canary` provider).
   `resolve_session` and client.rs's `exchange_code` / `refresh` /
   `principal_from_access_token`. NOT instrumented, and known: `discover`
   (client.rs) and `BearerValidator::validate` (bearer.rs).
-- Served shim is a `common-templating` on-disk template (§9.2a/§9.7/§9.8):
-  `templates/common-oidc.js.jinja`, loaded from `assets_dir`, version-pinned by
-  `COMMON_OIDC_JS_SHA256` (derived in build.rs — `rerun-if-changed` is
-  load-bearing) and asserted at discover() boot. NO `include_str!`/`.replace`.
-  Adopters MUST copy the template into their `assets/` (README recipe).
+- THE SHIM IS STATIC AND LIVES IN THE BINARY (R64/R65). `build.rs` strips
+  `src/common-oidc.ts` with esbuild into `OUT_DIR`; `SHIM_JS` is an
+  `include_str!` of the result; the router serves it at `/common-oidc.js` with
+  `immutable` caching. There is no `assets_dir`, no on-disk copy for an adopter
+  to make, and no runtime integrity pin: compile-time inclusion IS the pin,
+  because a shim inside the binary cannot drift from the crate that serves it
+  (§9.8 amended by R65). Restart is deploy.
+- THE LOGIN PATH IS NOT IN THE SHIM. It reads
+  `JSON.parse(document.getElementById("config").textContent).login_path`
+  lazily, at the 401 rather than at import, so a page that never 401s never
+  touches the block. `Config.login_path` is therefore mandatory and populated
+  from `OidcConfig`, so a service cannot forget it. `serves_shim_and_login_route`
+  asserts the path is ABSENT from the served bytes — the old test asserted it
+  was baked in, which is the same test inverted.
+- ESBUILD IS A BUILD DEPENDENCY OF THIS CRATE, so every consumer needs it on
+  PATH. cron and les-forms already carry it; searchbase and role-ui had to add
+  it. That is the cost of the shim being TypeScript, and it is worth knowing
+  before adding a second TS source here.
 - §4.4: discover() enforces the deployment class — refuses
   `danger_accept_invalid_certs` under `Deployment::Prod`, and refuses a shim
   built from a dirty crate tree (§9.8b). The prod-required / dev-only / neutral
@@ -67,6 +80,6 @@ up (its `common-oidc-canary` provider).
   exist yet; `cookie_name` and `request_refresh_tokens` carry prose docs only.
 
 ## Build note
-`build.rs` reads `templates/common-oidc.js.jinja` and emits its sha256 as
-`COMMON_OIDC_JS_SHA256` (build-dep sha2). The `cargo:rerun-if-changed` on the
-template is LOAD-BEARING — without it a template edit wouldn't refresh the pin.
+`build.rs` runs `esbuild` over `src/common-oidc.ts` into `OUT_DIR`. The strip
+is a type strip, never a compile (`erasableSyntaxOnly`): the output is the
+input minus annotations. `cargo:rerun-if-changed=src` is what refreshes it.

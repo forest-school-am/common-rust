@@ -27,6 +27,7 @@
           inputsFrom = [
             (import "${dev-shells-src}/shells/rust-stable.nix" { inherit pkgs; })
           ];
+          packages = [ pkgs.esbuild ];
           env = {
             CARGO_TARGET_DIR = "/home/dev/.cache/common-rust-target";
           };

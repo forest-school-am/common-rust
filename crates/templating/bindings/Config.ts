@@ -4,4 +4,4 @@
  * The one object page code reads on its first line. Per-request values belong
  * here; there is no `/api/config` and no value passed through JS (R65).
  */
-export type Config = { assets_origin: string, login_path: string, };
+export type Config = { assetsOrigin: string, loginPath: string, };

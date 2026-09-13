@@ -155,7 +155,6 @@ async fn oidc_state(base: &str, store: MemoryStore) -> OidcState {
     )
     .request_refresh_tokens();
     config.cookie_secure = false;
-    config.assets_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/templates").into();
     OidcState::discover(config, store)
         .await
         .expect("discovery against mock")
@@ -417,7 +416,16 @@ async fn serves_shim_and_login_route() {
         .to_str()
         .unwrap()
         .to_owned();
+    let cache = resp
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .map(|v| v.to_str().unwrap().to_owned());
     assert!(ct.contains("javascript"), "content-type: {ct}");
+    let cache = cache.expect("a static shim must be cacheable");
+    assert!(
+        cache.contains("immutable"),
+        "the shim is in the binary, so it can be cached forever: {cache}"
+    );
     let js = String::from_utf8(
         http_body_util::BodyExt::collect(resp.into_body())
             .await
@@ -427,16 +435,21 @@ async fn serves_shim_and_login_route() {
     )
     .unwrap();
     assert!(
-        js.contains("\"/oidc/login\""),
-        "login path must be baked in"
+        !js.contains("/oidc/login"),
+        "R65: the shim is STATIC — the login path reaches it through the config \
+         block, never baked in: {js}"
     );
     assert!(
-        !js.contains("__LOGIN_PATH__"),
-        "placeholder must be replaced"
+        js.contains("getElementById(\"config\")") && js.contains("loginPath"),
+        "it must read the login path from the config block: {js}"
     );
     assert!(
         js.contains("installReauthGuard"),
         "must expose the guard API"
+    );
+    assert!(
+        !js.contains("interface ") && !js.contains(": string") && !js.contains("as unknown"),
+        "the TypeScript must be STRIPPED, not shipped: {js}"
     );
 
     let resp = app

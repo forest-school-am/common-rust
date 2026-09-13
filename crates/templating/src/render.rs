@@ -55,7 +55,7 @@ mod tests {
         );
         assert!(!html.contains("{{"), "no marker may survive: {html}");
         assert!(
-            html.contains(r#"<script type="application/json" id="config">{"assets_origin":"#),
+            html.contains(r#"<script type="application/json" id="config">{"assetsOrigin":"#),
             "the config lands inside the data block: {html}"
         );
     }
@@ -100,7 +100,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&html[start..end])
             .expect("escaping must leave valid JSON, or the page cannot read it");
         assert_eq!(
-            parsed["login_path"], hostile,
+            parsed["loginPath"], hostile,
             "the page must get the value back unchanged: {parsed:?}"
         );
     }

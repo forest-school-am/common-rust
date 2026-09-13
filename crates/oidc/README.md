@@ -157,85 +157,42 @@ concurrent 401s see the raw response while the page is already navigating) and
 a loop breaker (a bounce won't re-fire within 10s; the server also escalates
 to interactive exactly once when the SSO session is truly dead).
 
-### Serving the shim: the template copy recipe (§9.8 — REQUIRED)
+### Serving the shim (R64/R65 — nothing to copy)
 
-The shim is an on-disk template
-(`templates/common-oidc.js.jinja`) rendered through `common-templating`. Your app
-serves it from its `assets_dir`, and the crate **refuses to boot** unless the
-on-disk copy's hash matches the version this crate was built against (a pin
-derived in `build.rs`, so it can never go stale — that `rerun-if-changed` line
-is load-bearing).
+The shim is **static and lives in the binary**. `build.rs` strips
+`src/common-oidc.ts` with esbuild into `OUT_DIR`; the crate exposes it as
+`common_oidc::SHIM_JS` and `common_oidc::router` serves it at
+`GET /common-oidc.js` with `Cache-Control: public, max-age=31536000,
+immutable`. There is no template to copy, no `assets_dir`, and no runtime
+integrity pin: compile-time inclusion IS the pin, because a shim inside the
+binary cannot drift from the crate that serves it. **Restart is deploy.**
 
-**This binds every adopter that builds an `OidcState`, even one that never
-serves the shim.** The pin is checked inside `OidcState::discover` — at boot,
-not on first request to `/common-oidc.js` — so a fully server-rendered app with
-no browser fetch calls still refuses to start without the template on disk.
-Fail-fast is deliberate: a missing shim should surface at deploy, not at
-whoever's first 401. The one exemption is a bearer-only API service using
-[`BearerValidator`](#2-bearer-api-services-the-mint-pattern) — it takes neither
-discovery nor an assets dir, so it needs no copy step at all.
-
-So each adopter MUST mechanically copy the template into a conventional
-`assets/` dir — **never a hand-copy** (a stale hand-copy is exactly the skew
-this prevents). The crate tells you where to copy FROM, so the recipe needs no
-`../common-oidc` sibling path and works identically whether you took this crate
-as a path dep or a git dep.
-
-`Cargo.toml` — a build script and this crate as a build-dependency-free
-regular dependency is enough; `links` metadata reaches your build script
-automatically:
-
-```toml
-[dependencies]
-common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.2" }
-```
-
-`build.rs` — copy the template next to your other assets:
+Mount the router and put one tag in your page:
 
 ```rust
-fn main() {
-    // Published by common-oidc's build script via its `links = "common-oidc"`
-    // key. Absolute, and valid whether the crate came from a sibling directory
-    // or from ~/.cargo/git/checkouts/.
-    let src = std::path::PathBuf::from(std::env::var("DEP_COMMON_OIDC_ASSETS").unwrap())
-        .join("common-oidc.js.jinja");
-    println!("cargo:rerun-if-changed={}", src.display());
-    std::fs::create_dir_all("assets").unwrap();
-    std::fs::copy(&src, "assets/common-oidc.js.jinja").unwrap();
-}
+let app = Router::new()
+    .route("/", get(index))
+    .merge(common_oidc::router(oidc));
+```
+```html
+<script type="module" src="/common-oidc.js"></script>
 ```
 
-`DEP_COMMON_OIDC_ASSETS` is derived from the `links` VALUE, not the package
-name — `links = "common-oidc"` plus `cargo:assets=` gives exactly that name.
-(`links = "common-oidc-assets"` would give `DEP_COMMON_OIDC_ASSETS_ASSETS`;
-this is a common misreading of the cargo docs.) The variable is set only for
-**direct** dependents: a crate that gets common-oidc transitively does not see
-it.
+**The login path is not baked into the shim.** It reads it from the page's
+config block, lazily, at the 401 — so a page that never 401s never touches the
+block:
 
-**`.gitignore` the copied file** (`assets/common-oidc.js.jinja`) — it is a build
-artifact re-derived from the crate every time, never edited in place. Committing
-it invites exactly the stale hand-copy the boot pin exists to catch. The recipe
-copies fresh; git never tracks it.
-
-Then point the config at it:
-
-```rust
-let mut config = OidcConfig::new(issuer, client_id, redirect_url, cookie_name);
-config.assets_dir = "assets".into();
+```html
+<script type="application/json" id="config">{"assetsOrigin":"…","loginPath":"/oidc/login"}</script>
 ```
 
-For Docker: because the copy now happens in `build.rs` during the build itself,
-there is no pre-build step to remember and nothing extra to stage into the
-build context — `cargo build` produces `assets/` inside the container. Just
-make sure your final image carries that directory next to the binary and points
-`assets_dir` at it.
+which `common_templating::render` writes for you from
+`common_templating::Config`. `loginPath` is mandatory: populate it from your
+`OidcConfig::login_path` so a page cannot end up unable to bounce.
 
-**When you bump the common-oidc dependency the copy re-runs by itself**, since
-the `rerun-if-changed` above tracks the crate's own template path. If a copy
-ever does go stale, the boot pin fails LOUD and EARLY — the app refuses to
-start with an integrity-pin error — rather than silently serving a stale shim
-that disagrees with the backend's 401 contract. That loud failure is the
-feature, not a bug: it's what makes drift structurally impossible.
+**esbuild is a build dependency of this crate**, so it must be on `PATH`
+wherever you build — add `pkgs.esbuild` to your dev shell's `packages` and to
+`nativeBuildInputs` if you package the binary with nix.
 
 ### Emitting the 401 from your own error chokepoint (§3.1)
 

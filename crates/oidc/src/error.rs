@@ -30,6 +30,4 @@ pub enum OidcError {
     Userinfo(String),
     #[error("invalid configuration: {0}")]
     Config(String),
-    #[error("asset setup failed: {0}")]
-    Assets(String),
 }

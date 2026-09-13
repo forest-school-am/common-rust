@@ -27,8 +27,11 @@ mod web;
 
 use source_state::SourceState;
 
-include!(concat!(env!("OUT_DIR"), "/shim_hash.rs"));
 include!(concat!(env!("OUT_DIR"), "/source_state.rs"));
+
+/// The browser shim, stripped from `src/common-oidc.ts` at build time and
+/// carried in the binary: it cannot drift from the crate that serves it.
+pub const SHIM_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/common-oidc.js"));
 
 pub use bearer::{BearerValidator, ValidationError};
 pub use client::{OidcClient, TokenBundle};

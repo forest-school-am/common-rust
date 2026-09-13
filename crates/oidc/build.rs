@@ -1,37 +1,16 @@
-//! Build script: derives the served shim's integrity pin and publishes the
-//! template directory to dependents. Anything needed at RUN time belongs in
-//! src/, not here.
+//! Build script: strips the served shim from TypeScript into the binary.
+//! Anything needed at RUN time belongs in src/, not here.
 
 use std::path::PathBuf;
 
-use sha2::{Digest, Sha256};
-
-const ARTIFACT_SOURCES: [&str; 4] = ["src", "templates", "Cargo.toml", "build.rs"];
+const ARTIFACT_SOURCES: [&str; 3] = ["src", "Cargo.toml", "build.rs"];
 
 fn main() {
-    let template = "templates/common-oidc.js.jinja";
     for path in ARTIFACT_SOURCES {
         println!("cargo:rerun-if-changed={path}");
     }
 
-    let assets = std::fs::canonicalize("templates")
-        .unwrap_or_else(|e| panic!("cannot canonicalize templates dir: {e}"));
-    println!("cargo:assets={}", assets.display());
-
-    let bytes = std::fs::read(template).unwrap_or_else(|e| panic!("cannot read {template}: {e}"));
-    let hash: [u8; 32] = Sha256::digest(&bytes).into();
-
-    let bytes_list = hash
-        .iter()
-        .map(|b| b.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("shim_hash.rs");
-    std::fs::write(
-        &out,
-        format!("pub(crate) const COMMON_OIDC_JS_SHA256: [u8; 32] = [{bytes_list}];\n"),
-    )
-    .unwrap();
+    strip_shim();
     let source_list = ARTIFACT_SOURCES.map(|p| format!("{p:?}")).join(", ");
     std::fs::write(
         PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("source_state.rs"),
@@ -42,6 +21,27 @@ fn main() {
         ),
     )
     .unwrap();
+}
+
+/// The shim ships INSIDE the binary (R64/R65), so it cannot drift from the
+/// crate that serves it and needs no runtime integrity pin. `erasableSyntaxOnly`
+/// TypeScript means this is a type strip, never a compile: the output is the
+/// input minus annotations.
+fn strip_shim() {
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("common-oidc.js");
+    let status = std::process::Command::new("esbuild")
+        .arg("src/common-oidc.ts")
+        .arg("--loader:.ts=ts")
+        .arg("--format=esm")
+        .arg("--target=firefox128,chrome120,safari17")
+        .arg(format!("--outfile={}", out.display()))
+        .status()
+        .unwrap_or_else(|e| {
+            panic!("esbuild is required to build common-oidc (R64) and did not run: {e}")
+        });
+    if !status.success() {
+        panic!("esbuild refused src/common-oidc.ts");
+    }
 }
 
 /// THE SCOPE CANNOT EXCEED THE RERUN TRIGGERS: git state is not a file cargo
