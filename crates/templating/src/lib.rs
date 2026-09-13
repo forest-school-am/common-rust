@@ -25,7 +25,7 @@ mod assets_origin;
 mod config;
 mod render;
 
-pub use assets_origin::{AssetsOrigin, PARAM as ASSETS_ORIGIN_PARAM};
+pub use assets_origin::{AssetsOrigin, VARIABLE as ASSETS_ORIGIN_VARIABLE};
 pub use config::Config;
 pub use render::{render, CONFIG_MARKER, ORIGIN_MARKER};
 

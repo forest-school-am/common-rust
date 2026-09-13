@@ -36,14 +36,24 @@ directory. Used only by services that serve assets — kept SEPARATE from
 
 - THE ASSET ORIGIN IS THIS CRATE'S (§12.6), not each service's: one option
   `ASSETS_ORIGIN` (unprefixed, like the common-logging options), one refusal
-  shape, one CSP value, one `{{ assets_origin }}`. `AssetsOrigin::parse`
+  shape, one CSP value, one `{{assets_origin}}`. The variable's NAME is
+  exported as `ASSETS_ORIGIN_VARIABLE`, so a consumer adding a flag override
+  names it without a second copy to drift; there is no separate "parameter"
+  constant, because a lowercase one read as the variable and sent an operator
+  to set `assets_origin`. `AssetsOrigin::parse`
   RETURNS a `common_logging::Refusal` rather than refusing itself — the SERVICE
   calls `refuse!`, so the line carries the service's module path (§1.3b).
   Accepts `https://<host>` and nothing else: no path, port, trailing slash,
   credentials, query or fragment, and the `detail` field says which rule the
   value broke. Prod-required: unset is `Ok(None)` under dev and a refusal under
-  prod. `csp_layer()` and `param()` hang off a PRESENT origin, so a service
-  without one cannot half-wire itself.
+  prod. `csp_layer()` hangs off a PRESENT origin, so a service without one
+  cannot half-wire itself.
+- A SERVICE THAT RENDERS THE SHELL REQUIRES `ASSETS_ORIGIN` IN EVERY DEPLOYMENT
+  CLASS, dev included (USER RULING). `Config::new` takes `&AssetsOrigin`, not
+  an `Option`, so the type makes a shell-rendering service resolve the dev
+  `Ok(None)` into a refusal of its own rather than emitting a config block that
+  names an origin nobody chose. Prod-required stays the PARSE rule — a service
+  that serves no shell may still run without one.
 - The CSP is §12.2's normative string, asserted literally in both the unit test
   and the served-response test. No `unsafe-*`, and
   `object-src`/`base-uri`/`form-action`/`frame-ancestors` are spelled out

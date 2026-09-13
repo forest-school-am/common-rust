@@ -93,12 +93,19 @@ let app = Router::new()
     .route("/", get(index))
     .layer(origin.as_ref().map(|o| o.csp_layer()).unwrap());
 
-// in the handler, as an ordinary §9.5 substitution parameter:
-let html = assets.render("index.html", &[origin.param()])?;
+// in the handler, stamped into the built shell along with the config block:
+let config = common_templating::Config::new(&origin, "/oidc/login");
+let html = common_templating::render(SHELL, &config);
 ```
 
+A service that renders the shell requires `ASSETS_ORIGIN` in EVERY deployment
+class: `Config::new` takes `&AssetsOrigin` rather than an `Option`, so the dev
+`Ok(None)` has to become a refusal of the service's own instead of a config
+block naming an origin nobody chose. `ASSETS_ORIGIN_VARIABLE` is the variable's
+name, for a consumer that adds a flag override.
+
 ```html
-<script type="module" src="{{ assets_origin }}/common-ui@<hash>/common-ui.js"
+<script type="module" src="{{assets_origin}}/common-ui@<hash>/common-ui.js"
         integrity="sha384-…" crossorigin="anonymous"></script>
 ```
 

@@ -1,17 +1,15 @@
-//! The asset origin: the option, the CSP it implies, and the template
-//! parameter pages substitute it into (§12.6). Anything about reading or
-//! caching an asset from DISK belongs in lib.rs.
+//! The asset origin: the option, the variable it is read from, and the CSP it
+//! implies (§12.6). Stamping it into a shell is render.rs; reading or caching
+//! an asset from DISK is lib.rs.
 
 use common_logging::{Deployment, Refusal};
 use http::header::{HeaderName, HeaderValue, CONTENT_SECURITY_POLICY};
 use tower_http::set_header::SetResponseHeaderLayer;
 
-const VARIABLE: &str = "ASSETS_ORIGIN";
+pub const VARIABLE: &str = "ASSETS_ORIGIN";
 const ACCEPTED: &str =
     "an https origin and nothing else, such as \"https://assets.dev.local\" — no path, \
      no port, no trailing slash, no credentials";
-
-pub const PARAM: &str = "assets_origin";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetsOrigin(String);
@@ -77,10 +75,6 @@ impl AssetsOrigin {
             HeaderName::from(CONTENT_SECURITY_POLICY),
             HeaderValue::from_str(&self.csp()).expect("an accepted origin makes a header value"),
         )
-    }
-
-    pub fn param(&self) -> (&'static str, &str) {
-        (PARAM, &self.0)
     }
 }
 
@@ -213,13 +207,18 @@ mod tests {
     }
 
     #[test]
-    fn the_template_parameter_is_the_one_pages_write() {
-        let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
-            .unwrap()
-            .unwrap();
+    fn the_exported_name_is_the_variable_an_operator_is_told_to_set() {
         assert_eq!(
-            origin.param(),
-            ("assets_origin", "https://assets.dev.local")
+            VARIABLE, "ASSETS_ORIGIN",
+            "spelled out rather than read off the const: an operator sets this \
+             exact string, and a consumer's flag override names it"
+        );
+
+        let refusal =
+            AssetsOrigin::parse(Some("assets.dev.local"), Deployment::Dev).expect_err("refused");
+        assert_eq!(
+            refusal.variable, VARIABLE,
+            "the refusal must name the variable an operator can actually set"
         );
     }
 }

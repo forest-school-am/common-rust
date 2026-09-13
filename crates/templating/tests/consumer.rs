@@ -60,7 +60,10 @@ fn app() -> Router {
         .route(
             "/",
             get(|State(app): State<Arc<App>>| async move {
-                match app.assets.render("index.html", &[app.origin.param()]) {
+                match app
+                    .assets
+                    .render("index.html", &[("assets_origin", app.origin.as_str())])
+                {
                     Ok(html) => (
                         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
                         html.to_string(),
