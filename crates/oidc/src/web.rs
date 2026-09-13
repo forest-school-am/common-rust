@@ -276,9 +276,29 @@ async fn logout(State(oidc): State<OidcState>, jar: CookieJar, headers: HeaderMa
     }
 
     let jar = jar.remove(expiring_removal(oidc.config().cookie_name.as_str()));
-    // 303, so the browser turns the POST into a GET of the root. A 307 would
-    // re-POST to "/".
-    (jar, Redirect::to("/")).into_response()
+
+    /* R79, the user's words: "Logout should just send to authentik logout." So
+    the browser goes to `end_session_endpoint` PLAIN — no id_token_hint, no
+    post_logout_redirect_uri, nothing registered on the provider. Authentik's
+    own page is the end of the trip, and without a hint that page asks the
+    user to confirm, which is the intended shape rather than a shortcoming.
+
+    The app session is already destroyed above, so a user who abandons the
+    trip is still logged out HERE. 303 either way: the browser must turn the
+    POST into a GET, and a 307 would re-POST to the destination. */
+    match oidc.client.end_session_url() {
+        Some(url) => (jar, Redirect::to(url.as_str())).into_response(),
+        None => {
+            common_logging::warn!(
+                common_logging::AUTH,
+                field = "end_session_endpoint",
+                "the IdP's discovery document has no end_session_endpoint, so \
+                 logout ended the app session only — the IdP session survives \
+                 and the next page load will silently re-authenticate"
+            );
+            (jar, Redirect::to("/")).into_response()
+        }
+    }
 }
 
 /// `Sec-Fetch-Site` is the browser's own account of the request and page JS

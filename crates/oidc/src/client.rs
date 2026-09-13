@@ -83,6 +83,10 @@ pub struct OidcClient {
     core: OidcCore,
     http: reqwest::Client,
     config: OidcConfig,
+    /// R79: where a logout sends the browser. OPTIONAL in the spec, so its
+    /// absence is a missing feature to report, not a discovery failure —
+    /// everything else the crate does still works without it.
+    end_session_url: Option<Url>,
 }
 
 pub struct AuthorizeRequest {
@@ -134,6 +138,14 @@ impl OidcClient {
         let token_url = endpoint("token_endpoint", &back)?;
         let userinfo_url = endpoint("userinfo_endpoint", &back)?;
 
+        // The ISSUER origin, not the backchannel: this one is a URL a BROWSER
+        // is redirected to, so it has to be the address a browser can reach.
+        let end_session_url = doc
+            .get("end_session_endpoint")
+            .and_then(|v| v.as_str())
+            .and_then(|raw| Url::parse(raw).ok())
+            .map(|u| OidcConfig::swap_origin(&u, &config.issuer));
+
         // No ID token is ever verified — identity comes from userinfo on every
         // request, so a revoked session stops working immediately rather than
         // at token expiry. The issuer and the empty jwks are structural only.
@@ -147,11 +159,20 @@ impl OidcClient {
         .set_user_info_url(UserInfoUrl::from_url(userinfo_url))
         .set_redirect_uri(RedirectUrl::from_url(config.redirect_url.clone()));
 
-        Ok(Self { core, http, config })
+        Ok(Self {
+            core,
+            http,
+            config,
+            end_session_url,
+        })
     }
 
     pub fn config(&self) -> &OidcConfig {
         &self.config
+    }
+
+    pub fn end_session_url(&self) -> Option<&Url> {
+        self.end_session_url.as_ref()
     }
 
     pub fn authorize_url(&self, silent: bool) -> AuthorizeRequest {

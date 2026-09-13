@@ -116,6 +116,13 @@ async fn mock_userinfo(
 }
 
 async fn spawn_mock() -> (String, Arc<Mock>) {
+    spawn_mock_with(true).await
+}
+
+/// `end_session` false serves a discovery document WITHOUT
+/// `end_session_endpoint`, which is legal — it is optional in the spec — and
+/// is how the fallback path gets exercised instead of being assumed.
+async fn spawn_mock_with(end_session: bool) -> (String, Arc<Mock>) {
     let mock = Arc::new(Mock::default());
     let base_path = "/application/o/test";
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -125,13 +132,17 @@ async fn spawn_mock() -> (String, Arc<Mock>) {
     let disco = move || {
         let b = disco_base.clone();
         async move {
-            Json(json!({
+            let mut doc = json!({
                 "issuer": format!("{b}/application/o/test"),
                 "authorization_endpoint": format!("{b}/application/o/authorize/"),
                 "token_endpoint": format!("{b}/application/o/token/"),
                 "userinfo_endpoint": format!("{b}/application/o/userinfo/"),
                 "jwks_uri": format!("{b}/application/o/test/jwks/"),
-            }))
+            });
+            if end_session {
+                doc["end_session_endpoint"] = json!(format!("{b}/application/o/test/end-session/"));
+            }
+            Json(doc)
         }
     };
     let app = Router::new()
@@ -828,10 +839,23 @@ async fn a_posted_logout_ends_the_session_and_the_next_page_asks_for_login() {
         StatusCode::SEE_OTHER,
         "303, so the browser GETs the root rather than re-POSTing to it"
     );
-    assert_eq!(
-        logout.headers().get(header::LOCATION).unwrap(),
-        "/",
-        "back to the app root"
+    /* R79 — straight to the IdP's end_session_endpoint, PLAIN: the user's
+    ruling is "logout should just send to authentik logout", so no
+    id_token_hint and no post_logout_redirect_uri. Authentik's page is the
+    end of the trip. */
+    let sent = logout
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|l| l.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        sent.contains("/application/o/test/end-session/"),
+        "logout must send the browser to the IdP: {sent}"
+    );
+    assert!(
+        !sent.contains("id_token_hint") && !sent.contains("post_logout_redirect_uri"),
+        "R79 wants the endpoint plain, with no parameters: {sent}"
     );
     let cleared = logout
         .headers()
@@ -951,5 +975,48 @@ async fn a_cross_site_logout_is_refused_and_leaves_the_session_alive() {
         as_get.status(),
         StatusCode::METHOD_NOT_ALLOWED,
         "GET must not end a session"
+    );
+}
+
+/// `end_session_endpoint` is OPTIONAL in the spec, so an IdP without it must
+/// still log the user out of the app rather than 500 or hang. Exercised by
+/// omission from the discovery document, which is why the fallback is not an
+/// unverified branch.
+#[tokio::test(flavor = "multi_thread")]
+async fn without_an_end_session_endpoint_logout_still_ends_the_app_session() {
+    let (base, mock) = spawn_mock_with(false).await;
+    mock.valid_access.lock().unwrap().insert("at-live".into());
+    let (store, sid) = seed_session("at-live", None).await;
+    let oidc = oidc_state(&base, store).await;
+    let cookie = format!("test_session={sid}");
+
+    assert!(
+        oidc.client.end_session_url().is_none(),
+        "this mock must NOT advertise the endpoint, or the test proves nothing"
+    );
+
+    let logout = app(oidc.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/common-oidc/logout")
+                .header(header::COOKIE, &cookie)
+                .header("sec-fetch-site", "same-origin")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(logout.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        logout.headers().get(header::LOCATION).unwrap(),
+        "/",
+        "no IdP to send them to, so back to the app root"
+    );
+    assert!(
+        oidc.store.get(sid).await.is_none(),
+        "the app session must be gone either way — doing LESS than asked is \
+         the failure, doing nothing would be the worse one"
     );
 }

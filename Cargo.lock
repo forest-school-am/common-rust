@@ -2796,20 +2796,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[patch.unused]]
-name = "authentik_api"
-version = "2026.5.2"
-
-[[patch.unused]]
 name = "common-logging"
 version = "0.3.0"
+
+[[patch.unused]]
+name = "authentik-forest-school-attributes"
+version = "0.2.0"
 
 [[patch.unused]]
 name = "common-oidc"
 version = "0.3.0"
 
 [[patch.unused]]
-name = "authentik-forest-school-attributes"
-version = "0.2.0"
+name = "authentik_api"
+version = "2026.5.2"
 
 [[patch.unused]]
 name = "common-templating"
