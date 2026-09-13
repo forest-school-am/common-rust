@@ -105,6 +105,41 @@ mod tests {
         );
     }
 
+    /// A display name arrives from authentik, so it is the likeliest hostile
+    /// string in the whole block — likelier than a login path, which a service
+    /// writes itself.
+    #[test]
+    fn a_hostile_display_name_cannot_close_the_data_block() {
+        let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
+            .unwrap()
+            .unwrap();
+        let mut config = Config::new(&origin, "/oidc/login");
+        config.user = Some(crate::User {
+            name: "</script><script>alert(1)</script>".to_owned(),
+            portrait: None,
+        });
+        let html = render(SHELL, &config);
+
+        assert!(
+            !html.contains("</script><script>"),
+            "a display name closed the data block: {html}"
+        );
+        assert_eq!(
+            html.matches("</script>").count(),
+            2,
+            "only the shell's own two closing tags may appear: {html}"
+        );
+
+        let start = html.find(r#"id="config">"#).unwrap() + r#"id="config">"#.len();
+        let end = html[start..].find("</script>").unwrap() + start;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&html[start..end]).expect("escaping must leave valid JSON");
+        assert_eq!(
+            parsed["user"]["name"], "</script><script>alert(1)</script>",
+            "the page must still get the name back unchanged: {parsed:?}"
+        );
+    }
+
     #[test]
     fn a_build_time_marker_render_does_not_own_survives_visibly() {
         let html = render("<title>{{title}}</title>{{config}}", &config("/oidc/login"));

@@ -26,7 +26,7 @@ mod config;
 mod render;
 
 pub use assets_origin::{AssetsOrigin, VARIABLE as ASSETS_ORIGIN_VARIABLE};
-pub use config::Config;
+pub use config::{Config, User};
 pub use render::{render, CONFIG_MARKER, ORIGIN_MARKER};
 
 use std::collections::{BTreeMap, HashMap};
