@@ -12,6 +12,10 @@ pub struct OidcConfig {
     pub redirect_url: Url,
     pub scopes: Vec<String>,
     pub login_path: String,
+    /// Where `common_oidc::router` mounts the POST that ends a session (R73).
+    /// A consumer passes this SAME value into `Config::logout_path` so the
+    /// page never carries a literal that can drift from the route.
+    pub logout_path: String,
     pub cookie_name: String,
     pub cookie_secure: bool,
     pub danger_accept_invalid_certs: bool,
@@ -34,6 +38,7 @@ impl OidcConfig {
                 .map(String::from)
                 .to_vec(),
             login_path: "/oidc/login".into(),
+            logout_path: "/common-oidc/logout".into(),
             cookie_name: cookie_name.into(),
             cookie_secure: true,
             danger_accept_invalid_certs: false,

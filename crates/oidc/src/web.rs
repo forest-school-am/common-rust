@@ -7,9 +7,10 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use axum::extract::{FromRef, FromRequestParts, Query, State};
+use axum::http::HeaderMap;
 use axum::http::{header, request::Parts, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use url::Url;
@@ -240,11 +241,72 @@ async fn start_login(
 pub fn router(state: OidcState) -> Router {
     let callback_path = state.config().redirect_url.path().to_owned();
     let login_path = state.config().login_path.clone();
+    let logout_path = state.config().logout_path.clone();
     Router::new()
         .route(&callback_path, get(callback))
         .route(&login_path, get(login))
+        .route(&logout_path, post(logout))
         .route("/common-oidc.js", get(client_js))
         .with_state(state)
+}
+
+/// A POST, never a GET: a GET would let any page anywhere log a user out with
+/// an `<img src>`. There is no CSRF token in the form (R65.4 leaves that
+/// open), so the request has to prove it came from this site some other way.
+///
+/// UNENFORCED PRECONDITION: this relies on the browser's `Sec-Fetch-Site` or
+/// `Origin`. A proxy that strips both makes every logout a 403 — visibly, not
+/// silently, which is the right way round for a security check.
+async fn logout(State(oidc): State<OidcState>, jar: CookieJar, headers: HeaderMap) -> Response {
+    if !from_this_site(&headers, oidc.config()) {
+        common_logging::warn!(
+            common_logging::AUTH,
+            "refused a logout that did not prove it came from this site"
+        );
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    // Server-side FIRST. Clearing only the cookie would leave a live session
+    // for anyone who kept the value.
+    if let Some(sid) = jar
+        .get(oidc.config().cookie_name.as_str())
+        .map(|c| c.value().to_owned())
+    {
+        oidc.store.remove(&sid).await;
+    }
+
+    let jar = jar.remove(expiring_removal(oidc.config().cookie_name.as_str()));
+    // 303, so the browser turns the POST into a GET of the root. A 307 would
+    // re-POST to "/".
+    (jar, Redirect::to("/")).into_response()
+}
+
+/// `Sec-Fetch-Site` is the browser's own account of the request and page JS
+/// cannot set it; `Origin` is the fallback for a client that sends no
+/// fetch-metadata. Neither present is a REFUSAL, not a pass — otherwise a
+/// header-less POST from anywhere would end a session.
+fn from_this_site(headers: &HeaderMap, config: &OidcConfig) -> bool {
+    if let Some(site) = headers
+        .get("sec-fetch-site")
+        .and_then(|value| value.to_str().ok())
+    {
+        return site == "same-origin";
+    }
+    headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|origin| origin == app_origin(config))
+}
+
+fn app_origin(config: &OidcConfig) -> String {
+    let url = &config.redirect_url;
+    let port = url.port().map(|p| format!(":{p}")).unwrap_or_default();
+    format!(
+        "{}://{}{}",
+        url.scheme(),
+        url.host_str().unwrap_or_default(),
+        port
+    )
 }
 
 async fn login(

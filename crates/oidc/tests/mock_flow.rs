@@ -786,3 +786,170 @@ async fn unauthorized_response_matches_the_extractor_401() {
         "session cookie must be cleared, got: {cookie}"
     );
 }
+
+/// The les-forms sso_login.sh shape, in-process: hold a live session, POST the
+/// logout, then ask for a page again. R73's route exists so the bar's button
+/// is not dead the moment a consumer bumps.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_posted_logout_ends_the_session_and_the_next_page_asks_for_login() {
+    let (base, mock) = spawn_mock().await;
+    // The IdP has to consider the token live, or "the session works before
+    // logout" is vacuous and the whole test proves nothing.
+    mock.valid_access.lock().unwrap().insert("at-live".into());
+    let (store, sid) = seed_session("at-live", Some("refresh-1")).await;
+    let oidc = oidc_state(&base, store).await;
+    let cookie = format!("test_session={sid}");
+
+    let before = app(oidc.clone())
+        .oneshot(get_req("/me", &cookie, true))
+        .await
+        .unwrap();
+    assert_eq!(
+        before.status(),
+        StatusCode::OK,
+        "the session has to be live BEFORE logout, or this test proves nothing"
+    );
+
+    let logout = app(oidc.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/common-oidc/logout")
+                .header(header::COOKIE, &cookie)
+                // What a real same-origin form POST sends.
+                .header("sec-fetch-site", "same-origin")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        logout.status(),
+        StatusCode::SEE_OTHER,
+        "303, so the browser GETs the root rather than re-POSTing to it"
+    );
+    assert_eq!(
+        logout.headers().get(header::LOCATION).unwrap(),
+        "/",
+        "back to the app root"
+    );
+    let cleared = logout
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("the session cookie must be cleared")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        cleared.contains("test_session=") && cleared.to_lowercase().contains("max-age=0"),
+        "got: {cleared}"
+    );
+
+    assert!(
+        oidc.store.get(sid).await.is_none(),
+        "the SERVER-side session must be gone — clearing only the cookie leaves \
+         a live session for anyone who kept the value"
+    );
+
+    let after = app(oidc)
+        .oneshot(get_req("/me", &cookie, true))
+        .await
+        .unwrap();
+    // 307, which is what start_login already issues (Redirect::temporary) —
+    // not the 303 the logout itself uses. Two different redirects for two
+    // different jobs: 303 turns a POST into a GET, 307 preserves the method of
+    // a page request being sent to login.
+    assert_eq!(
+        after.status(),
+        StatusCode::TEMPORARY_REDIRECT,
+        "the next page request must be sent to login, not served: {:?}",
+        after.status()
+    );
+    /* Sent to the IdP to re-authenticate, not to the local login path: the
+    extractor starts a SILENT login itself. Which is the thing to understand
+    about this commit — the app session is genuinely gone, but with
+    authentik's own SSO session still alive that `prompt=none` round trip
+    SUCCEEDS and the user is logged straight back in. Ending the IdP session
+    is R73's follow-up (the client does not read `end_session_endpoint` from
+    discovery yet), and until it lands this route is correct plumbing whose
+    user-visible effect is nil. */
+    let sent_to = after
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|l| l.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        sent_to.contains("/application/o/authorize/") && sent_to.contains("prompt=none"),
+        "the app session must be gone and re-authentication required; sent to {sent_to}"
+    );
+}
+
+/// THE negative that matters: a logout with no proof of origin must be refused
+/// AND must leave the session alive. A check that rejects the response while
+/// still destroying the session would be worse than no check — it would be a
+/// forced-logout hole that looked closed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cross_site_logout_is_refused_and_leaves_the_session_alive() {
+    let (base, _mock) = spawn_mock().await;
+    let (store, sid) = seed_session("good-access", Some("refresh-1")).await;
+    let oidc = oidc_state(&base, store).await;
+    let cookie = format!("test_session={sid}");
+
+    for (label, header_name, value) in [
+        ("cross-site fetch metadata", "sec-fetch-site", "cross-site"),
+        ("a foreign Origin", "origin", "https://evil.example"),
+    ] {
+        let refused = app(oidc.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/common-oidc/logout")
+                    .header(header::COOKIE, &cookie)
+                    .header(header_name, value)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            refused.status(),
+            StatusCode::FORBIDDEN,
+            "{label} must be refused"
+        );
+        assert!(
+            oidc.store.get(sid).await.is_some(),
+            "{label}: the session must SURVIVE a refused logout"
+        );
+    }
+
+    // No fetch metadata and no Origin at all is a refusal too, not a pass:
+    // otherwise a header-less POST from anywhere ends the session.
+    let bare = app(oidc.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/common-oidc/logout")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bare.status(), StatusCode::FORBIDDEN);
+    assert!(
+        oidc.store.get(sid).await.is_some(),
+        "still alive after a bare POST"
+    );
+
+    // And a GET is not a route at all — a GET logout is an <img src> away.
+    let as_get = app(oidc)
+        .oneshot(get_req("/common-oidc/logout", &cookie, true))
+        .await
+        .unwrap();
+    assert_eq!(
+        as_get.status(),
+        StatusCode::METHOD_NOT_ALLOWED,
+        "GET must not end a session"
+    );
+}
