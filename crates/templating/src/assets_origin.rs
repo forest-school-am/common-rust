@@ -61,10 +61,14 @@ impl AssetsOrigin {
         &self.0
     }
 
+    /// `data:` is in `img-src` because the shell ships an inline SVG favicon,
+    /// which is not `'self'` and fails as an `EncodingError` on decode with no
+    /// CSP report of any kind — every byte-level test stays green and the icon
+    /// is simply absent.
     pub fn csp(&self) -> String {
         format!(
             "default-src 'self'; script-src 'self' {origin}; style-src 'self' {origin}; \
-             img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; \
+             img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; \
              form-action 'self'; frame-ancestors 'self'",
             origin = self.0
         )
@@ -177,7 +181,7 @@ mod tests {
         assert_eq!(
             origin.csp(),
             "default-src 'self'; script-src 'self' https://assets.dev.local; \
-             style-src 'self' https://assets.dev.local; img-src 'self'; \
+             style-src 'self' https://assets.dev.local; img-src 'self' data:; \
              connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; \
              frame-ancestors 'self'"
         );
@@ -185,6 +189,41 @@ mod tests {
             !origin.csp().contains("unsafe"),
             "no unsafe-* directive may ever appear: {}",
             origin.csp()
+        );
+    }
+
+    /// The shell's favicon is a `data:` URI, and `img-src 'self'` refused it
+    /// with no CSP report and no failed request — `Image.decode()` rejects
+    /// with an `EncodingError`, which reads as a malformed SVG rather than as
+    /// a policy decision, and the icon is just missing. Driven by the URI
+    /// SHAPE the shell composes, so this fails if `data:` is dropped again.
+    #[test]
+    fn the_csp_admits_the_inline_favicon_the_shell_ships() {
+        let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
+            .unwrap()
+            .unwrap();
+        let csp = origin.csp();
+        let favicon = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>";
+
+        let img_src = csp
+            .split("; ")
+            .find(|directive| directive.starts_with("img-src "))
+            .expect("there must be an img-src to reason about");
+        let sources: Vec<&str> = img_src["img-src ".len()..].split(' ').collect();
+
+        let scheme = favicon
+            .split_once(':')
+            .map(|(scheme, _)| format!("{scheme}:"))
+            .expect("a data URI has a scheme");
+        assert!(
+            sources.contains(&scheme.as_str()),
+            "the shell's favicon is a {scheme} URI, which no origin in \
+             {sources:?} can match — it fails as an EncodingError with no CSP \
+             report, so nothing but this notices: {csp}"
+        );
+        assert!(
+            !sources.contains(&"*"),
+            "admitting the favicon must not mean admitting everything: {csp}"
         );
     }
 

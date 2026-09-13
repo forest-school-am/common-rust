@@ -118,7 +118,7 @@ async fn a_served_page_carries_the_csp_and_the_substituted_origin() {
     assert_eq!(
         csp,
         "default-src 'self'; script-src 'self' https://assets.dev.local; \
-         style-src 'self' https://assets.dev.local; img-src 'self'; connect-src 'self'; \
+         style-src 'self' https://assets.dev.local; img-src 'self' data:; connect-src 'self'; \
          object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
     );
 
