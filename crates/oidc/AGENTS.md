@@ -19,8 +19,9 @@ contract. No login/logout UI — logout lives only at authentik.
 - `src/web.rs` — router, `Principal` extractor, and the `resolve_session` seam.
 - `src/common-oidc.ts` — the served 401→silent-relogin shim. TypeScript in
   erasable syntax; a new browser behaviour goes here, never into a service.
-- `build.rs` — strips the shim into `OUT_DIR` with esbuild and records the
-  crate's clean/dirty source state.
+- `build.rs` — strips the shim into `OUT_DIR` with esbuild. (The build-time
+  worktree-status check was removed on 2026-09-16, R114 item 1: consumers stamp
+  `+dirty` in their own footers.)
 - `tests/mock_flow.rs` — offline mock-authentik integration tests.
 - `tests/live_canary.rs` — §7.4 canary: the instant-logout acceptance test.
 
@@ -74,8 +75,7 @@ up (its `common-oidc-canary` provider).
   it. That is the cost of the shim being TypeScript, and it is worth knowing
   before adding a second TS source here.
 - §4.4: discover() enforces the deployment class — refuses
-  `danger_accept_invalid_certs` under `Deployment::Prod`, and refuses a shim
-  built from a dirty crate tree (§9.8b). The prod-required / dev-only / neutral
+  `danger_accept_invalid_certs` under `Deployment::Prod`. The prod-required / dev-only / neutral
   classification TABLE that §4.4 requires beside the config struct does not
   exist yet; `cookie_name` and `request_refresh_tokens` carry prose docs only.
 

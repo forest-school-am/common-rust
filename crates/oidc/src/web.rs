@@ -69,18 +69,6 @@ impl OidcState {
                     .into(),
             ));
         }
-        if let Some(msg) =
-            crate::source_state::dirty_source_refusal(config.deployment, crate::CRATE_SOURCE_STATE)
-        {
-            return Err(crate::OidcError::Config(msg));
-        }
-        if crate::CRATE_SOURCE_STATE == crate::SourceState::Unknown {
-            common_logging::warn!(
-                common_logging::AUTH,
-                "could not determine whether common-oidc was built from a clean tree \
-                 (no git, or not a work tree) — this is NOT an assurance that it was"
-            );
-        }
 
         Ok(Self {
             client: Arc::new(OidcClient::discover(config).await?),

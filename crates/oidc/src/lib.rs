@@ -21,13 +21,8 @@ mod config;
 mod error;
 mod principal;
 mod retry;
-mod source_state;
 mod store;
 mod web;
-
-use source_state::SourceState;
-
-include!(concat!(env!("OUT_DIR"), "/source_state.rs"));
 
 /// The browser shim, stripped from `src/common-oidc.ts` at build time and
 /// carried in the binary: it cannot drift from the crate that serves it.
