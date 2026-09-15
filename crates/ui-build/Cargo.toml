@@ -1,0 +1,22 @@
+[package]
+name = "common-ui-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Build-script helper for common-ui consumers: one prefix pin in Cargo.toml; the shell, markers and types fetched, verified against the origin manifest and cached for offline builds"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+base64 = "0.22"
+# `parse` only: the one thing read is `[package.metadata.common-ui] prefix`.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+# The fetch. ureq over rustls, no gzip/json/cookies: four small files over
+# TLS with the stand's own CA. `tls` is rustls with `ring` — the same
+# provider reqwest's `rustls-tls` selects in every consumer, so no second
+# crypto backend enters a build.
+ureq = { version = "2", default-features = false, features = ["tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-pki-types = { version = "1", features = ["std"] }

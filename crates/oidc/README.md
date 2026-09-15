@@ -9,10 +9,11 @@ authentik.
 
 - **Version:** `0.3.0`
 - **Toolchain:** Rust 1.98.0 (workspace standard).
-- Member of the `common-rust` workspace (`crates/oidc`); `common-logging` and
-  `common-templating` are workspace siblings, not git deps, as of 0.3.0.
-- **Depends on** the stand crates `common-logging` (§8 logging) and `common-templating`
-  (§9 asset rendering).
+- Member of the `common-rust` workspace (`crates/oidc`); `common-logging` is a
+  workspace sibling, not a git dep, as of 0.3.0.
+- **Depends on** the stand crate `common-logging` (§8 logging) and nothing else
+  of ours: `common-templating` is a consumer-side concern (it renders the
+  `PageConfig` this crate defines; this crate never renders anything).
 
 ## Depend on it
 
@@ -39,9 +40,9 @@ to the published crate and rewrites your lockfile to say so. Run
 ordering is non-deterministic); that is a lock-check failure, not a build
 failure, and is not to be "fixed".
 
-This crate's own two dependencies (`common-logging`, `common-templating`) are
-workspace siblings by path, not git deps — the three crates share one
-workspace, so a member cannot drift from a sibling's transitive pick.
+This crate's own stand dependency (`common-logging`) is a workspace sibling by
+path, not a git dep — the crates share one workspace, so a member cannot drift
+from a sibling's transitive pick.
 
 **Building:** `cargo build` is the build path (R11(a)); `nix build` is not used
 for these crates, and the flake provides the dev shell only. Build inside

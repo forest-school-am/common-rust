@@ -7,7 +7,6 @@ description = "Shared in-app OIDC for stand apps: BFF sessions, per-request user
 
 [dependencies]
 common-logging.workspace = true
-common-templating.workspace = true
 axum = "0.8"
 backon = { version = "1.6", default-features = false, features = ["std", "tokio-sleep"] }
 axum-extra = { version = "0.10", features = ["cookie"] }

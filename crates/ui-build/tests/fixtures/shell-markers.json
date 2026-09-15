@@ -1,0 +1,25 @@
+{
+  "runtime": [
+    "assets_origin",
+    "config",
+    "theme_override"
+  ],
+  "build": [
+    "title",
+    "app_name",
+    "app_icon",
+    "bar_pages",
+    "prefix",
+    "page_css",
+    "page_module",
+    "root_class",
+    "sri_base_css",
+    "sri_palette_css",
+    "sri_elements_css",
+    "sri_common_ui_js",
+    "footer_app",
+    "footer_commit",
+    "legal"
+  ],
+  "csp": "default-src 'self'; script-src 'self' {{assets_origin}}; style-src 'self' {{assets_origin}}; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+}

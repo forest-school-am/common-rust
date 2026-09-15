@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/logging", "crates/templating", "crates/oidc"]
+members = ["crates/logging", "crates/templating", "crates/oidc", "crates/ui-build"]
 
 [workspace.package]
 version = "0.3.0"

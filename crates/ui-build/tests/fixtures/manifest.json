@@ -1,0 +1,38 @@
+{
+  "lit": "3.3.3",
+  "prefix": "common-ui@b9f049d05d44",
+  "theme": "theme-default",
+  "src": "ad015c3fddae2fe4",
+  "files": {
+    "common-ui@b9f049d05d44/base.css": "sha384-FKTi8WRMRH1X8Zvf60jnHmUxezjTk4aIgSwclKWNpzXIMUNkCkCDO3arJkd4cTSz",
+    "common-ui@b9f049d05d44/elements.css": "sha384-CYwpFCVZeF6oFvp6+gv/yp3oZZOcugvQab9CrbfjXHOOzNLvbJmtfugw14ap5jMu",
+    "common-ui@b9f049d05d44/common-ui.js": "sha384-Rp+1e0GEEgsiDnNTeh8VHMMmcZimdjoPaKj7KB8hrTXSw+5zG6tHmEMNxBSUWnBK",
+    "common-ui@b9f049d05d44/common-ui.d.ts": "sha384-LwcUCFH6x21L0uGWUxJoh/Rtu61xA4NjA/Bsz+VDgtlXKzxToHir636d6UFVS8WE",
+    "common-ui@b9f049d05d44/shell.html": "sha384-+1AC7CYT7qzTr8h97Lw0NJOxzXlfPBrpoYsPWARS8O+nrDlRvxl1N6ecG29Kvmh8",
+    "common-ui@b9f049d05d44/shell-markers.json": "sha384-wDQ4LlQOLRoIrNas1nvchtx2R94BHYsdQTz5ZuGoN34XbX6s1BDv5M2vi4TunpDY",
+    "common-ui@b9f049d05d44/theme-contrast/palette.css": "sha384-SgIqAVIa1eiITqCgK76Kh+Vs/WCo42/3XTH/G8wi9ST2CV+31elBo9Cv6JT8Q/LC",
+    "common-ui@b9f049d05d44/theme-default/palette.css": "sha384-PhJfGDoOilr4AAxIncpuJRxor00q9zM/B+m8dAm/Jc3reu46lwgdq2DWx0ilIchO",
+    "common-ui@b9f049d05d44/theme-forest/palette.css": "sha384-7PpgkN686OW0oN4OYK5HQX6VwCjNhobULNSUuuKaH6j1lbVT1wdwtYdU2I6x4XDP",
+    "common-ui@b9f049d05d44/theme-glassmorph/palette.css": "sha384-FUO5egXeX8hyTZ8txKz7Yima9WXXCviaTdNimuj9rg3uCrqCJutZzvi85ZcYsgE3",
+    "common-ui@b9f049d05d44/theme-graphite/palette.css": "sha384-l7nZugRfx7OxHVrr1n/2RRTaQgX5R/idcr98Y1bm2ZHjVDP9PFDRzouIvu0PJT/F",
+    "common-ui@b9f049d05d44/theme-ink/palette.css": "sha384-Xd51qRAZL6BKPAGFwmzWoT50Q102EtlXQVe1GrUV/wInT8MBqmSGEEeHDVg+0hud",
+    "common-ui@b9f049d05d44/theme-material3/palette.css": "sha384-UW2JzkSvhwCSC/SkTrg4bkJThWtOiVW+ZJVGf9vHFGy6zhmB2t1so9Qzd+ZYH/mn",
+    "common-ui@b9f049d05d44/theme-midnight/palette.css": "sha384-0J0+9Ijzz+xdGF6NDxlMItvyOTK+WDosNTNb0I20gFoviA7bBEx5MEH0L8cGGSdC",
+    "common-ui@b9f049d05d44/theme-neo-brutal/palette.css": "sha384-cEUYDnzkia45TZxq0o8VP//8H09bVpDQ7Am8VqgqKevzxI5EbrnCk8b5Af5zY8P/",
+    "common-ui@b9f049d05d44/theme-neumorph/palette.css": "sha384-I+jBqhb71gK7KAQ/rGU48+rsgrQxk+OvTGuGpAK/KnR4lBivUTSaQ85Mm0eqa7Ej",
+    "common-ui@b9f049d05d44/theme-nord/palette.css": "sha384-PHjgCoQov+NHg9LKdeBi/59/3wYjvBczXHT1YMTMBdDw/Zm1Pl/SUi8cGjucAE1w",
+    "common-ui@b9f049d05d44/theme-ocean/palette.css": "sha384-x1Qy127UljVAxcTqOCkUn223EHAyQ4gekrPLUxJ1h+lhunaeNIDNx5OCm1VZybSD",
+    "common-ui@b9f049d05d44/theme-sand/palette.css": "sha384-Z09m2zs+DesJNnyI2ft4EEhizP1oXvOWTBnUZZAnAdeTO5Wk5yHlrJyiwn71SHM9",
+    "common-ui@b9f049d05d44/theme-slate/palette.css": "sha384-EGimiRjKJx9pK0F4K4CnTRSnSVfPDXp1YjwvYLeVL1JWhq2E87aczzHah7kwKQ3e",
+    "common-ui@b9f049d05d44/theme-soft/palette.css": "sha384-uE7ogX0qUrm4O/enFnvkY7En18VACKaoezAlg8oZPNeSddZU0hnllig04op0/yMs",
+    "common-ui@b9f049d05d44/theme-swiss/palette.css": "sha384-Xw9yYO6sV1HZGXvWTQCzKWcToky49qI1YSyKQNcYynF0qc2oep4757pvi8wAt9GR"
+  },
+  "gallery": {
+    "common-ui@b9f049d05d44/gallery.html": "sha384-DhWrhBgYSKoe0QAdI72Sp0twKBIOeQyvi17lOhhPDr57Y8xkptzdjvlor9Q0HZCK",
+    "common-ui@b9f049d05d44/gallery.976f04d32f59.js": "sha384-0mq8acMy7/B/XJ/M4HoInHnxhrsrS8NS6O/eOr/YlHMpx7GVau3NznHWsUoO1W66",
+    "common-ui@b9f049d05d44/gallery.02a11bbf0cf8.css": "sha384-4rZtur6i+KcqXTMp/+jD2gpqAfndoqtMsHmHIXTLH9XDVPeYp1UKEy3ovI/3KHiP",
+    "common-ui@b9f049d05d44/fixture.1f0c12288406.html": "sha384-SUct0oQs8WewdsTUxAKzmNLe0KAGEXAtyi2JJ0ajjBjpH64LNqmgm4WezjkkIVnB",
+    "common-ui@b9f049d05d44/fixture.b8d2669611ef.css": "sha384-2QyD2nUBm80DRij0VaRu7rnPytyrqE5/OdbCjL8zPZ10w35UAsVwnFHaLVcYWnO1",
+    "common-ui@b9f049d05d44/page.fd11718f8ab7.js": "sha384-jFhRpn+ka74/Jb+ej8nOMJNrtr5LIwPnyaGzwXGtCYnxSlqY9goTwHXv4bvS9qDH"
+  }
+}
