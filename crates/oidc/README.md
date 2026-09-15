@@ -186,9 +186,12 @@ block:
 <script type="application/json" id="config">{"assetsOrigin":"…","loginPath":"/oidc/login"}</script>
 ```
 
-which `common_templating::render` writes for you from
-`common_templating::Config`. `loginPath` is mandatory: populate it from your
-`OidcConfig::login_path` so a page cannot end up unable to bounce.
+which `common_templating::render` writes for you from this crate's
+`PageConfig`. `PageConfig::new(&oidc_config, user, launcher_url, assets_origin)`
+copies `loginPath` and `logoutPath` off the `OidcConfig` the router was mounted
+with, so a page cannot end up unable to bounce or pointing a logout control at
+a route that does not exist; `PageConfig::without_oidc` is for a build that
+mounts no router at all.
 
 **esbuild is a build dependency of this crate**, so it must be on `PATH`
 wherever you build — add `pkgs.esbuild` to your dev shell's `packages` and to

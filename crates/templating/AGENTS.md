@@ -11,12 +11,10 @@ nothing don't pull a template engine.
 - `src/lib.rs` — `Builder` (boot validation + pins), `AssetCache`
   (`static_file`), `RenderError`, `sha256`, and the cache/path tests.
 - `src/render.rs` — `Shell` (compile once, render per request), the total
-  `render(shell, config)` convenience, the config-block escaping, and the
-  marker constants `ORIGIN_MARKER` / `CONFIG_MARKER`.
-- `src/config.rs` — `Config` and `User`, the data block a page reads first
-  (R65); ts-rs exports them to `bindings/`.
+  `render(shell, origin, config)` convenience, the config-block escaping, and
+  the marker constants `ORIGIN_MARKER` / `CONFIG_MARKER`.
 - `src/assets_origin.rs` — `AssetsOrigin` (§12.6): the `ASSETS_ORIGIN`
-  option, its refusal shape, and the CSP layer.
+  option, its refusal shape, and its substitution into the shell's CSP.
 - `tests/consumer.rs` — an asset-serving service in miniature: shell compiled
   at boot, rendered per request, static file, CSP layer.
 
@@ -27,6 +25,11 @@ nothing don't pull a template engine.
 - EXACTLY TWO RUNTIME VALUES, `assets_origin` (raw) and `config` (escaped
   JSON). `render::Values` is the whole context; a third field is a
   shell-contract change first and a crate change second.
+- THE CONFIG IS ANY `Serialize` AND THIS CRATE DOES NOT KNOW ITS FIELDS
+  (R114 item 5). The block's shape is a contract between its writer
+  (`common_oidc::PageConfig`) and its readers in common-ui, pinned there — no
+  page-config type, no ts-rs, no `bindings/` here. A config that cannot
+  serialise is `RenderError::Render`, not a panic.
 - AN UNSTAMPED MARKER IS A RENDER ERROR, NEVER SHIPPED. `{{title}}` left by a
   build.rs is `RenderError::Render` quoting the line
   (`an_unstamped_build_time_marker_is_a_render_error_naming_it`). The total
@@ -59,7 +62,7 @@ nothing don't pull a template engine.
 
 - THE ASSET ORIGIN IS THIS CRATE'S (§12.6), not each service's: one option
   `ASSETS_ORIGIN` (unprefixed, like the common-logging options), one refusal
-  shape, one CSP value, one `{{assets_origin}}`. The variable's NAME is
+  shape, one `{{assets_origin}}`. The variable's NAME is
   exported as `ASSETS_ORIGIN_VARIABLE`, so a consumer adding a flag override
   names it without a second copy to drift; there is no separate "parameter"
   constant, because a lowercase one read as the variable and sent an operator
@@ -72,32 +75,16 @@ nothing don't pull a template engine.
   prod. `csp_layer()` hangs off a PRESENT origin, so a service without one
   cannot half-wire itself.
 - A SERVICE THAT RENDERS THE SHELL REQUIRES `ASSETS_ORIGIN` IN EVERY DEPLOYMENT
-  CLASS, dev included (USER RULING). `Config::new` takes `&AssetsOrigin`, not
-  an `Option`, so the type makes a shell-rendering service resolve the dev
-  `Ok(None)` into a refusal of its own rather than emitting a config block that
-  names an origin nobody chose. Prod-required stays the PARSE rule — a service
-  that serves no shell may still run without one.
-- The CSP is §12.2's normative string, asserted literally in both the unit test
-  and the served-response test. No `unsafe-*`, and
-  `object-src`/`base-uri`/`form-action`/`frame-ancestors` are spelled out
-  because they do NOT fall back to `default-src`.
-- `frame-ancestors` is `'self'`, NOT `'none'`. `'none'` refuses same-origin
-  framing as well as cross-origin, which blanks les-forms' editor preview
-  (it frames its own `/render?preview=1`) and breaks cron's 360px harness,
-  which measures inside a same-origin iframe because headless Firefox will not
-  size a window below ~500px. `'self'` still refuses every cross-origin framer,
-  which is the clickjacking threat the directive exists for.
-- EACH DIRECTIVE NEEDS A CONSUMER THAT EXERCISES IT, and one that nothing
-  exercises is unverified rather than safe. Two defects arrived this way: this
-  crate has no page that frames another, so `'none'` passed every test here;
-  and common-ui's CSP check served its CSS same-origin, so cross-origin
-  `style-src` is still unexercised until les-forms' pages load the theme for
-  real. Who exercises what today: `script-src`/`style-src` cross-origin →
-  les-forms (pending), `frame-ancestors` same-origin → les-forms' preview and
-  cron's harness, `form-action` → les-forms and cron, `connect-src` → the
-  picker's remote source. `data:` was dropped from `img-src` under this rule —
-  nothing in les-forms, cron or common-ui uses it — and comes back when a page
-  ships an inline image.
+  CLASS, dev included (USER RULING). `render` takes `&AssetsOrigin`, not an
+  `Option`, so the type makes a shell-rendering service resolve the dev
+  `Ok(None)` into a refusal of its own rather than emitting a page that names
+  an origin nobody chose. Prod-required stays the PARSE rule — a service that
+  serves no shell may still run without one.
+- THE CSP IS THE SHELL'S, NOT THIS CRATE'S. `csp()` substitutes the origin
+  into the policy the consumer vendored and refuses one with no
+  `{{assets_origin}}`: the shell's CSP must allow this origin, and that is the
+  whole of what this crate says about it. What the directives should be is
+  common-ui's contract; the tests here pin the substitution and the refusal.
 
 ## Run / test
 `nix develop --impure -c cargo test -p common-templating` at the WORKSPACE
@@ -107,6 +94,6 @@ Library only; `cargo build` is the build path (R11(a)).
 
 ## Stand context
 Implements DECISIONS.md R6 / CODESTYLE.md §9.7–§9.8; engine swap under R114
-item 4. Consumers: cron, les-forms, les-registry (shell + origin) and
+item 4, page config moved out to common-oidc under R114 item 5. Consumers: cron, les-forms, les-registry (shell + origin) and
 authentik-role-UI (static files + origin). Builds serialized under R4's disk
 regime.

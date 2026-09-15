@@ -11,9 +11,18 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use common_logging::Deployment;
-use common_templating::{AssetCache, AssetsOrigin, Builder, Config, Shell};
+use common_templating::{AssetCache, AssetsOrigin, Builder, Shell};
 use http_body_util::BodyExt;
 use tower::util::ServiceExt;
+
+/// The config block as THIS consumer shapes it: the crate takes any
+/// `Serialize` and does not know the fields.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Config {
+    assets_origin: String,
+    login_path: &'static str,
+}
 
 const PAGE: &str = "<!doctype html>\n\
 <script type=\"module\" src=\"{{ assets_origin }}/common-ui@abc123/common-ui.js\"\n\
@@ -26,6 +35,7 @@ const LOGIC: &[u8] = b"export const answer = 42;\n";
 struct App {
     assets: Arc<AssetCache>,
     shell: Shell,
+    origin: AssetsOrigin,
     config: Config,
 }
 
@@ -54,7 +64,10 @@ fn app() -> Router {
     let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
         .expect("accepted")
         .expect("present");
-    let config = Config::new(&origin, "/oidc/login");
+    let config = Config {
+        assets_origin: origin.as_str().to_owned(),
+        login_path: "/oidc/login",
+    };
     /* The policy a consumer VENDORS, as build.rs would embed it from the
     prefix's shell-markers.json. Spelled out here rather than read from a
     file, because this test is the consumer and a consumer has these bytes
@@ -69,6 +82,7 @@ fn app() -> Router {
     let state = Arc::new(App {
         assets: Arc::new(assets),
         shell,
+        origin,
         config,
     });
 
@@ -76,7 +90,7 @@ fn app() -> Router {
         .route(
             "/",
             get(|State(app): State<Arc<App>>| async move {
-                match app.shell.render(&app.config) {
+                match app.shell.render(&app.origin, &app.config) {
                     Ok(html) => (
                         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
                         html,

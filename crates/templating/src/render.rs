@@ -1,6 +1,8 @@
 //! Stamping a built shell with the two values only the request knows: the
 //! asset origin and the config block. Build-time values (title, page css,
-//! page module, prefix, hashes) are a service's build.rs, not this.
+//! page module, prefix, hashes) are a service's build.rs, not this; WHAT the
+//! config block says is the service's (and common-oidc's) business, not this
+//! crate's — it takes any `Serialize` and only escapes it for its block.
 //!
 //! The engine is `upon` with no functions, no filters and no escaping: a
 //! `{{name}}` expression is the whole grammar a shell uses. Two rules of its
@@ -14,7 +16,7 @@
 
 use serde::Serialize;
 
-use crate::{Config, RenderError};
+use crate::{AssetsOrigin, RenderError};
 
 pub const ORIGIN_MARKER: &str = "{{assets_origin}}";
 pub const CONFIG_MARKER: &str = "{{config}}";
@@ -23,14 +25,20 @@ pub const CONFIG_MARKER: &str = "{{config}}";
 const NAME: &str = "shell";
 
 /// Serialised JSON with `<`, `>` and `&` as `\u00XX`, so no value can close
-/// the block it sits in or open a tag inside it. JSON has no syntax use for
-/// any of the three, so every occurrence is inside a string literal.
-fn data_block(config: &Config) -> String {
-    serde_json::to_string(config)
-        .expect("Config is strings only, which serde_json cannot fail on")
+/// the `<script type="application/json">` it sits in or open a tag inside
+/// it. JSON has no syntax use for any of the three, so every occurrence is
+/// inside a string literal and the page parses the value back unchanged.
+///
+/// This is NOT HTML sanitisation and an HTML escaper would be wrong here:
+/// browsers do not decode entities inside `<script>`, so `&lt;` would reach
+/// `JSON.parse` as a literal `&lt;` and break the block.
+fn json_for_script_block(config: &impl Serialize) -> Result<String, RenderError> {
+    let json = serde_json::to_string(config)
+        .map_err(|e| RenderError::Render(NAME.to_owned(), format!("config: {e}")))?;
+    Ok(json
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
-        .replace('&', "\\u0026")
+        .replace('&', "\\u0026"))
 }
 
 /// Exactly the two values a shell may ask for at runtime. A third field here
@@ -60,13 +68,17 @@ impl Shell {
         Ok(Self { engine, template })
     }
 
-    /// Renders with `assets_origin` raw and `config` as the escaped JSON
-    /// block. Any other `{{name}}` still in the shell is a render error
-    /// whose message quotes the offending line.
-    pub fn render(&self, config: &Config) -> Result<String, RenderError> {
-        let block = data_block(config);
+    /// Renders with `assets_origin` raw and `config` serialised and escaped
+    /// for its block. Any other `{{name}}` still in the shell is a render
+    /// error whose message quotes the offending line.
+    pub fn render(
+        &self,
+        origin: &AssetsOrigin,
+        config: &impl Serialize,
+    ) -> Result<String, RenderError> {
+        let block = json_for_script_block(config)?;
         let values = Values {
-            assets_origin: &config.assets_origin,
+            assets_origin: origin.as_str(),
             config: &block,
         };
         self.template
@@ -83,9 +95,9 @@ impl Shell {
 /// holds a `{{name}}` other than the two runtime markers — both are defects
 /// in the build-time stamping, not conditions a request can produce. A
 /// service that wants to refuse at boot instead compiles a [`Shell`] there.
-pub fn render(shell: &str, config: &Config) -> String {
+pub fn render(shell: &str, origin: &AssetsOrigin, config: &impl Serialize) -> String {
     Shell::compile(shell)
-        .and_then(|shell| shell.render(config))
+        .and_then(|shell| shell.render(origin, config))
         .unwrap_or_else(|e| panic!("{e}"))
 }
 
@@ -94,14 +106,35 @@ mod tests {
     use super::*;
     use common_logging::Deployment;
 
-    fn config(login_path: &str) -> Config {
-        let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
-            .unwrap()
-            .unwrap();
-        Config::new(&origin, login_path)
+    /// A config block as a service might shape one. The crate does not know
+    /// or care what is in it; the tests need something with a string a hostile
+    /// value can land in.
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Page {
+        assets_origin: &'static str,
+        login_path: String,
+        user: Option<Who>,
     }
 
-    use crate::AssetsOrigin;
+    #[derive(Serialize)]
+    struct Who {
+        name: String,
+    }
+
+    fn origin() -> AssetsOrigin {
+        AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
+            .unwrap()
+            .unwrap()
+    }
+
+    fn config(login_path: &str) -> Page {
+        Page {
+            assets_origin: "https://assets.dev.local",
+            login_path: login_path.to_owned(),
+            user: None,
+        }
+    }
 
     const SHELL: &str = concat!(
         "<link rel=stylesheet href=\"{{assets_origin}}/common-ui@abc/base.css\">\n",
@@ -111,7 +144,7 @@ mod tests {
 
     #[test]
     fn both_runtime_markers_are_filled_everywhere_they_appear() {
-        let html = render(SHELL, &config("/oidc/login"));
+        let html = render(SHELL, &origin(), &config("/oidc/login"));
         assert_eq!(
             html.matches("https://assets.dev.local/common-ui@abc/")
                 .count(),
@@ -128,7 +161,7 @@ mod tests {
     #[test]
     fn a_config_value_cannot_close_the_block_it_sits_in() {
         let hostile = "</script><script>alert(1)</script>";
-        let html = render(SHELL, &config(hostile));
+        let html = render(SHELL, &origin(), &config(hostile));
 
         assert!(
             !html.contains("</script><script>"),
@@ -147,7 +180,7 @@ mod tests {
 
     #[test]
     fn an_ampersand_is_escaped_so_an_entity_cannot_form() {
-        let html = render(SHELL, &config("/login?a=1&amp;lt;b"));
+        let html = render(SHELL, &origin(), &config("/login?a=1&amp;lt;b"));
         assert!(
             !html.contains('&'),
             "no raw ampersand may reach the page: {html}"
@@ -158,7 +191,7 @@ mod tests {
     #[test]
     fn the_escaped_block_is_still_the_json_the_page_parses() {
         let hostile = "</script>&<>";
-        let html = render(SHELL, &config(hostile));
+        let html = render(SHELL, &origin(), &config(hostile));
         let start = html.find(r#"id="config">"#).unwrap() + r#"id="config">"#.len();
         let end = html[start..].find("</script>").unwrap() + start;
 
@@ -170,20 +203,16 @@ mod tests {
         );
     }
 
-    /// A display name arrives from authentik, so it is the likeliest hostile
+    /// A display name arrives from the IdP, so it is the likeliest hostile
     /// string in the whole block — likelier than a login path, which a service
     /// writes itself.
     #[test]
     fn a_hostile_display_name_cannot_close_the_data_block() {
-        let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
-            .unwrap()
-            .unwrap();
-        let mut config = Config::new(&origin, "/oidc/login");
-        config.user = Some(crate::User {
+        let mut config = config("/oidc/login");
+        config.user = Some(Who {
             name: "</script><script>alert(1)</script>".to_owned(),
-            portrait: None,
         });
-        let html = render(SHELL, &config);
+        let html = render(SHELL, &origin(), &config);
 
         assert!(
             !html.contains("</script><script>"),
@@ -209,7 +238,7 @@ mod tests {
     fn an_unstamped_build_time_marker_is_a_render_error_naming_it() {
         let shell = Shell::compile("<title>{{title}}</title>{{config}}").expect("the grammar is fine");
         let err = shell
-            .render(&config("/oidc/login"))
+            .render(&origin(), &config("/oidc/login"))
             .expect_err("a marker the build did not stamp must not reach a browser");
         assert!(
             matches!(err, RenderError::Render(..)),
@@ -231,5 +260,18 @@ mod tests {
             .err()
             .expect("a `}}` outside an expression must not compile");
         assert!(matches!(err, RenderError::Parse(..)), "{err}");
+    }
+
+    /// The crate takes any `Serialize`; one that cannot serialise (a map with
+    /// non-string keys, say) is a render error, not a panic in a handler.
+    #[test]
+    fn a_config_that_cannot_serialise_is_a_render_error() {
+        let shell = Shell::compile(SHELL).unwrap();
+        let unserialisable: std::collections::BTreeMap<(u8, u8), u8> =
+            [((1, 2), 3)].into_iter().collect();
+        let err = shell
+            .render(&origin(), &unserialisable)
+            .expect_err("serde_json refuses a non-string map key");
+        assert!(matches!(err, RenderError::Render(..)), "{err}");
     }
 }

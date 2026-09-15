@@ -19,11 +19,9 @@
 //! ```
 
 mod assets_origin;
-mod config;
 mod render;
 
 pub use assets_origin::{AssetsOrigin, VARIABLE as ASSETS_ORIGIN_VARIABLE};
-pub use config::{Config, User};
 pub use render::{render, Shell, CONFIG_MARKER, ORIGIN_MARKER};
 
 use std::collections::HashMap;

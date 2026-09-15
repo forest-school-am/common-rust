@@ -19,6 +19,7 @@ mod bearer;
 mod client;
 mod config;
 mod error;
+mod page_config;
 mod principal;
 mod retry;
 mod store;
@@ -32,6 +33,7 @@ pub use bearer::{BearerValidator, ValidationError};
 pub use client::{OidcClient, TokenBundle};
 pub use config::OidcConfig;
 pub use error::{OidcError, Upstream};
+pub use page_config::{PageConfig, PageUser};
 pub use principal::{GateDenied, Principal};
 pub use store::{
     BoxFuture, FlowState, FlowStore, MemoryFlowStore, MemoryStore, Session, SessionStore,

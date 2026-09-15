@@ -99,7 +99,9 @@ impl OidcState {
             .into_response()
     }
 
-    fn config(&self) -> &OidcConfig {
+    /// The config the router was mounted with; `PageConfig::new` reads the
+    /// login and logout paths off it per request.
+    pub fn config(&self) -> &OidcConfig {
         self.client.config()
     }
 

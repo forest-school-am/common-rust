@@ -4,6 +4,11 @@
 use common_logging::Deployment;
 use url::Url;
 
+/// The default login path, shared with `PageConfig::without_oidc` so the
+/// placeholder a router-less build publishes is the spelling a router would
+/// have mounted.
+pub(crate) const LOGIN_PATH: &str = "/oidc/login";
+
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
     pub issuer: Url,
@@ -12,9 +17,9 @@ pub struct OidcConfig {
     pub redirect_url: Url,
     pub scopes: Vec<String>,
     pub login_path: String,
-    /// Where `common_oidc::router` mounts the POST that ends a session (R73).
-    /// A consumer passes this SAME value into `Config::logout_path` so the
-    /// page never carries a literal that can drift from the route.
+    /// Where `common_oidc::router` mounts the POST that ends a session.
+    /// `PageConfig::new` copies this SAME value into the page so it never
+    /// carries a literal that can drift from the route.
     pub logout_path: String,
     pub cookie_name: String,
     pub cookie_secure: bool,
@@ -37,7 +42,7 @@ impl OidcConfig {
             scopes: ["openid", "profile", "email", "effective_groups"]
                 .map(String::from)
                 .to_vec(),
-            login_path: "/oidc/login".into(),
+            login_path: LOGIN_PATH.into(),
             logout_path: "/common-oidc/logout".into(),
             cookie_name: cookie_name.into(),
             cookie_secure: true,

@@ -42,18 +42,18 @@ stamped every build-time marker (title, prefix, page css/module, SRI hashes,
 `{{config}}`, and this crate fills them:
 
 ```rust
-use common_templating::{Config, Shell};
+use common_templating::Shell;
 
 // boot: compile once. Refuses a shell upon cannot parse.
 let shell = Shell::compile(SHELL)?;
 
-// per request: the origin raw, the config as an escaped JSON block
-let mut config = Config::new(&origin, "/oidc/login");
-config.user = Some(User { name, portrait: None });
-let html = shell.render(&config)?;
+// per request: the origin raw, the config as an escaped JSON block. The
+// config is any `Serialize` the service chooses — common-oidc's `PageConfig`
+// on this stand.
+let html = shell.render(&origin, &config)?;
 
 // or, for a shell the build already validated, both steps in one:
-let html = common_templating::render(SHELL, &config);
+let html = common_templating::render(SHELL, &origin, &config);
 ```
 
 The engine is `upon` 0.11 with only its `serde` feature: no filters, no
@@ -62,23 +62,23 @@ but a shell uses nothing else. Three rules matter:
 
 - **A missing value is a render error.** A `{{title}}` the build did not
   stamp is `RenderError::Render` whose message quotes the line, never a marker
-  shipped to a browser. `render(shell, config)` is total and PANICS on it —
-  an unstamped marker is a build.rs defect, not a request-time condition; a
-  service that wants a boot refusal instead compiles a `Shell` at boot.
+  shipped to a browser. `render(shell, origin, config)` is total and PANICS on
+  it — an unstamped marker is a build.rs defect, not a request-time condition;
+  a service that wants a boot refusal instead compiles a `Shell` at boot.
 - **A lone `}}` is a compile error.** upon refuses a `}}` outside an
   expression. A build-time value containing one (minified CSS or JS pasted
   into the shell, say) breaks compilation, which is why a `Shell` compiled at
   boot is the shape to prefer.
 - **`{{config}}` is escaped for its block, not for HTML.** The JSON is
   serialised with `<`, `>` and `&` as `\u00XX`, so no value — a display name
-  from authentik above all — can close the `<script type="application/json">`
+  from the IdP above all — can close the `<script type="application/json">`
   it sits in or open a tag inside it, and the page still parses it back
   unchanged. `{{assets_origin}}` is inserted raw; it is `https://<host>` by
   construction (below).
 
-`Config` is the one object page code reads on its first line (R65): the
-origin, the login path, the signed-in `User` if any, the launcher URL and the
-logout path. Its TypeScript bindings are exported to `bindings/`.
+What the config block SAYS is not this crate's concern: it takes any
+`serde::Serialize`. The field names are a contract between the writer
+(`common_oidc::PageConfig`) and the readers in common-ui, pinned there.
 
 ## Static files
 
@@ -113,33 +113,31 @@ editing a served file on disk takes effect without a restart. Wrap the
 
 ## The asset origin (§12.6)
 
-The origin, its CSP and its template parameter come from here, so no service
-composes them:
+The origin and its substitution into the shell's CSP come from here, so no
+service composes them:
 
 ```rust
 let origin = common_templating::AssetsOrigin::from_env(deployment)
     .unwrap_or_else(|r| common_logging::refuse!(r));   // your module, your log line
 
-// The POLICY is the shell's, not this crate's: it is the `csp` field of the
-// shell-markers.json you vendored from the prefix, with {{assets_origin}}
-// where the origin goes. Embed it in build.rs beside the shell itself — the
-// crate holding its own copy is what let `img-src 'self'` refuse the shell's
-// data: favicon with no CSP report and no failing test.
+// The POLICY is the shell's, not this crate's: the `csp` field of the
+// shell-markers.json you vendored, with {{assets_origin}} where the origin
+// goes. The shell's CSP must allow this origin; a policy with no marker is
+// refused rather than served.
 const CSP: &str = /* build.rs: the `csp` field of your vendored shell-markers.json */;
 
 let app = Router::new()
     .route("/", get(index))
-    .layer(origin.as_ref().map(|o| o.csp_layer(CSP).unwrap()).unwrap());
+    .layer(origin.csp_layer(CSP)?);
 
 // in the handler, stamped into the built shell along with the config block:
-let config = common_templating::Config::new(&origin, "/oidc/login");
-let html = common_templating::render(SHELL, &config);
+let html = common_templating::render(SHELL, &origin, &config);
 ```
 
 A service that renders the shell requires `ASSETS_ORIGIN` in EVERY deployment
-class: `Config::new` takes `&AssetsOrigin` rather than an `Option`, so the dev
-`Ok(None)` has to become a refusal of the service's own instead of a config
-block naming an origin nobody chose. `ASSETS_ORIGIN_VARIABLE` is the variable's
+class: `render` takes `&AssetsOrigin` rather than an `Option`, so the dev
+`Ok(None)` has to become a refusal of the service's own instead of a page
+naming an origin nobody chose. `ASSETS_ORIGIN_VARIABLE` is the variable's
 name, for a consumer that adds a flag override.
 
 ```html
@@ -152,15 +150,6 @@ slash, credentials, query or fragment. Anything else is a boot refusal naming
 the variable, the value, what was accepted, and which rule it broke. It is
 **prod-required**: unset is `None` under `DEPLOYMENT_TYPE=dev` and a refusal
 under prod.
-
-The header is §12.2's value, with no `unsafe-*` and the origin in both
-`script-src` and `style-src`:
-
-```
-default-src 'self'; script-src 'self' <origin>; style-src 'self' <origin>;
-img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self';
-form-action 'self'; frame-ancestors 'self'
-```
 
 ## Untrusted names (§9.5b)
 
@@ -179,8 +168,9 @@ fixtures, golden anchors) is out of scope and may stay embedded.
 ## Test
 
 `cargo test` — both runtime markers filled everywhere + config-block escaping
-(script close, ampersand, hostile display name, JSON round-trip) + unstamped
-marker is a render error + lone `}}` refuses to compile + static cache +
+(script close, ampersand, hostile display name, JSON round-trip, unserialisable
+config) + unstamped marker is a render error + lone `}}` refuses to compile +
+static cache +
 edit-without-restart + boot refusals (bad dir, missing pinned file) + pin
 match/mismatch/drift + path traversal and symlink escape + a consumer-shaped
 router serving the shell and a static file under the CSP layer. No network.

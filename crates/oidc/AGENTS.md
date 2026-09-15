@@ -10,6 +10,9 @@ contract. No login/logout UI — logout lives only at authentik.
 ## Layout
 - `src/lib.rs` — curated `pub use` surface over the private modules below.
 - `src/config.rs` — `OidcConfig` (new() + defaults; refresh default-OFF).
+- `src/page_config.rs` — `PageConfig`/`PageUser`, the `<script id="config">`
+  block a service serialises into its shell (paths from `OidcConfig`, the
+  display name from the service, portrait always null on this stand).
 - `src/client.rs` — `OidcClient`: discovery, PKCE, exchange, refresh, userinfo.
 - `src/bearer.rs` — `BearerValidator` for bearer-API services (no discovery).
 - `src/principal.rs` — `Principal` + the single identity-contract enforcer.
@@ -66,8 +69,10 @@ up (its `common-oidc-canary` provider).
 - THE LOGIN PATH IS NOT IN THE SHIM. It reads
   `JSON.parse(document.getElementById("config").textContent).login_path`
   lazily, at the 401 rather than at import, so a page that never 401s never
-  touches the block. `Config.login_path` is therefore mandatory and populated
-  from `OidcConfig`, so a service cannot forget it. `serves_shim_and_login_route`
+  touches the block. `PageConfig` (`src/page_config.rs`) is the block's writer
+  and copies `login_path`/`logout_path` off `OidcConfig`, so a service cannot
+  forget or misspell either; its key names are pinned by
+  `the_serialised_keys_are_the_ones_page_code_reads`. `serves_shim_and_login_route`
   asserts the path is ABSENT from the served bytes — the old test asserted it
   was baked in, which is the same test inverted.
 - ESBUILD IS A BUILD DEPENDENCY OF THIS CRATE, so every consumer needs it on

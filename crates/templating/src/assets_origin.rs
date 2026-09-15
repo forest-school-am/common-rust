@@ -1,9 +1,10 @@
-//! The asset origin: the option, the variable it is read from, and the CSP it
-//! implies (§12.6). Stamping it into a shell is render.rs; reading or caching
-//! an asset from DISK is lib.rs.
+//! The asset origin: the option, the variable it is read from, and its
+//! substitution into the CSP the shell declares — which must allow this
+//! origin. Stamping it into a shell is render.rs; reading or caching an asset
+//! from DISK is lib.rs.
 
 use common_logging::{Deployment, Refusal};
-use http::header::{HeaderName, HeaderValue, CONTENT_SECURITY_POLICY};
+use http::header::{HeaderValue, CONTENT_SECURITY_POLICY};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 pub const VARIABLE: &str = "ASSETS_ORIGIN";
@@ -68,18 +69,10 @@ impl AssetsOrigin {
         &self.0
     }
 
-    /// The policy the SHELL declares, with this origin substituted for
-    /// `{{assets_origin}}`.
-    ///
-    /// The text is the consumer's vendored `shell-markers.json` `csp` field,
-    /// not a copy held here. The shell is what dictates the policy — its asset
-    /// origin, its `data:` favicon — and while this crate held its own string
-    /// the two drifted: `img-src 'self'` refused the shell's inline favicon
-    /// with no CSP report and no failed request, so every byte-level test
-    /// stayed green and the icon was simply absent.
-    ///
-    /// Refuses a policy with no `{{assets_origin}}` in it rather than serving
-    /// one that silently admits nothing from the asset origin.
+    /// The policy the SHELL declares (the consumer's vendored
+    /// `shell-markers.json` `csp` field), with this origin substituted for
+    /// `{{assets_origin}}`. The shell's CSP must allow this origin, so a policy
+    /// with no marker is refused rather than served.
     pub fn csp(&self, declared: &str) -> Result<String, Refusal> {
         if !declared.contains(MARKER) {
             return Err(
@@ -100,7 +93,7 @@ impl AssetsOrigin {
                 .with_detail("the policy has a character a header value cannot carry".to_owned())
         })?;
         Ok(SetResponseHeaderLayer::overriding(
-            HeaderName::from(CONTENT_SECURITY_POLICY),
+            CONTENT_SECURITY_POLICY,
             value,
         ))
     }
@@ -229,10 +222,8 @@ mod tests {
         );
     }
 
-    /// The policy is the SHELL's, so a crate that ignored the declared text
-    /// and emitted its own would pass every other test here while serving a
-    /// policy the shell does not ask for — which is the drift that cost
-    /// registry its favicon.
+    /// The policy is the SHELL's: a crate that ignored the declared text and
+    /// emitted its own would pass every other test here.
     #[test]
     fn the_emitted_policy_is_the_declared_one_and_not_a_copy_held_here() {
         let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
@@ -270,11 +261,8 @@ mod tests {
         );
     }
 
-    /// The shell's favicon is a `data:` URI, and `img-src 'self'` refused it
-    /// with no CSP report and no failed request — `Image.decode()` rejects
-    /// with an `EncodingError`, which reads as a malformed SVG rather than as
-    /// a policy decision, and the icon is just missing. Driven by the URI
-    /// SHAPE the shell composes, so this fails if `data:` is dropped again.
+    /// A `data:` favicon fails under `img-src 'self'` with no CSP report and
+    /// no failed request, so nothing but a test like this notices.
     #[test]
     fn the_csp_admits_the_inline_favicon_the_shell_ships() {
         let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)

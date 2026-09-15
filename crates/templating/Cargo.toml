@@ -15,7 +15,6 @@ common-logging.workspace = true
 http = "1"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-ts-rs = "10"
 tower-http = { version = "0.6", default-features = false, features = ["set-header"] }
 sha2.workspace = true
 thiserror.workspace = true
