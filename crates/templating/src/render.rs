@@ -1,11 +1,26 @@
 //! Stamping a built shell with the two values only the request knows: the
 //! asset origin and the config block. Build-time values (title, page css,
 //! page module, prefix, hashes) are a service's build.rs, not this.
+//!
+//! The engine is `upon` with no functions, no filters and no escaping: a
+//! `{{name}}` expression is the whole grammar a shell uses. Two rules of its
+//! matter here and are pinned by tests below:
+//!
+//! - a `{{name}}` whose value is not supplied is a RENDER error naming the
+//!   expression, never a marker quietly shipped to a browser;
+//! - a `}}` outside an expression is a COMPILE error, so a build-time value
+//!   that happens to contain one is caught when the shell is compiled, not
+//!   when a page is served.
 
-use crate::Config;
+use serde::Serialize;
+
+use crate::{Config, RenderError};
 
 pub const ORIGIN_MARKER: &str = "{{assets_origin}}";
 pub const CONFIG_MARKER: &str = "{{config}}";
+
+/// The name the shell has in error messages; there is only ever one.
+const NAME: &str = "shell";
 
 /// Serialised JSON with `<`, `>` and `&` as `\u00XX`, so no value can close
 /// the block it sits in or open a tag inside it. JSON has no syntax use for
@@ -18,10 +33,60 @@ fn data_block(config: &Config) -> String {
         .replace('&', "\\u0026")
 }
 
+/// Exactly the two values a shell may ask for at runtime. A third field here
+/// would be a third runtime marker, which is a shell-contract change first.
+#[derive(Serialize)]
+struct Values<'a> {
+    assets_origin: &'a str,
+    config: &'a str,
+}
+
+/// A compiled shell: the build-stamped document with only [`ORIGIN_MARKER`]
+/// and [`CONFIG_MARKER`] left in it. Compile once at boot, render per request.
+pub struct Shell {
+    engine: upon::Engine<'static>,
+    template: upon::Template<'static>,
+}
+
+impl Shell {
+    /// Compiles the shell. Fails on anything `upon` cannot parse — including
+    /// a lone `}}` — so a stamped shell that breaks the grammar is refused
+    /// here rather than at the first request.
+    pub fn compile(shell: &str) -> Result<Self, RenderError> {
+        let engine = upon::Engine::new();
+        let template = engine
+            .compile(shell.to_owned())
+            .map_err(|e| RenderError::Parse(NAME.to_owned(), format!("{e:#}")))?;
+        Ok(Self { engine, template })
+    }
+
+    /// Renders with `assets_origin` raw and `config` as the escaped JSON
+    /// block. Any other `{{name}}` still in the shell is a render error
+    /// whose message quotes the offending line.
+    pub fn render(&self, config: &Config) -> Result<String, RenderError> {
+        let block = data_block(config);
+        let values = Values {
+            assets_origin: &config.assets_origin,
+            config: &block,
+        };
+        self.template
+            .render(&self.engine, values)
+            .to_string()
+            .map_err(|e| RenderError::Render(NAME.to_owned(), format!("{e:#}")))
+    }
+}
+
+/// Compiles and renders in one call, for a shell already validated by the
+/// build that stamped it.
+///
+/// Total by design. It panics only if the shell fails to compile or still
+/// holds a `{{name}}` other than the two runtime markers — both are defects
+/// in the build-time stamping, not conditions a request can produce. A
+/// service that wants to refuse at boot instead compiles a [`Shell`] there.
 pub fn render(shell: &str, config: &Config) -> String {
-    shell
-        .replace(ORIGIN_MARKER, &config.assets_origin)
-        .replace(CONFIG_MARKER, &data_block(config))
+    Shell::compile(shell)
+        .and_then(|shell| shell.render(config))
+        .unwrap_or_else(|e| panic!("{e}"))
 }
 
 #[cfg(test)]
@@ -141,11 +206,30 @@ mod tests {
     }
 
     #[test]
-    fn a_build_time_marker_render_does_not_own_survives_visibly() {
-        let html = render("<title>{{title}}</title>{{config}}", &config("/oidc/login"));
+    fn an_unstamped_build_time_marker_is_a_render_error_naming_it() {
+        let shell = Shell::compile("<title>{{title}}</title>{{config}}").expect("the grammar is fine");
+        let err = shell
+            .render(&config("/oidc/login"))
+            .expect_err("a marker the build did not stamp must not reach a browser");
         assert!(
-            html.contains("{{title}}"),
-            "an unfilled build-time marker stays visible rather than being swallowed: {html}"
+            matches!(err, RenderError::Render(..)),
+            "a missing value is a render error, not a parse error: {err}"
         );
+        let text = err.to_string();
+        assert!(
+            text.contains("title"),
+            "the error must name the marker so the build.rs defect is findable: {text}"
+        );
+    }
+
+    /// upon's rule, and the reason a stamped shell should be compiled at boot:
+    /// a build-time value containing `}}` breaks the shell, and this is where
+    /// it shows.
+    #[test]
+    fn a_lone_close_brace_fails_to_compile() {
+        let err = Shell::compile("body { a { b } } }} {{config}}")
+            .err()
+            .expect("a `}}` outside an expression must not compile");
+        assert!(matches!(err, RenderError::Parse(..)), "{err}");
     }
 }

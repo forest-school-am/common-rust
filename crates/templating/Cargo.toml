@@ -3,17 +3,14 @@ name = "common-templating"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Shared template + static-asset rendering for Les services: minijinja + an mtime/params-keyed asset cache over a validated dir"
+description = "Shared shell stamping + static-asset serving for Les services: upon for the two runtime markers, an mtime-keyed asset cache over a validated dir"
 
 [dependencies]
-# `serde` is KEPT because `Template::render<S: Serialize>` is an unconditional
-# bound and minijinja depends on serde non-optionally regardless: dropping the
-# feature would buy no dependency and only deprecate `Environment::new`.
-minijinja = { version = "2", default-features = false, features = [
-    "builtins",
-    "debug",
-    "serde",
-] }
+# `serde` alone: `Template::render` takes any `Serialize` context, which is
+# how the two runtime values reach the shell. `functions` (filters) and
+# `unicode` (identifier/width rules) buy nothing for a `{{name}}`-only grammar
+# with ASCII marker names, and `syntax` is left off on purpose (R114 item 4).
+upon = { version = "0.11", default-features = false, features = ["serde"] }
 common-logging.workspace = true
 http = "1"
 serde = { workspace = true, features = ["derive"] }

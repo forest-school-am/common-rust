@@ -1,36 +1,59 @@
 # AGENTS.md — common-templating
 
 ## Purpose
-The stand's shared template + static-asset rendering (CODESTYLE.md §9.7):
-minijinja setup + an mtime/params-keyed `AssetCache` over a validated asset
-directory. Used only by services that serve assets — kept SEPARATE from
-`common-logging` so binaries that serve nothing don't pull minijinja.
+The stand's shared shell stamping + static-asset serving (CODESTYLE.md §9.7):
+`upon` fills a built shell's two runtime markers, and an mtime-keyed
+`AssetCache` serves files from a validated directory. Used only by services
+that serve assets — kept SEPARATE from `common-logging` so binaries that serve
+nothing don't pull a template engine.
 
 ## Layout
-- `src/lib.rs` — the whole crate: `Builder` (boot validation + pins),
-  `AssetCache` (`render` / `static_file`), `RenderError`, `sha256`, and the
-  test suite.
+- `src/lib.rs` — `Builder` (boot validation + pins), `AssetCache`
+  (`static_file`), `RenderError`, `sha256`, and the cache/path tests.
+- `src/render.rs` — `Shell` (compile once, render per request), the total
+  `render(shell, config)` convenience, the config-block escaping, and the
+  marker constants `ORIGIN_MARKER` / `CONFIG_MARKER`.
+- `src/config.rs` — `Config` and `User`, the data block a page reads first
+  (R65); ts-rs exports them to `bindings/`.
+- `src/assets_origin.rs` — `AssetsOrigin` (§12.6): the `ASSETS_ORIGIN`
+  option, its refusal shape, and the CSP layer.
+- `tests/consumer.rs` — an asset-serving service in miniature: shell compiled
+  at boot, rendered per request, static file, CSP layer.
 
 ## Invariants
-- Two cache modes, both invalidate on the next request after their key
-  changes: `render` on (mtime, params), `static_file` on (mtime). Editing a
-  served file on disk MUST take effect without a restart.
-- EXACTLY TWO entry points and the crate MUST NOT grow a third (§9.4, R30).
-  Single-file templates are NOT enforced; hot-reload reloads modified templates
-  only. A service needing per-request domain data owns its own engine.
-- Boot validation (§9.6): bad dir / missing / unparseable required template
-  refuses to boot — never a render-time surprise.
+- THE ENGINE IS `upon` 0.11 WITH ONLY ITS `serde` FEATURE: no filters, no
+  functions, no escaping, no custom syntax (R114 item 4). A shell's grammar
+  is `{{name}}` and nothing else; the crate must not grow a use for more.
+- EXACTLY TWO RUNTIME VALUES, `assets_origin` (raw) and `config` (escaped
+  JSON). `render::Values` is the whole context; a third field is a
+  shell-contract change first and a crate change second.
+- AN UNSTAMPED MARKER IS A RENDER ERROR, NEVER SHIPPED. `{{title}}` left by a
+  build.rs is `RenderError::Render` quoting the line
+  (`an_unstamped_build_time_marker_is_a_render_error_naming_it`). The total
+  `render()` panics on it by design: it is a build defect, not a request
+  condition. `Shell::compile` at boot is the shape that refuses early.
+- A LONE `}}` FAILS TO COMPILE (`a_lone_close_brace_fails_to_compile`). upon's
+  rule, and the reason a stamped shell should be compiled at boot: a
+  build-time value containing `}}` breaks the shell there, not per request.
+- THE CONFIG BLOCK ESCAPES `<`, `>`, `&` AS `\u00XX`. That is what keeps a
+  display name from closing the `<script type="application/json">` it sits
+  in, and the page still parses it back unchanged. Kept as-is across the
+  engine swap (R114 item 3); the four escaping tests pin it.
+- ONE CACHE MODE: `static_file` keyed on (mtime), invalidating on the next
+  request after the key changes. Editing a served file on disk MUST take
+  effect without a restart. There is no parameterised file rendering any
+  more; a service needing per-request domain data owns its own engine.
+- Boot validation (§9.6): bad dir / missing or mismatching pinned file refuses
+  to boot — never a serve-time surprise.
 - Integrity pins (§9.7b/§9.8): a pinned file's sha256 is verified at boot AND
   on every reload; mismatch refuses to serve. Pins are for server-enforced
-  logic and library templates that must not drift.
-- NO escaping (§9.3): string parameters are injected verbatim into every file
-  type. `parameters_are_injected_verbatim_whatever_the_file_type` pins it.
-- Asset names are UNTRUSTED (§9.5b): every name-taking method (render,
-  static_file) routes through `safe_path` first — rejects absolute
-  paths and any `..`/root/prefix component, then canonicalizes and requires
-  containment under the resolved root (catches an in-root symlink pointing
-  out). The rejection lives HERE so no adopter serving assets by request path
-  can forget it. Negative-space tests cover `..`, absolute, and symlink escape.
+  logic and library files that must not drift.
+- Asset names are UNTRUSTED (§9.5b): `static_file` routes through `safe_path`
+  first — rejects absolute paths and any `..`/root/prefix component, then
+  canonicalizes and requires containment under the resolved root (catches an
+  in-root symlink pointing out). The rejection lives HERE so no adopter
+  serving assets by request path can forget it. Negative-space tests cover
+  `..`, absolute, and symlink escape.
 - Scope is SERVED content only (§9.7a); embedded non-served data is fine
   elsewhere.
 
@@ -77,11 +100,13 @@ directory. Used only by services that serve assets — kept SEPARATE from
   ships an inline image.
 
 ## Run / test
-`nix develop --impure -c cargo test` at the WORKSPACE root (frozen 1.98.0; the
-flake sets `CARGO_TARGET_DIR=/home/dev/.cache/common-rust-target` for all three
-members). Library only; `cargo build` is the build path (R11(a)).
+`nix develop --impure -c cargo test -p common-templating` at the WORKSPACE
+root (frozen 1.98.0; the flake sets
+`CARGO_TARGET_DIR=/home/dev/.cache/common-rust-target` for all three members).
+Library only; `cargo build` is the build path (R11(a)).
 
 ## Stand context
-Implements DECISIONS.md R6 / CODESTYLE.md §9.7–§9.8. First consumers:
-common-oidc (its served shim → a pinned library template, §9.8) and mint
-(searchbase.js). Builds serialized under R4's disk regime.
+Implements DECISIONS.md R6 / CODESTYLE.md §9.7–§9.8; engine swap under R114
+item 4. Consumers: cron, les-forms, les-registry (shell + origin) and
+authentik-role-UI (static files + origin). Builds serialized under R4's disk
+regime.

@@ -11,20 +11,22 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
 use common_logging::Deployment;
-use common_templating::{AssetCache, AssetsOrigin, Builder};
+use common_templating::{AssetCache, AssetsOrigin, Builder, Config, Shell};
 use http_body_util::BodyExt;
 use tower::util::ServiceExt;
 
 const PAGE: &str = "<!doctype html>\n\
 <script type=\"module\" src=\"{{ assets_origin }}/common-ui@abc123/common-ui.js\"\n\
         integrity=\"sha384-xyz\" crossorigin=\"anonymous\"></script>\n\
-<link rel=\"stylesheet\" href=\"{{ assets_origin }}/common-ui@abc123/palette.css\">\n";
+<link rel=\"stylesheet\" href=\"{{ assets_origin }}/common-ui@abc123/palette.css\">\n\
+<script type=\"application/json\" id=\"config\">{{config}}</script>\n";
 
 const LOGIC: &[u8] = b"export const answer = 42;\n";
 
 struct App {
     assets: Arc<AssetCache>,
-    origin: AssetsOrigin,
+    shell: Shell,
+    config: Config,
 }
 
 fn dir() -> std::path::PathBuf {
@@ -43,13 +45,16 @@ fn dir() -> std::path::PathBuf {
 
 fn app() -> Router {
     let d = dir();
-    let assets = Builder::new(&d)
-        .require_template("index.html")
-        .build()
-        .expect("boot");
+    let assets = Builder::new(&d).build().expect("boot");
+    // The shell is compiled at BOOT, from the same validated dir, so a
+    // stamped shell that breaks the grammar refuses here, not per request.
+    let shell = String::from_utf8(assets.static_file("index.html").expect("present").to_vec())
+        .expect("utf-8");
+    let shell = Shell::compile(&shell).expect("the vendored shell compiles");
     let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
         .expect("accepted")
         .expect("present");
+    let config = Config::new(&origin, "/oidc/login");
     /* The policy a consumer VENDORS, as build.rs would embed it from the
     prefix's shell-markers.json. Spelled out here rather than read from a
     file, because this test is the consumer and a consumer has these bytes
@@ -63,20 +68,18 @@ fn app() -> Router {
         .expect("the vendored policy is accepted");
     let state = Arc::new(App {
         assets: Arc::new(assets),
-        origin,
+        shell,
+        config,
     });
 
     Router::new()
         .route(
             "/",
             get(|State(app): State<Arc<App>>| async move {
-                match app
-                    .assets
-                    .render("index.html", &[("assets_origin", app.origin.as_str())])
-                {
+                match app.shell.render(&app.config) {
                     Ok(html) => (
                         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-                        html.to_string(),
+                        html,
                     )
                         .into_response(),
                     Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -140,6 +143,10 @@ async fn a_served_page_carries_the_csp_and_the_substituted_origin() {
     assert!(
         html.contains("href=\"https://assets.dev.local/common-ui@abc123/palette.css\""),
         "and into the stylesheet link: {html}"
+    );
+    assert!(
+        html.contains(r#"id="config">{"assetsOrigin":"https://assets.dev.local""#),
+        "the config block must carry the same origin: {html}"
     );
     assert!(
         !html.contains("{{"),

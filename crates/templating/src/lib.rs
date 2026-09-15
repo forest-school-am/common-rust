@@ -1,6 +1,6 @@
-//! Rendering templates from a validated directory, with caching and path
-//! safety. Everything here is about turning a template plus parameters into
-//! bytes; nothing here decides what to serve or when.
+//! Serving static files from a validated directory, with caching and path
+//! safety, and stamping a built shell with the two values only a request
+//! knows. Nothing here decides what to serve or when.
 //!
 //! ```
 //! use common_templating::Builder;
@@ -12,10 +12,7 @@
 //! std::fs::write(dir.join("logic.js"), logic)?;
 //! let expected: [u8; 32] = Sha256::digest(logic.as_bytes()).into();
 //!
-//! let assets = Builder::new(&dir)
-//!     .require_template("logic.js")
-//!     .pin("logic.js", expected)
-//!     .build()?;
+//! let assets = Builder::new(&dir).pin("logic.js", expected).build()?;
 //!
 //! assert_eq!(&*assets.static_file("logic.js")?, logic.as_bytes());
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -27,22 +24,20 @@ mod render;
 
 pub use assets_origin::{AssetsOrigin, VARIABLE as ASSETS_ORIGIN_VARIABLE};
 pub use config::{Config, User};
-pub use render::{render, CONFIG_MARKER, ORIGIN_MARKER};
+pub use render::{render, Shell, CONFIG_MARKER, ORIGIN_MARKER};
 
-use std::collections::{BTreeMap, HashMap};
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 
-use minijinja::{AutoEscape, Environment};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
     #[error("asset dir does not exist or is not a directory: {0}")]
     BadDir(PathBuf),
-    #[error("required template not found: {0}")]
+    #[error("required file not found: {0}")]
     Missing(String),
     #[error("template {0} failed to parse: {1}")]
     Parse(String, String),
@@ -56,29 +51,20 @@ pub enum RenderError {
     UnsafeName(String),
 }
 
-enum Entry {
-    Template {
-        mtime: SystemTime,
-        key: u64,
-        out: Arc<str>,
-    },
-    Static {
-        mtime: SystemTime,
-        bytes: Arc<[u8]>,
-    },
+struct Entry {
+    mtime: SystemTime,
+    bytes: Arc<[u8]>,
 }
 
 pub struct AssetCache {
     root: PathBuf,
     canonical_root: PathBuf,
-    env: Environment<'static>,
     pins: HashMap<String, [u8; 32]>,
     entries: RwLock<HashMap<String, Entry>>,
 }
 
 pub struct Builder {
     root: PathBuf,
-    required: Vec<String>,
     pins: HashMap<String, [u8; 32]>,
 }
 
@@ -86,20 +72,12 @@ impl Builder {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self {
             root: root.into(),
-            required: Vec::new(),
             pins: HashMap::new(),
         }
     }
 
-    pub fn require_template(mut self, name: impl Into<String>) -> Self {
-        self.required.push(name.into());
-        self
-    }
-
     pub fn pin(mut self, name: impl Into<String>, expected_sha256: [u8; 32]) -> Self {
-        let name = name.into();
-        self.pins.insert(name.clone(), expected_sha256);
-        self.required.push(name);
+        self.pins.insert(name.into(), expected_sha256);
         self
     }
 
@@ -111,13 +89,10 @@ impl Builder {
             .root
             .canonicalize()
             .map_err(|e| RenderError::Io(self.root.display().to_string(), e.to_string()))?;
-        let mut env = Environment::new();
-        env.set_auto_escape_callback(|_| AutoEscape::None);
 
         let cache = AssetCache {
             root: self.root,
             canonical_root,
-            env,
             pins: self.pins,
             entries: RwLock::new(HashMap::new()),
         };
@@ -125,15 +100,6 @@ impl Builder {
         for (name, expected) in &cache.pins {
             let path = cache.safe_path(name)?;
             cache.read_verified(&path, name, Some(expected))?;
-        }
-        for name in &self.required {
-            let path = cache.safe_path(name)?;
-            let src = String::from_utf8(cache.read_verified(&path, name, cache.pins.get(name))?)
-                .map_err(|e| RenderError::Parse(name.clone(), e.to_string()))?;
-            cache
-                .env
-                .template_from_named_str(name, &src)
-                .map_err(|e| RenderError::Parse(name.clone(), e.to_string()))?;
         }
         Ok(cache)
     }
@@ -192,55 +158,12 @@ impl AssetCache {
         Ok(bytes)
     }
 
-    pub fn render(&self, name: &str, params: &[(&str, &str)]) -> Result<Arc<str>, RenderError> {
-        let path = self.safe_path(name)?;
-        let mtime = self.mtime(&path, name)?;
-        let key = params_key(params);
-
-        if let Ok(entries) = self.entries.read() {
-            if let Some(Entry::Template {
-                mtime: m,
-                key: k,
-                out,
-            }) = entries.get(name)
-            {
-                if *m == mtime && *k == key {
-                    return Ok(out.clone());
-                }
-            }
-        }
-
-        let src = String::from_utf8(self.read_verified(&path, name, self.pins.get(name))?)
-            .map_err(|e| RenderError::Render(name.to_owned(), e.to_string()))?;
-        let ctx: BTreeMap<&str, &str> = params.iter().copied().collect();
-        let tmpl = self
-            .env
-            .template_from_named_str(name, &src)
-            .map_err(|e| RenderError::Parse(name.to_owned(), e.to_string()))?;
-        let out: Arc<str> = Arc::from(
-            tmpl.render(ctx)
-                .map_err(|e| RenderError::Render(name.to_owned(), e.to_string()))?,
-        );
-
-        if let Ok(mut entries) = self.entries.write() {
-            entries.insert(
-                name.to_owned(),
-                Entry::Template {
-                    mtime,
-                    key,
-                    out: out.clone(),
-                },
-            );
-        }
-        Ok(out)
-    }
-
     pub fn static_file(&self, name: &str) -> Result<Arc<[u8]>, RenderError> {
         let path = self.safe_path(name)?;
         let mtime = self.mtime(&path, name)?;
 
         if let Ok(entries) = self.entries.read() {
-            if let Some(Entry::Static { mtime: m, bytes }) = entries.get(name) {
+            if let Some(Entry { mtime: m, bytes }) = entries.get(name) {
                 if *m == mtime {
                     return Ok(bytes.clone());
                 }
@@ -251,7 +174,7 @@ impl AssetCache {
         if let Ok(mut entries) = self.entries.write() {
             entries.insert(
                 name.to_owned(),
-                Entry::Static {
+                Entry {
                     mtime,
                     bytes: bytes.clone(),
                 },
@@ -263,16 +186,6 @@ impl AssetCache {
 
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
-}
-
-fn params_key(params: &[(&str, &str)]) -> u64 {
-    let sorted: BTreeMap<&str, &str> = params.iter().copied().collect();
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    for (k, v) in sorted {
-        k.hash(&mut h);
-        v.hash(&mut h);
-    }
-    h.finish()
 }
 
 #[cfg(test)]
@@ -305,44 +218,6 @@ mod tests {
     }
 
     #[test]
-    fn render_substitutes_and_caches_by_params_and_mtime() {
-        let d = tmpdir();
-        write(&d, "shim.js.jinja", "const P = {{ login_path }};");
-        let c = Builder::new(&d)
-            .require_template("shim.js.jinja")
-            .build()
-            .unwrap();
-
-        let a = c
-            .render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")])
-            .unwrap();
-        assert_eq!(&*a, "const P = \"/oidc/login\";");
-        let b = c
-            .render("shim.js.jinja", &[("login_path", "\"/oidc/login\"")])
-            .unwrap();
-        assert!(Arc::ptr_eq(&a, &b), "same params+mtime must be a cache hit");
-        let e = c
-            .render("shim.js.jinja", &[("login_path", "\"/x\"")])
-            .unwrap();
-        assert_eq!(&*e, "const P = \"/x\";");
-        assert!(!Arc::ptr_eq(&a, &e));
-    }
-
-    #[test]
-    fn edit_takes_effect_without_restart_via_mtime() {
-        let d = tmpdir();
-        write(&d, "a.txt.jinja", "one {{ x }}");
-        let c = Builder::new(&d).build().unwrap();
-        let first = c.render("a.txt.jinja", &[("x", "!")]).unwrap();
-        assert_eq!(&*first, "one !");
-        std::thread::sleep(Duration::from_millis(5));
-        write(&d, "a.txt.jinja", "two {{ x }}");
-        bump_mtime(&d, "a.txt.jinja");
-        let second = c.render("a.txt.jinja", &[("x", "!")]).unwrap();
-        assert_eq!(&*second, "two !", "edit must take effect without restart");
-    }
-
-    #[test]
     fn static_file_caches_by_mtime() {
         let d = tmpdir();
         write(&d, "logo.svg", "<svg/>");
@@ -354,7 +229,23 @@ mod tests {
     }
 
     #[test]
-    fn boot_refuses_bad_dir_and_missing_template() {
+    fn edit_takes_effect_without_restart_via_mtime() {
+        let d = tmpdir();
+        write(&d, "a.txt", "one");
+        let c = Builder::new(&d).build().unwrap();
+        assert_eq!(&*c.static_file("a.txt").unwrap(), b"one");
+        std::thread::sleep(Duration::from_millis(5));
+        write(&d, "a.txt", "two");
+        bump_mtime(&d, "a.txt");
+        assert_eq!(
+            &*c.static_file("a.txt").unwrap(),
+            b"two",
+            "edit must take effect without restart"
+        );
+    }
+
+    #[test]
+    fn boot_refuses_bad_dir_and_missing_pinned_file() {
         let missing = std::env::temp_dir().join(format!("nope-{}", uniq()));
         assert!(matches!(
             Builder::new(&missing).build(),
@@ -363,18 +254,8 @@ mod tests {
 
         let d = tmpdir();
         assert!(matches!(
-            Builder::new(&d).require_template("absent.jinja").build(),
+            Builder::new(&d).pin("absent.js", sha256(b"")).build(),
             Err(RenderError::Missing(_))
-        ));
-    }
-
-    #[test]
-    fn boot_refuses_unparseable_template() {
-        let d = tmpdir();
-        write(&d, "bad.jinja", "{{ unclosed ");
-        assert!(matches!(
-            Builder::new(&d).require_template("bad.jinja").build(),
-            Err(RenderError::Parse(..))
         ));
     }
 
@@ -402,52 +283,9 @@ mod tests {
     }
 
     #[test]
-    fn boot_refuses_a_template_using_a_removed_construct() {
-        for construct in ["{% extends \"base.html\" %}", "{% include \"part.html\" %}"] {
-            let d = tmpdir();
-            write(&d, "page.html", construct);
-            assert!(
-                matches!(
-                    Builder::new(&d).require_template("page.html").build(),
-                    Err(RenderError::Parse(..))
-                ),
-                "{construct} must be refused at BUILD, not at render"
-            );
-        }
-
-        let d = tmpdir();
-        write(&d, "fine.html", "hello {{ name }}");
-        assert!(Builder::new(&d)
-            .require_template("fine.html")
-            .build()
-            .is_ok());
-    }
-
-    #[test]
-    fn parameters_are_injected_verbatim_whatever_the_file_type() {
-        let d = tmpdir();
-        write(&d, "p.html", "<b>{{ v }}</b>");
-        write(&d, "safe.html", "<b>{{ v | safe }}</b>");
-        write(&d, "p.js.jinja", "x = {{ v }}");
-        let c = Builder::new(&d).build().unwrap();
-        for name in ["p.html", "safe.html"] {
-            assert_eq!(
-                &*c.render(name, &[("v", "<x>")]).unwrap(),
-                "<b><x></b>",
-                "{name}: this loader injects string parameters, it does not escape them"
-            );
-        }
-        assert_eq!(
-            &*c.render("p.js.jinja", &[("v", "<x>")]).unwrap(),
-            "x = <x>"
-        );
-    }
-
-    #[test]
-    fn traversal_names_rejected_on_every_entry_point() {
+    fn traversal_names_rejected() {
         let d = tmpdir();
         write(&d, "ok.txt", "ok");
-        write(&d, "t.js.jinja", "x = {{ v }}");
         let c = Builder::new(&d).build().unwrap();
         assert_eq!(&*c.static_file("ok.txt").unwrap(), b"ok");
 
@@ -461,10 +299,6 @@ mod tests {
             assert!(
                 matches!(c.static_file(bad), Err(RenderError::UnsafeName(_))),
                 "static_file({bad:?}) not rejected"
-            );
-            assert!(
-                matches!(c.render(bad, &[]), Err(RenderError::UnsafeName(_))),
-                "render({bad:?}) not rejected"
             );
         }
     }
@@ -497,10 +331,6 @@ mod tests {
         let c = Builder::new(&d).build().unwrap();
         assert!(matches!(
             c.static_file("absent.txt"),
-            Err(RenderError::Missing(_))
-        ));
-        assert!(matches!(
-            c.render("absent.js.jinja", &[]),
             Err(RenderError::Missing(_))
         ));
     }
