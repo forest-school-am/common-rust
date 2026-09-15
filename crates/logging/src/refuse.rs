@@ -28,8 +28,7 @@ macro_rules! __refusal_line {
     ($refusal:expr) => {{
         let refusal: $crate::Refusal = $refusal;
         $crate::__unfiltered(|| {
-            $crate::error!(
-                $crate::STARTUP,
+            $crate::error::startup!(
                 variable = refusal.variable,
                 value = %refusal.value,
                 accepted = %refusal.accepted,

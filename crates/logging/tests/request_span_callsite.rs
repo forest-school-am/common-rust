@@ -69,7 +69,7 @@ fn emit_under(filter: &str) -> String {
         let span = middleware::open("rq-callsite");
         let _entered = span.enter();
         common_logging::set_actor(&span, "alice");
-        common_logging::info!(common_logging::HTTP, "request served");
+        common_logging::info::http!("request served");
     });
     buf.string()
 }
@@ -114,7 +114,7 @@ fn an_owned_reqid_records_as_a_plain_string() {
         || {
             let span = middleware::open_owned(owned.clone());
             let _entered = span.enter();
-            common_logging::info!(common_logging::HTTP, "request served");
+            common_logging::info::http!("request served");
         },
     );
     let out = buf.string();

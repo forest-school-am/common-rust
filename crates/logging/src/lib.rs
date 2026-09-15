@@ -1,28 +1,33 @@
 //! Subscriber setup and the crate's public surface. Assembly only — the
-//! pieces live in config.rs, filter.rs, format.rs, designator.rs and span.rs.
+//! pieces live in config.rs, filter.rs, format.rs, designator.rs, macros.rs
+//! and span.rs.
 //!
 //! ```
+//! use common_logging as log;
 //! let name = "alice";
-//! common_logging::info!(common_logging::AUTH, user = %name, "signed in");
-//! common_logging::warn!(common_logging::HTTP, status = 400, "unknown audience");
+//! log::info::auth!(user = %name, "signed in");
+//! log::warn::http!(status = 400, "unknown audience");
 //! ```
 //!
 //! ```
-//! common_logging::info!(common_logging::custom!("scheduler"), run = 7, "tick");
+//! use common_logging as log;
+//! log::info::custom!("scheduler" | run = 7, "tick");
 //! ```
 
 mod config;
 mod designator;
 mod filter;
 mod format;
+mod macros;
 mod refuse;
 mod span;
 
 pub use tracing;
 
 pub use config::{Deployment, Format, LogConfig, Refusal};
-pub use designator::{AUTH, BUSINESS, HTTP, STARTUP, STORAGE, UPSTREAM};
+pub use designator::{Designator, AUTH, BUSINESS, HTTP, STAND, STARTUP, STORAGE, UPSTREAM};
 pub use filter::Designators;
+pub use macros::{debug, error, info, trace, warn};
 #[doc(hidden)]
 pub use refuse::{__exit_refused, __unfiltered};
 #[doc(hidden)]
@@ -144,7 +149,7 @@ mod tests {
             let span = crate::request_span!("rq0001");
             let _g = span.enter();
             set_actor(&span, "bob");
-            crate::info!(AUTH, "hello world");
+            crate::info!(AUTH | "hello world");
         });
         let out = buf.string();
         let line = out.trim_end();
@@ -169,7 +174,7 @@ mod tests {
         tracing::subscriber::with_default(human(buf.clone()), || {
             let span = crate::request_span!("rq0002");
             let _g = span.enter();
-            crate::warn!(UPSTREAM, "no user yet");
+            crate::warn!(UPSTREAM | "no user yet");
         });
         let out = buf.string();
         let line = out.trim_end();
@@ -187,7 +192,7 @@ mod tests {
             let span = crate::request_span!("rq0003");
             let _g = span.enter();
             set_actor(&span, "carol");
-            crate::info!(BUSINESS, count = 3, "did a thing");
+            crate::info!(BUSINESS | count = 3, "did a thing");
         });
         let out = buf.string();
         let line = out.lines().next().expect("one json line");
@@ -211,7 +216,7 @@ mod tests {
 
         let buf = Buf::new();
         tracing::subscriber::with_default(json(buf.clone()), || {
-            crate::warn!(STORAGE, "written");
+            crate::warn!(STORAGE | "written");
         });
         let v: serde_json::Value =
             serde_json::from_str(buf.string().lines().next().unwrap()).unwrap();
@@ -234,8 +239,8 @@ mod tests {
                     .with_filter(Designators::parse(Some(designators)).unwrap()),
             );
             tracing::subscriber::with_default(subscriber, || {
-                crate::info!(AUTH, "an auth line");
-                crate::info!(BUSINESS, "a business line");
+                crate::info!(AUTH | "an auth line");
+                crate::info!(BUSINESS | "a business line");
             });
             buf.string()
         };
@@ -261,7 +266,7 @@ mod tests {
     fn the_designator_prints_once_as_a_column_and_not_also_as_a_field() {
         let buf = Buf::new();
         tracing::subscriber::with_default(human(buf.clone()), || {
-            crate::info!(AUTH, user = "bob", "hello");
+            crate::info!(AUTH | user = "bob", "hello");
         });
         let out = buf.string();
         let line = out.trim_end();
@@ -284,12 +289,7 @@ mod tests {
             let _o = outer.enter();
             let inner = tracing::info_span!("execute", task = "hello");
             let _i = inner.enter();
-            crate::info!(
-                custom!("scheduler"),
-                task = "hello",
-                run_id = 1,
-                "run started"
-            );
+            crate::info!("scheduler" | task = "hello", run_id = 1, "run started");
         });
         let line1 = buf.string();
         let line1 = line1.trim_end();
@@ -306,7 +306,7 @@ mod tests {
             let _o = outer.enter();
             let inner = tracing::info_span!("execute", task = "hello");
             let _i = inner.enter();
-            crate::info!(custom!("scheduler"), run_id = 2, "run finished");
+            crate::info!("scheduler" | run_id = 2, "run finished");
         });
         let line2 = buf.string();
         let line2 = line2.trim_end();
@@ -319,13 +319,48 @@ mod tests {
 
     #[test]
     fn custom_designator_prefixes_c_and_travels_in_the_field() {
-        assert_eq!(custom!("scheduler"), "c-scheduler");
         let buf = Buf::new();
         tracing::subscriber::with_default(json(buf.clone()), || {
-            crate::info!(custom!("scheduler"), "run started");
+            crate::info!("scheduler" | "run started");
         });
         let v: serde_json::Value =
             serde_json::from_str(buf.string().lines().next().unwrap()).unwrap();
+        assert_eq!(v[designator::FIELD], "c-scheduler");
+    }
+
+    #[test]
+    fn a_designator_held_in_a_variable_goes_through_the_primitive() {
+        let buf = Buf::new();
+        tracing::subscriber::with_default(json(buf.clone()), || {
+            let chosen = Designator::from("poller");
+            crate::debug!(chosen | "picked");
+        });
+        let v: serde_json::Value =
+            serde_json::from_str(buf.string().lines().next().unwrap()).unwrap();
+        assert_eq!(v["level"], "DEBUG");
+        assert_eq!(v[designator::FIELD], "c-poller");
+    }
+
+    /// The comma form and `custom!("name")` as a value: one release of
+    /// grace, so they must still emit exactly what they used to.
+    #[test]
+    #[allow(deprecated)]
+    fn the_deprecated_first_argument_form_still_emits() {
+        assert_eq!(custom!("scheduler").to_string(), "c-scheduler");
+        let buf = Buf::new();
+        tracing::subscriber::with_default(json(buf.clone()), || {
+            crate::info!(AUTH, user = "bob", "old form");
+            crate::warn!(custom!("scheduler"), "old custom form");
+        });
+        let out = buf.string();
+        let mut lines = out.lines();
+        let v: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+        assert_eq!(v["level"], "INFO");
+        assert_eq!(v[designator::FIELD], "auth");
+        assert_eq!(v["user"], "bob");
+        assert_eq!(v["message"], "old form");
+        let v: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+        assert_eq!(v["level"], "WARN");
         assert_eq!(v[designator::FIELD], "c-scheduler");
     }
 
@@ -340,8 +375,8 @@ mod tests {
                 .with_filter(Designators::parse(Some("c-scheduler=info")).unwrap()),
         );
         tracing::subscriber::with_default(subscriber, || {
-            crate::info!(custom!("scheduler"), "kept");
-            crate::info!(AUTH, "dropped");
+            crate::info::custom!("scheduler" | "kept");
+            crate::info!(AUTH | "dropped");
         });
         let out = buf.string();
         assert!(out.contains("kept"), "{out}");
@@ -359,7 +394,7 @@ mod tests {
                 .with_filter(EnvFilter::new("common_logging=info")),
         );
         tracing::subscriber::with_default(subscriber, || {
-            crate::info!(AUTH, "visible by module path");
+            crate::info!(AUTH | "visible by module path");
         });
         assert!(
             buf.string().contains("visible by module path"),

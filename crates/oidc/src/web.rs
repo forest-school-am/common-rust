@@ -16,6 +16,7 @@ use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use url::Url;
 use uuid::Uuid;
 
+use common_logging as log;
 use common_logging::Deployment;
 
 use crate::client::OidcClient;
@@ -123,8 +124,7 @@ impl OidcState {
         {
             Ok(p) => return Some((p, session)),
             Err(Upstream::Unreachable(why)) => {
-                common_logging::warn!(
-                    common_logging::AUTH,
+                log::warn::auth!(
                     reason = %why,
                     "identity unresolvable within the upstream budget — ending session"
                 );
@@ -148,17 +148,13 @@ impl OidcState {
                 })
                 .await
                 {
-                    common_logging::debug!(
-                        common_logging::AUTH,
-                        "access token refreshed server-side"
-                    );
+                    log::debug::auth!("access token refreshed server-side");
                     return Some((p, refreshed));
                 }
             }
         }
 
-        common_logging::info!(
-            common_logging::AUTH,
+        log::info::auth!(
             reason = %rejected,
             "session tokens rejected by the IdP — destroying local session"
         );
@@ -249,10 +245,7 @@ pub fn router(state: OidcState) -> Router {
 /// silently, which is the right way round for a security check.
 async fn logout(State(oidc): State<OidcState>, jar: CookieJar, headers: HeaderMap) -> Response {
     if !from_this_site(&headers, oidc.config()) {
-        common_logging::warn!(
-            common_logging::AUTH,
-            "refused a logout that did not prove it came from this site"
-        );
+        log::warn::auth!("refused a logout that did not prove it came from this site");
         return StatusCode::FORBIDDEN.into_response();
     }
 
@@ -279,8 +272,7 @@ async fn logout(State(oidc): State<OidcState>, jar: CookieJar, headers: HeaderMa
     match oidc.client.end_session_url() {
         Some(url) => (jar, Redirect::to(url.as_str())).into_response(),
         None => {
-            common_logging::warn!(
-                common_logging::AUTH,
+            log::warn::auth!(
                 field = "end_session_endpoint",
                 "the IdP's discovery document has no end_session_endpoint, so \
                  logout ended the app session only — the IdP session survives \
@@ -400,7 +392,7 @@ async fn callback(
             (jar, Redirect::temporary(&safe_next(Some(&flow.next)))).into_response()
         }
         Err(e) => {
-            common_logging::warn!(common_logging::AUTH, error = %e, "code exchange failed");
+            log::warn::auth!(error = %e, "code exchange failed");
             (
                 StatusCode::UNAUTHORIZED,
                 jar.remove(removal_cookie(FLOW_COOKIE)),
@@ -432,7 +424,7 @@ async fn unauthenticated(oidc: &OidcState, parts: &Parts, jar: CookieJar) -> Aut
     if wants_html(parts) {
         let jar = jar.remove(removal_cookie(oidc.config().cookie_name.as_str()));
         let next = safe_next(parts.uri.path_and_query().map(|pq| pq.as_str()));
-        common_logging::debug!(common_logging::AUTH, path = %next, "no session — silent re-auth redirect");
+        log::debug::auth!(path = %next, "no session — silent re-auth redirect");
         AuthRedirect(start_login(oidc, jar, next, true, false).await)
     } else {
         AuthRedirect(oidc.unauthorized_with_jar(jar))

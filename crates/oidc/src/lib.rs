@@ -10,7 +10,7 @@
 //!     "https://idp.example/application/o/my-app/userinfo/",
 //! );
 //! let principal = validator.validate("an-access-token").await?;
-//! common_logging::info!(common_logging::AUTH, user = %principal.username, "authorised");
+//! common_logging::info::auth!(user = %principal.username, "authorised");
 //! # Ok(())
 //! # }
 //! ```

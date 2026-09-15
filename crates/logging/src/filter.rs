@@ -12,7 +12,7 @@ use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::{Context, Filter};
 
 use crate::config::Refusal;
-use crate::designator::{CUSTOM_PREFIX, FIELD, STAND};
+use crate::designator::{Designator, CUSTOM_PREFIX, FIELD, STAND};
 
 const LEVELS: [&str; 6] = ["trace", "debug", "info", "warn", "error", "off"];
 
@@ -81,15 +81,18 @@ fn parse_level(text: &str) -> Result<LevelFilter, Refusal> {
     })
 }
 
+/// `FromStr` never fails (a stranger parses as `Custom`), so the verdict is
+/// the well-formedness check on what it produced.
 fn check_designator(name: &str) -> Result<(), Refusal> {
-    if STAND.contains(&name) || name.starts_with(CUSTOM_PREFIX) {
+    if Designator::from_str(name).is_ok_and(|d| d.is_well_formed()) {
         return Ok(());
     }
+    let stand: Vec<&str> = STAND.iter().map(AsRef::as_ref).collect();
     Err(Refusal {
         variable: "LOG_DESIGNATORS",
         value: name.to_owned(),
         accepted: format!(
-            "a designator, one of {STAND:?}, or a project designator carrying \
+            "a designator, one of {stand:?}, or a project designator carrying \
              the {CUSTOM_PREFIX:?} prefix"
         ),
         detail: None,
@@ -218,6 +221,26 @@ mod tests {
         assert_eq!(r.value, "verbose");
         for level in ["trace", "debug", "info", "warn", "error", "off"] {
             assert!(r.accepted.contains(level), "must name {level}: {r:?}");
+        }
+    }
+
+    /// What the macros write is what the filter reads: every variant's
+    /// Display string is accepted as a `LOG_DESIGNATORS` key and admits an
+    /// event carrying that same string.
+    #[test]
+    fn every_variant_round_trips_from_the_column_string_to_the_filter() {
+        let all = STAND.iter().cloned().chain([Designator::from("scheduler")]);
+        for d in all {
+            let column = d.to_string();
+            assert_eq!(Designator::from_str(&column), Ok(d.clone()), "{column}");
+            let f = Designators::parse(Some(&format!("{column}=info"))).unwrap();
+            assert!(f.admits(Some(&column), &Level::INFO), "{column}");
+            assert!(!f.admits(Some(&column), &Level::DEBUG), "{column}");
+            let other = if column == "auth" { "business" } else { "auth" };
+            assert!(
+                !f.admits(Some(other), &Level::ERROR),
+                "{column} must be selective"
+            );
         }
     }
 

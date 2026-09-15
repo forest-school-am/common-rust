@@ -15,6 +15,6 @@ mod boot {
 
 fn main() -> ! {
     common_logging::init();
-    common_logging::info!(common_logging::STARTUP, "ordinary startup event");
+    common_logging::info::startup!("ordinary startup event");
     boot::refuse_bind()
 }

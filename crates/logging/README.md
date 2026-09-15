@@ -44,18 +44,35 @@ fn main() {
 }
 ```
 
-Emit with a **designator** (§8.3) as the first argument — it becomes the
-event's `designator` field:
+Emit through `log::<level>::<designator>!` — the level is the module, the
+**designator** (§8.3) is the macro, and it becomes the event's `designator`
+field:
 
 ```rust
-use common_logging::{info, warn, AUTH, UPSTREAM};
+use common_logging as log;
 // tracing idiom: structured fields FIRST, then the message string.
 // The human formatter DE-DUPLICATES span-appended fields by name (event
 // wins, then inner-most span) — do not hand-dedupe, but DO reduce
 // Option/Result before capture: `?opt` prints Rust syntax like Some(0).
-info!(AUTH, user = %username, "signed in");
-warn!(UPSTREAM, attempt = n, "retry");
+log::info::auth!(user = %username, "signed in");
+log::warn::upstream!(attempt = n, "retry");
 ```
+
+Five level modules (`error`, `warn`, `info`, `debug`, `trace`), each with
+`auth!`, `business!`, `upstream!`, `storage!`, `http!`, `startup!` and
+`custom!` (below). The module is named inside this crate, so `log::` is
+whatever you `use … as`; no repo depends on the `log` crate.
+
+Underneath sits one public primitive per level, `log::info!(designator | …)`,
+for a designator held in a variable: the `|` separates it from the fields,
+and what precedes it must be a path or a string literal (macro_rules permits
+`|` after those two fragments only — a call expression needs a `let` first).
+It takes anything `Into<Designator>`: the `AUTH`…`STARTUP` consts, a
+`Designator`, or a string, which becomes a custom one.
+
+The old first-argument form, `info!(AUTH, …)`, and `custom!("name")` as a
+value still compile for ONE release, `#[deprecated]`; the fleet has no uses
+left. They go next release.
 
 **Map `Option`/`Result` before capturing them.** A `?`-captured (Debug) value
 prints Rust syntax — `exit_code = ?maybe` logs `exit_code=Some(0)`, which reads
@@ -79,28 +96,40 @@ future (`.instrument(span)`) — not five-line pure helpers.
 
 ## Designators (§8.3)
 
-Common vocabulary — prefer it, it covers most events:
+`Designator` is a strum enum: `Auth`, `Business`, `Upstream`, `Storage`,
+`Http`, `Startup` and `Custom(String)`. `Display` writes the column string
+(`auth`, …, `c-<name>`), `FromStr` reads it back, and `AUTH`…`STARTUP` are
+consts for the six. Common vocabulary — prefer it, it covers most events:
 
-| designator | for |
-|---|---|
-| `AUTH` (`auth`) | authentication / authorization / identity |
-| `BUSINESS` (`business`) | domain logic |
-| `UPSTREAM` (`upstream`) | calls to another service (IdP, DB, remote API) |
-| `STORAGE` (`storage`) | persistence / caches / files |
-| `HTTP` (`http`) | request lifecycle |
-| `STARTUP` (`startup`) | startup checks: config, classification, boot validation — the process deciding whether it comes up |
+| macro | column | for |
+|---|---|---|
+| `auth!` (`AUTH`) | `auth` | authentication / authorization / identity |
+| `business!` (`BUSINESS`) | `business` | domain logic |
+| `upstream!` (`UPSTREAM`) | `upstream` | calls to another service (IdP, DB, remote API) |
+| `storage!` (`STORAGE`) | `storage` | persistence / caches / files |
+| `http!` (`HTTP`) | `http` | request lifecycle |
+| `startup!` (`STARTUP`) | `startup` | startup checks: config, classification, boot validation — the process deciding whether it comes up |
 
 ### Custom designators
 
-A project MAY add its own where the common set genuinely doesn't fit, via the
-`c-` helper (a compile-time `&'static str`):
+A project MAY add its own where the common set genuinely doesn't fit. The
+tag goes before the `|` in `custom!`, as a string literal or as a path — a
+repo that uses a tag more than a couple of times declares a small strum enum
+for its tags, plus the three-line `String` conversion that puts it on the
+`Into<Designator>` path:
 
 ```rust
-info!(common_logging::custom!("scheduler"), run_id = %id, "run started");  // designator "c-scheduler"
+log::info::custom!("scheduler" | run_id = %id, "run started");  // designator "c-scheduler"
+
+#[derive(strum::Display)]
+enum Tag { #[strum(serialize = "scheduler")] Scheduler }
+impl From<Tag> for String { fn from(t: Tag) -> String { t.to_string() } }
+log::debug::custom!(Tag::Scheduler | run_id = %id, "tick");     // designator "c-scheduler"
 ```
 
-The `c-` prefix keeps project vocabulary visually distinct from stand
-vocabulary. **Rules (§8.3):** every custom designator MUST be listed and
+The `c-` prefix is added by the crate (`Designator::from("scheduler")` is
+`Custom("c-scheduler")`) and keeps project vocabulary visually distinct from
+stand vocabulary. **Rules (§8.3):** every custom designator MUST be listed and
 explained in its repo's README; one proposed by an LLM/agent MUST be
 operator-confirmed before it lands.
 
@@ -213,4 +242,6 @@ filterable like everything else.
 
 `cargo test` — one refuse/default test per environment variable, plus
 literal-shape tests for both output formats and the `c-` designator behaviour
-(no network).
+(no network). `tests/levels.rs` drives every level module from outside the
+crate, the way a consumer does — the thirty static macros are macro-expanded
+`macro_export`s, which is the one path rustc lets this crate itself not take.

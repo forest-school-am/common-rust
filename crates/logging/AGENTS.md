@@ -18,8 +18,15 @@ included. Change here ripples fleet-wide — treat the output contract as public
   validation, and the `Filter` impl that reads the designator FIELD. Anything
   about which events pass goes here; what a designator means stays in
   designator.rs.
-- `src/designator.rs` — common designator consts, `custom!`, and the
-  `error!/warn!/info!/debug!/trace!` emission macros (designator as first arg).
+- `src/designator.rs` — the `Designator` strum enum (six stand variants +
+  `Custom(String)`, `Display` = the column string, `From<impl Into<String>>` =
+  the custom path), the `AUTH`…`STARTUP` consts and `STAND`.
+- `src/macros.rs` — emission: the five level primitives
+  (`info!(designator | …)`), the level modules `error`/`warn`/`info`/`debug`/
+  `trace` each holding `auth!`…`startup!` + `custom!(tag | …)` (thirty static
+  macros from one generating macro, hidden root names re-exported by
+  single-segment `pub use`), and the `#[deprecated]` first-argument aliases
+  kept for one release.
 - `src/span.rs` — `gen_reqid`, the `request_span!` MACRO, `set_actor`.
 - `src/format.rs` — the human `FormatEvent` and the `CaptureLayer` that
   snapshots `reqid`/`actor` for it. (JSON uses the stock layer.)
@@ -49,8 +56,19 @@ included. Change here ripples fleet-wide — treat the output contract as public
   filter, so an in-process test or one driving init()'s own refusal passes
   either way.
 - The designator is an event FIELD, never the tracing target (R28). The target
-  is the module path, so `RUST_LOG` behaves as standard tracing. Designators
-  must stay compile-time `&'static str` (so `custom!` uses `concat!`).
+  is the module path, so `RUST_LOG` behaves as standard tracing. The field is
+  recorded as `%designator` — `Display` of the enum IS the contract (`auth`,
+  …, `c-<name>`), and `FromStr` must keep reading exactly what `Display`
+  writes, since `LOG_DESIGNATORS` parses through it. `FromStr` is hand-written:
+  strum's `EnumString` also emits `TryFrom<&str>`, which collides with the
+  blanket `From<impl Into<String>>` through core's `TryFrom`.
+- The level primitives `error!`…`trace!` are hand-written and the thirty
+  static macros are generated. That split is forced: a macro-expanded
+  `#[macro_export]` cannot be reached by absolute path (``, `crate::`)
+  from inside this crate, so the generated ones are re-exported by
+  single-segment `pub use` (textual scope) and tested only from
+  `tests/levels.rs`, and the primitives they expand to must not themselves be
+  generated.
 - TWO filtering axes, ANDed and independent: `RUST_LOG` (module path) and
   `LOG_DESIGNATORS` (designator). Unset `LOG_DESIGNATORS` must pass
   EVERYTHING, or the two ANDs resolve to silence. An event with no designator
