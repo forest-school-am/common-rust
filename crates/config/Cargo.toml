@@ -1,0 +1,17 @@
+[package]
+name = "common-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Layered configuration for Les stand binaries: one derived schema spells every value as a toml key, an env var and a flag; defaults < file < env < args"
+
+[dependencies]
+common-config-derive.workspace = true
+# Refusal lives in common-logging until the follow-up moves it (and
+# Deployment) here; then the dependency arrow reverses.
+common-logging.workspace = true
+# `parse` only: this crate reads a file and never writes one.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+[dev-dependencies]
+strum = { version = "0.26", features = ["derive"] }

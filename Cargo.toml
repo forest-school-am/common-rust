@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["crates/logging", "crates/templating", "crates/oidc", "crates/ui-build"]
+members = [
+    "crates/logging",
+    "crates/templating",
+    "crates/oidc",
+    "crates/ui-build",
+    "crates/config",
+    "crates/config-derive",
+]
 
 [workspace.package]
 version = "0.3.0"
@@ -10,6 +17,8 @@ license = "MIT"
 [workspace.dependencies]
 common-logging = { path = "crates/logging", version = "0.3.0" }
 common-templating = { path = "crates/templating", version = "0.3.0" }
+common-config = { path = "crates/config", version = "0.3.0" }
+common-config-derive = { path = "crates/config-derive", version = "0.3.0" }
 
 # Shared by two or more members.
 serde = "1"
