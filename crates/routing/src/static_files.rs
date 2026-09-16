@@ -3,49 +3,61 @@
 //! launcher bundle) and hand-rolled the same three things to serve it: a
 //! `name -> Content-Type` map, a path-traversal guard, and a bytes+type
 //! response. They live here now, in one place, and each caller keeps only the
-//! part that genuinely differs — its cache policy and its auth guard.
+//! part that genuinely differs — its auth guard.
 //!
-//! Two shapes:
+//! [`serve_static`] is THE response constructor: bytes, a Content-Type, and a
+//! [`CachePolicy`]. Every SPA bundle, served shim and launcher file in the
+//! fleet goes through it — the raw-axum callers ([the oidc shim][shim],
+//! cron's `/assets`, role-ui's `{*path}`) call it directly because they keep an
+//! auth extractor, a wildcard path or a bespoke 404; the plain callers reach it
+//! through [`crate::Router::static_file`] / [`crate::Router::static_dir`], which
+//! also record the route in the manifest. The cache decision is never implicit:
+//! it is a [`CachePolicy`] argument at every call site.
 //!
-//! * The FREE helpers ([`serve_static`], [`content_type_for`],
-//!   [`safe_asset_name`]) are for a RAW axum handler — a caller that already
-//!   has a handler (because it carries an auth extractor, a wildcard path, or
-//!   a bespoke 404 body) and only wants the shared pieces.
-//! * [`crate::Router::static_file`] / [`crate::Router::static_dir`] are the
-//!   turnkey form for the plain case: they register a GET route through the
-//!   recording path, so the file shows in the manifest like any route, and
-//!   serve with a long-lived immutable cache.
+//! [shim]: https://docs.rs/common-oidc
 
 use axum::body::Body;
 use axum::http::{header, HeaderValue};
 use axum::response::Response;
 
-/// The immutable cache header for a fixed embedded file served through
-/// [`crate::Router::static_file`] / [`crate::Router::static_dir`]. A caller
-/// whose bytes change under a stable URL across restarts (a non-hashed
-/// `launcher.js`, say) must NOT use these; it serves through [`serve_static`]
-/// and sets `no-cache` itself.
-const IMMUTABLE: HeaderValue = HeaderValue::from_static("public, max-age=31536000, immutable");
-
-/// A bytes-with-a-Content-Type response, and NOTHING else — no cache header,
-/// no status but 200. The one construction every static handler shared. The
-/// caller layers on whatever cache policy (or `Vary`, or auth) it needs.
-pub fn serve_static(bytes: &[u8], content_type: &str) -> Response {
-    let mut resp = Response::new(Body::from(bytes.to_vec()));
-    if let Ok(value) = HeaderValue::from_str(content_type) {
-        resp.headers_mut().insert(header::CONTENT_TYPE, value);
-    }
-    resp
+/// How a static response tells caches to treat it. There is no "unset": a
+/// caller picks one deliberately, because an unversioned URL served
+/// `immutable` hands back stale bytes after a deploy, and a content-hashed URL
+/// served `no-cache` throws away the one cache win it was named for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CachePolicy {
+    /// `public, max-age=31536000, immutable`: the URL is content-addressed (a
+    /// hash in the name), so the bytes at it never change and a cache may keep
+    /// them forever.
+    Immutable,
+    /// `no-cache`: the URL is stable but its bytes change across restarts or
+    /// deploys (`/assets/app.js`, `launcher.js`), so a cache must revalidate
+    /// before reusing a stored copy.
+    NoCache,
 }
 
-/// As [`serve_static`], plus the immutable cache header. Used by the [`Router`]
-/// conveniences; kept crate-private because a caller that reaches for a cache
-/// header should pick it deliberately.
-///
-/// [`Router`]: crate::Router
-pub(crate) fn serve_static_immutable(bytes: &[u8], content_type: &str) -> Response {
-    let mut resp = serve_static(bytes, content_type);
-    resp.headers_mut().insert(header::CACHE_CONTROL, IMMUTABLE);
+impl CachePolicy {
+    fn header(self) -> HeaderValue {
+        match self {
+            CachePolicy::Immutable => {
+                HeaderValue::from_static("public, max-age=31536000, immutable")
+            }
+            CachePolicy::NoCache => HeaderValue::from_static("no-cache"),
+        }
+    }
+}
+
+/// THE static response: `bytes`, a `Content-Type`, and the `cache` policy as an
+/// explicit `Cache-Control`. The one construction every static handler in the
+/// fleet shares. A caller still layers on whatever else it needs (`Vary`, an
+/// auth extractor around the handler).
+pub fn serve_static(bytes: &[u8], content_type: &str, cache: CachePolicy) -> Response {
+    let mut resp = Response::new(Body::from(bytes.to_vec()));
+    let headers = resp.headers_mut();
+    if let Ok(value) = HeaderValue::from_str(content_type) {
+        headers.insert(header::CONTENT_TYPE, value);
+    }
+    headers.insert(header::CACHE_CONTROL, cache.header());
     resp
 }
 
@@ -66,26 +78,26 @@ pub fn content_type_for(name: &str) -> &'static str {
     }
 }
 
-/// The traversal guard for a SINGLE-SEGMENT asset name (lifted from cron's
-/// `bundles::valid_name` and its `/assets/{name}` refusal). `Some(name)` if the
-/// name is a plain file — ASCII alphanumerics and `-_.`, non-empty, not longer
-/// than 120, not starting with a dot — and `None` otherwise.
+/// The traversal guard for an asset path, single-segment OR nested. `Some(path)`
+/// if every `/`-separated segment is safe — non-empty and not starting with a
+/// dot — and the whole path is at most 512 bytes; `None` otherwise.
 ///
-/// This refuses every case cron's `asset_names_that_climb_out_are_refused`
-/// covers: a `/` (so `has/slash`, and a decoded `%2Fetc%2Fpasswd`), a leading
-/// dot (so `..`, `.hidden`, and a decoded `..%2FCargo.toml`), and a literal
-/// `%` (so the still-encoded `..%2F…` and a leading `%2F` are refused even if a
-/// caller never decodes them). It is NOT for a nested path: a `{*path}` handler
-/// that legitimately serves `sub/dir/file.js` must keep a guard that permits
-/// `/` (e.g. `common_templating`'s), which this deliberately does not.
-pub fn safe_asset_name(name: &str) -> Option<&str> {
-    let ok = !name.is_empty()
-        && name.len() <= 120
-        && !name.starts_with('.')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-    ok.then_some(name)
+/// This admits a LEGITIMATE nested path (`sub/dir/app.js`, which role-ui's
+/// `/assets/{*path}` and a nested [`crate::Router::static_dir`] serve) while
+/// refusing every climb: a `..` segment (`../x`, `a/../b` — a `..` starts with
+/// a dot), an absolute path or a `//` (a leading or doubled `/` makes an empty
+/// segment), a trailing `/`, and a dotfile (`.hidden`, `.git/config`). It is a
+/// syntactic guard over the name only: the bytes it protects are always an
+/// exact key lookup in an EMBEDDED set (an [`AssetSet`] or a caller's own map),
+/// never a filesystem join, so this refusing a climb is defence in depth over a
+/// lookup that already cannot escape.
+pub fn safe_asset_path(path: &str) -> Option<&str> {
+    let ok = !path.is_empty()
+        && path.len() <= 512
+        && path
+            .split('/')
+            .all(|seg| !seg.is_empty() && !seg.starts_with('.'));
+    ok.then_some(path)
 }
 
 /// A fixed set of embedded files, keyed by name, for [`crate::Router::static_dir`].
@@ -102,7 +114,7 @@ impl AssetSet {
     }
 
     /// The bytes for an EXACT name, or `None`. No traversal decision here —
-    /// [`crate::Router::static_dir`] runs [`safe_asset_name`] first.
+    /// [`crate::Router::static_dir`] runs [`safe_asset_path`] first.
     pub fn get(&self, name: &str) -> Option<&'static [u8]> {
         self.files
             .iter()
@@ -140,10 +152,19 @@ mod tests {
     }
 
     #[test]
-    fn safe_asset_name_accepts_plain_files() {
-        for good in ["app.js", "app.css", "favicon.svg", "index-a1b2c3.js", "x"] {
+    fn safe_asset_path_accepts_plain_and_nested_files() {
+        for good in [
+            "app.js",
+            "app.css",
+            "favicon.svg",
+            "index-a1b2c3.js",
+            "x",
+            "sub/app.js",
+            "a/b/c.js",
+            "chunks/vendor-9f8e.mjs",
+        ] {
             assert_eq!(
-                safe_asset_name(good),
+                safe_asset_path(good),
                 Some(good),
                 "{good} should be allowed"
             );
@@ -151,23 +172,27 @@ mod tests {
     }
 
     #[test]
-    fn safe_asset_name_refuses_the_names_cron_refuses() {
-        // The three from cron's `asset_names_that_climb_out_are_refused`, both
-        // still-encoded and decoded, plus the plain climbers.
+    fn safe_asset_path_refuses_every_climb() {
+        // The dot-segment climbs the task calls out, the absolute and doubled
+        // slashes, dotfiles, and the empty name. (Still-encoded `..%2F…` is a
+        // single opaque segment here — it decodes to a `/` only once axum hands
+        // the handler the path, which is where the decoded `../x` below is
+        // refused; the raw string cannot itself climb.)
         for bad in [
-            "..%2FCargo.toml",
-            "..%2F..%2Fetc%2Fpasswd",
-            "%2Fetc%2Fpasswd",
-            "../Cargo.toml",
+            "../x",
+            "/x",
+            "a/../b",
+            "..",
+            ".",
             "../../etc/passwd",
             "/etc/passwd",
-            "..",
             ".hidden",
-            "has/slash",
-            "has space",
+            ".git/config",
+            "a//b",
+            "a/",
             "",
         ] {
-            assert_eq!(safe_asset_name(bad), None, "{bad:?} must be refused");
+            assert_eq!(safe_asset_path(bad), None, "{bad:?} must be refused");
         }
     }
 
@@ -179,24 +204,49 @@ mod tests {
     }
 
     #[test]
-    fn serve_static_sets_the_type_and_the_bytes() {
-        let resp = serve_static(b"hello", "text/plain; charset=utf-8");
+    fn serve_static_sets_the_type_the_bytes_and_the_cache_policy() {
+        let immut = serve_static(
+            b"hello",
+            "text/plain; charset=utf-8",
+            CachePolicy::Immutable,
+        );
         assert_eq!(
-            resp.headers()
+            immut
+                .headers()
                 .get(header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok()),
             Some("text/plain; charset=utf-8")
         );
-        assert!(resp.headers().get(header::CACHE_CONTROL).is_none());
+        assert_eq!(
+            immut
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok()),
+            Some("public, max-age=31536000, immutable")
+        );
+
+        let no_cache = serve_static(
+            b"hi",
+            "text/javascript; charset=utf-8",
+            CachePolicy::NoCache,
+        );
+        assert_eq!(
+            no_cache
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok()),
+            Some("no-cache")
+        );
     }
 
     #[tokio::test]
-    async fn static_file_serves_the_bytes_with_the_type_and_a_cache_header() {
+    async fn static_file_serves_the_bytes_with_the_type_and_the_chosen_cache() {
         let app = Router::<()>::new()
             .static_file(
                 "/thing.js",
                 b"console.log(1)",
                 "text/javascript; charset=utf-8",
+                CachePolicy::Immutable,
             )
             .into_axum();
         let resp = app
@@ -226,7 +276,7 @@ mod tests {
 
     #[test]
     fn static_file_shows_in_the_manifest() {
-        let r = Router::<()>::new().static_file("/a.css", b"x", "text/css");
+        let r = Router::<()>::new().static_file("/a.css", b"x", "text/css", CachePolicy::NoCache);
         let m = r.manifest();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].method, "GET");
@@ -236,9 +286,9 @@ mod tests {
     static ASSETS: AssetSet = AssetSet::new(&[("app.js", b"CLIENT"), ("app.css", b"SHEET")]);
 
     #[tokio::test]
-    async fn static_dir_serves_a_named_file() {
+    async fn static_dir_serves_a_named_file_with_the_chosen_cache() {
         let app = Router::<()>::new()
-            .static_dir("/assets", &ASSETS)
+            .static_dir("/assets", &ASSETS, CachePolicy::NoCache)
             .into_axum();
         let resp = app
             .oneshot(
@@ -256,13 +306,19 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("text/css; charset=utf-8")
         );
+        assert_eq!(
+            resp.headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok()),
+            Some("no-cache")
+        );
         assert_eq!(body_of(resp).await, b"SHEET");
     }
 
     #[tokio::test]
     async fn static_dir_404s_a_traversal_and_an_unknown_name() {
         let app = Router::<()>::new()
-            .static_dir("/assets", &ASSETS)
+            .static_dir("/assets", &ASSETS, CachePolicy::Immutable)
             .into_axum();
         for name in ["..%2FCargo.toml", "nope.js"] {
             let resp = app
