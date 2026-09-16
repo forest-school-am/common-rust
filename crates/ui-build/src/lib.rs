@@ -24,11 +24,17 @@
 //! markers, embed the [`Pin::csp`] and the [`Pin::sri_table`], and
 //! [`Pin::write_dts`] for the typecheck. Nothing here runs at request time.
 //!
-//! There is NO build-time check of the stamped marker set (R114.2). The app's
-//! boot renders every stamped shell through `common_templating::Shell`, and
-//! upon refuses any `{{marker}}` left unfilled, naming it; a set comparison
-//! here against `shell-markers.json`'s `build`/`runtime` arrays duplicated
-//! that with a second source of truth. Those arrays are no longer parsed.
+//! The shell carries TWO marker styles. The BUILD markers are `[[name]]`,
+//! filled here by [`stamp`] through `upon`, which ERRORS on any `[[marker]]`
+//! left unfilled — so a forgotten or misspelled build marker is a build-time
+//! failure, not a raw marker on the page. The RUNTIME markers are `{{name}}`
+//! (`assets_origin`, `config`, `theme_override`); [`stamp`] leaves them for
+//! the app's boot, which renders every stamped shell through
+//! `common_templating::Shell` and refuses any `{{marker}}` left unfilled,
+//! naming it. There is thus no set comparison here against
+//! `shell-markers.json`'s `build`/`runtime` arrays (R114.2) — the two engines
+//! refuse an unfilled marker of each kind by name; those arrays are not
+//! parsed.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -392,14 +398,38 @@ pub fn csp(markers_json: &str) -> Result<String> {
     Ok(Markers::parse(markers_json)?.csp)
 }
 
-/// Fills `{{marker}}` for each `(marker, value)` by plain substitution, in
-/// order. Nothing is escaped: the values are the consumer's own constants
-/// and the digests the manifest pins. A marker left unfilled is not checked
-/// here: the app's boot render refuses it by name (R114.2).
+/// Fills the shell's `[[marker]]` BUILD markers from `values`, leaving every
+/// `{{marker}}` RUNTIME marker (`assets_origin`, `config`, `theme_override`)
+/// for common-templating's per-request render.
+///
+/// The engine is `upon` with `[[ ]]` expression delimiters and no escaping:
+/// the values are the consumer's own constants and the digests the manifest
+/// pins, so they reach the page verbatim exactly as the old raw replace left
+/// them. `{{ }}` is not this engine's delimiter, so runtime markers pass
+/// through untouched.
+///
+/// This runs inside a `build.rs`, so a defect must fail the build. Unlike the
+/// old blind `String::replace`, `upon` ERRORS on any `[[marker]]` the shell
+/// holds that `values` does not fill — naming it — and on a shell that does
+/// not parse as a `[[ ]]` template. Either is a PANIC here, which is the
+/// correct build failure: a forgotten or misspelled build marker is caught at
+/// build time, never shipped raw to a browser. (Runtime `{{ }}` markers are
+/// still refused at boot by common-templating's `Shell`, which names them.)
 pub fn stamp(shell: &str, values: &[(&str, &str)]) -> String {
-    let mut stamped = shell.to_owned();
-    for (marker, value) in values {
-        stamped = stamped.replace(&format!("{{{{{marker}}}}}"), value);
-    }
-    stamped
+    let syntax = upon::Syntax::builder().expr("[[", "]]").build();
+    let mut engine = upon::Engine::new();
+    engine.set_syntax(syntax);
+    let template = engine.compile(shell).unwrap_or_else(|e| {
+        panic!("the common-ui shell does not parse as a [[ ]] template: {e:#}\n\nshell:\n{shell}")
+    });
+    let map: BTreeMap<&str, &str> = values.iter().copied().collect();
+    template
+        .render(&engine, &map)
+        .to_string()
+        .unwrap_or_else(|e| {
+            panic!(
+            "stamping the common-ui shell failed — an unfilled or misspelled [[build marker]]?: \
+             {e:#}\n\nshell:\n{shell}"
+        )
+        })
 }

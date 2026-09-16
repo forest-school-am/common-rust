@@ -11,6 +11,11 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 base64 = "0.22"
+# The stamp engine: `[[name]]` BUILD markers filled here, `{{name}}` RUNTIME
+# markers left for common-templating's render. Same version/features as that
+# crate so the workspace keeps one `upon` — and no dep cycle: `upon` is a leaf
+# and common-templating does not depend on this crate.
+upon = { version = "0.11", default-features = false, features = ["serde", "syntax"] }
 # `parse` only: the one thing read is `[package.metadata.common-ui] prefix`.
 toml = { version = "0.8", default-features = false, features = ["parse"] }
 # The fetch. ureq over rustls, no gzip/json/cookies: four small files over

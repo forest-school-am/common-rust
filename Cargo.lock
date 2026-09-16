@@ -339,6 +339,7 @@ dependencies = [
  "sha2",
  "thiserror 2.0.20",
  "toml",
+ "upon",
  "ureq",
 ]
 
@@ -2482,6 +2483,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9c46fa694fd01d98377a882557a909f14258a0b2d453eb311cb471e32728ba8"
 dependencies = [
+ "aho-corasick",
  "serde",
 ]
 

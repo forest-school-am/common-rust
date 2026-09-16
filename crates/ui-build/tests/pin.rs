@@ -382,28 +382,59 @@ fn write_dts_and_write_manifest_land_in_out_dir_verbatim() {
 }
 
 // ---- stamping ---------------------------------------------------------------
-// No set check lives here (R114.2): a marker left unfilled is refused by the
-// app's boot render (common-templating `Shell`), which names it.
+// `[[build]]` markers are filled here, and `upon` refuses an unfilled one by
+// name (a build-time error); `{{runtime}}` markers are left for the app's boot
+// render (common-templating `Shell`), which refuses an unfilled one by name.
 
 #[test]
 fn a_full_stamp_fills_the_build_markers_and_leaves_the_runtime_ones() {
     let pin = pin();
     let sri = |n: &str| pin.sri(n).unwrap().to_owned();
     let html = stamp_all(&pin, &values(&sri));
+    // Every runtime `{{marker}}` reaches the per-request render verbatim.
     for runtime in ["assets_origin", "config", "theme_override"] {
         assert!(
             html.contains(&format!("{{{{{runtime}}}}}")),
             "{runtime} survives"
         );
     }
+    // Every build `[[marker]]` is gone: the values filled them.
+    assert!(
+        !html.contains("[["),
+        "no build marker may survive a full stamp: {html}"
+    );
     assert!(html.contains(&format!("integrity=\"{}\"", sri("base.css"))));
-    assert!(!html.contains("{{title}}"));
 }
 
 #[test]
-fn stamp_is_plain_substitution_in_order() {
-    assert_eq!(
-        stamp("a {{x}} b {{y}} {{x}}", &[("x", "1"), ("y", "{{x}}")]),
-        "a 1 b {{x}} 1"
+fn the_runtime_markers_pass_through_stamp_untouched() {
+    // `[[ ]]` is the build engine's delimiter; `{{ }}` is not, so the three
+    // runtime markers are copied verbatim for common-templating to fill.
+    let out = stamp(
+        "[[title]] {{assets_origin}} {{config}} {{theme_override}}",
+        &[("title", "T")],
+    );
+    assert_eq!(out, "T {{assets_origin}} {{config}} {{theme_override}}");
+}
+
+#[test]
+fn an_unfilled_build_marker_is_a_build_error() {
+    // A build marker the shell holds but the consumer does not fill (a forgot
+    // or a typo) panics the build, naming the marker — not a raw `[[marker]]`
+    // shipped to the browser as the old blind replace would have done.
+    let prior = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let caught = std::panic::catch_unwind(|| stamp("[[title]] [[forgotten]]", &[("title", "T")]));
+    std::panic::set_hook(prior);
+
+    let payload = caught.expect_err("an unfilled [[marker]] must fail the build");
+    let msg = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("");
+    assert!(
+        msg.contains("forgotten"),
+        "the build failure must name the unfilled marker: {msg}"
     );
 }
