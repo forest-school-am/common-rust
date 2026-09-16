@@ -31,8 +31,9 @@ mod web;
 pub const SHIM_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/common-oidc.js"));
 
 pub use auth::{
-    set_auth_context, And, AuthContext, AuthProviders, AuthVia, Authenticated, Denial, GatedBy,
-    Group, HasGroup, MaybeAuthenticated, Not, Or, Predicate, Refusals, ServiceAccount,
+    deny, set_auth_context, unauthorized, And, AuthContext, AuthProviders, AuthVia, Authenticated,
+    Denial, GatedBy, Group, HasGroup, MaybeAuthenticated, Not, Or, Predicate, Refusals,
+    ServiceAccount,
 };
 pub use bearer::{BearerValidator, ValidationError};
 pub use client::{OidcClient, TokenBundle};

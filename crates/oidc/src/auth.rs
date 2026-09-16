@@ -364,6 +364,24 @@ fn denied_response(parts: &Parts, denial: &Denial) -> Response {
         .into_response()
 }
 
+/// Emit the shared FORBIDDEN from an app's OWN extractor — so a bespoke,
+/// resource-scoped or async authorization check (role-ui's `GroupAccess`: is
+/// the caller a leader of THIS group, fetched per request) refuses with the
+/// same bytes and honours the same `on_denied` seam as [`GatedBy`], instead of
+/// hand-rolling a refusal. The predicate algebra covers pure principal+config
+/// rules; this is the door for everything it deliberately does not.
+pub fn deny(parts: &Parts, denial: Denial) -> Response {
+    denied_response(parts, &denial)
+}
+
+/// The shared 401 for an app's own extractor — the machine-caller counterpart
+/// of [`deny`]. Most app extractors get this for free by building on
+/// [`Authenticated`]/[`ServiceAccount`]; this is for the ones that decide
+/// unauthenticated for a reason of their own.
+pub fn unauthorized(parts: &Parts) -> Response {
+    unauthorized_wire(parts)
+}
+
 // ---------------------------------------------------------------------------
 // The predicate algebra.
 // ---------------------------------------------------------------------------
@@ -376,6 +394,13 @@ pub struct Denial {
 }
 
 impl Denial {
+    /// An arbitrary gate description — for an app extractor that gates on
+    /// something other than a group UUID (a role in a resource, a superuser
+    /// bit) and wants to name it to an operator through [`deny`].
+    pub fn new(gate: impl Into<String>) -> Self {
+        Self { gate: gate.into() }
+    }
+
     /// Names a single group by UUID, or `-` when the group is unconfigured.
     pub fn group(group: Option<Uuid>) -> Self {
         Self {
@@ -868,5 +893,73 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
         assert_eq!(&body[..], b"dev-stub");
+    }
+
+    // ----- the door stays open for role-ui's kind of predicate -----
+    //
+    // role-ui's real check is "is the caller a Leader of THIS group", which is
+    // async, reads the request path, and fetches the role relation — none of
+    // which the pure `Predicate` algebra expresses, ON PURPOSE. This models it
+    // as an APP-LOCAL extractor and proves it can still (a) read the principal
+    // the shared middleware set, via `Authenticated`, and (b) refuse with the
+    // shared bytes, via `deny(Denial::new(..))`. If a future edit privatises
+    // either seam, this test stops compiling — which is the guarantee.
+
+    struct Roles {
+        leaders: std::collections::HashMap<String, &'static str>,
+    }
+
+    /// A bespoke, async, resource-scoped authorization extractor — the shape
+    /// `Predicate` deliberately cannot take. It leans only on PUBLIC surface.
+    #[derive(Debug)]
+    struct LeaderOfResource(#[allow(dead_code)] Arc<Principal>);
+
+    impl FromRequestParts<Roles> for LeaderOfResource {
+        type Rejection = Response;
+
+        async fn from_request_parts(parts: &mut Parts, state: &Roles) -> Result<Self, Response> {
+            let Authenticated(principal) = Authenticated::from_request_parts(parts, state).await?;
+            // Stand-in for an async fetch keyed on a path param.
+            let resource = "group-42";
+            match state.leaders.get(&principal.username) {
+                Some(g) if *g == resource => Ok(LeaderOfResource(principal)),
+                _ => Err(deny(parts, Denial::new("must be leader of this group"))),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_app_local_resource_extractor_reuses_authenticated_and_deny() {
+        let state = Roles {
+            leaders: [("boss".to_owned(), "group-42")].into_iter().collect(),
+        };
+
+        // The leader of the resource passes.
+        let mut parts = parts_with(
+            AuthContext::Authenticated {
+                principal: principal("boss", &[]),
+                via: AuthVia::Session,
+            },
+            Some(empty_providers()),
+        );
+        assert!(LeaderOfResource::from_request_parts(&mut parts, &state)
+            .await
+            .is_ok());
+
+        // A non-leader is refused with the SHARED forbidden, naming the gate.
+        let mut parts = parts_with(
+            AuthContext::Authenticated {
+                principal: principal("nobody", &[]),
+                via: AuthVia::Session,
+            },
+            Some(empty_providers()),
+        );
+        let resp = LeaderOfResource::from_request_parts(&mut parts, &state)
+            .await
+            .expect_err("a non-leader is refused");
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["gate"], "must be leader of this group");
     }
 }
