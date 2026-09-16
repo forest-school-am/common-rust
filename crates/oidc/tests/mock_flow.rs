@@ -459,6 +459,11 @@ async fn serves_shim_and_login_route() {
         "must expose the guard API"
     );
     assert!(
+        js.contains("export") && js.contains("function call") && js.contains("class CallFailure"),
+        "the shim must EXPORT the transport (`call` + `CallFailure`) the generated \
+         clients import from /common-oidc.js: {js}"
+    );
+    assert!(
         !js.contains("interface ") && !js.contains(": string") && !js.contains("as unknown"),
         "the TypeScript must be STRIPPED, not shipped: {js}"
     );

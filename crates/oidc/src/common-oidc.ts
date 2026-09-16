@@ -64,3 +64,46 @@ export function installReauthGuard(): void {
 }
 
 installReauthGuard();
+
+// The transport under every app's generated client (`bindings/client.ts`):
+// `call(method, url, query?, body?)`. It lives HERE, beside the auth logic it
+// leans on, rather than vendored per app. The 401 → re-auth is not duplicated:
+// `call` issues its request through the GLOBAL `fetch`, which `installReauthGuard`
+// (run above at module load) has already wrapped, so an expired session's 401
+// bounces to login through the same guard every other request goes through.
+export class CallFailure extends Error {
+  declare status: number;
+  declare body: unknown;
+  constructor(status: number, body: unknown) {
+    super(`HTTP ${status}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
+export async function call<T>(
+  method: string,
+  url: string,
+  query?: object,
+  body?: unknown,
+): Promise<T> {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(query || {})) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) for (const item of v) q.append(k, String(item));
+    else q.append(k, String(v));
+  }
+  const qs = q.toString();
+  const init: RequestInit & { headers: Record<string, string> } = {
+    method,
+    headers: { Accept: "application/json" },
+  };
+  if (body instanceof FormData) init.body = body; // fetch sets the multipart boundary
+  else if (body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body);
+  }
+  const resp = await fetch(qs ? `${url}?${qs}` : url, init);
+  if (!resp.ok) throw new CallFailure(resp.status, await resp.json().catch(() => undefined));
+  return resp.status === 204 ? (undefined as T) : resp.json();
+}
