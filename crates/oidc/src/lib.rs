@@ -15,6 +15,7 @@
 //! # }
 //! ```
 
+mod auth;
 mod bearer;
 mod client;
 mod config;
@@ -29,6 +30,10 @@ mod web;
 /// carried in the binary: it cannot drift from the crate that serves it.
 pub const SHIM_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/common-oidc.js"));
 
+pub use auth::{
+    set_auth_context, And, AuthContext, AuthProviders, AuthVia, Authenticated, Denial, GatedBy,
+    Group, HasGroup, MaybeAuthenticated, Not, Or, Predicate, Refusals, ServiceAccount,
+};
 pub use bearer::{BearerValidator, ValidationError};
 pub use client::{OidcClient, TokenBundle};
 pub use config::OidcConfig;

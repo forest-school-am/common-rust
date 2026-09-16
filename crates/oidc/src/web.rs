@@ -90,6 +90,16 @@ impl OidcState {
         self.unauthorized_with_jar(CookieJar::new())
     }
 
+    /// The response for a browser with no valid session: a silent re-auth
+    /// redirect back to the path it was reaching. The `auth` module's
+    /// extractors call this for an anonymous HTML request, since only the
+    /// [`OidcState`] holds the flow store the redirect needs.
+    pub async fn login_redirect(&self, parts: &Parts) -> Response {
+        unauthenticated(self, parts, CookieJar::from_headers(&parts.headers))
+            .await
+            .into_response()
+    }
+
     fn unauthorized_with_jar(&self, jar: CookieJar) -> Response {
         (
             StatusCode::UNAUTHORIZED,

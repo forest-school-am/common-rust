@@ -26,6 +26,7 @@ struct UserInfoResponse {
     effective_groups: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct BearerValidator {
     http: reqwest::Client,
     userinfo_url: String,
