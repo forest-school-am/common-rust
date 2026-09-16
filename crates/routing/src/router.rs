@@ -4,15 +4,16 @@ use std::any::type_name;
 use std::convert::Infallible;
 use std::path::Path;
 
-use axum::extract::Request;
+use axum::extract::{Path as AssetPath, Request};
 use axum::handler::Handler;
-use axum::http::Method;
+use axum::http::{Method, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{MethodRouter, Route};
 use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::manifest::{parse_path_params, write_manifest, Registration};
+use crate::static_files::{content_type_for, safe_asset_name, AssetSet};
 
 /// An `axum::Router<S>` that remembers what was registered on it.
 ///
@@ -100,6 +101,37 @@ where
         T: 'static,
     {
         self.record::<H, T>(Method::PATCH, path, axum::routing::patch(handler))
+    }
+
+    /// Serve a single fixed embedded file at `path`: a recorded GET (it shows
+    /// in the manifest like any route) answering with `bytes`, the given
+    /// `content_type`, and a long-lived immutable cache header. For a file
+    /// whose bytes change under this same URL across restarts, do NOT use this
+    /// — serve through [`crate::serve_static`] and set your own cache header.
+    pub fn static_file(self, path: &str, bytes: &'static [u8], content_type: &'static str) -> Self {
+        self.get(path, move || async move {
+            crate::static_files::serve_static_immutable(bytes, content_type)
+        })
+    }
+
+    /// Serve a set of named embedded files under `<prefix>/{name}`: a recorded
+    /// GET that refuses path traversal ([`crate::safe_asset_name`]), looks the
+    /// name up in `files`, infers the Content-Type from the extension, and
+    /// serves with an immutable cache header. A missing or unsafe name is a
+    /// plain `404`.
+    pub fn static_dir(self, prefix: &str, files: &'static AssetSet) -> Self {
+        let path = format!("{}/{{name}}", prefix.trim_end_matches('/'));
+        self.get(
+            &path,
+            move |AssetPath(name): AssetPath<String>| async move {
+                match safe_asset_name(&name).and_then(|n| files.get(n)) {
+                    Some(bytes) => {
+                        crate::static_files::serve_static_immutable(bytes, content_type_for(&name))
+                    }
+                    None => StatusCode::NOT_FOUND.into_response(),
+                }
+            },
+        )
     }
 
     /// axum's own `route`: NOT recorded (see the type docs). For routes that
