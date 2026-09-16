@@ -1,0 +1,29 @@
+[package]
+name = "common-routing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A recording axum Router, the #[client] handler attribute and the TypeScript client generator: every HTTP path written once, in Rust, and the browser client compiled from it"
+
+[dependencies]
+common-routing-macros.workspace = true
+# Routing only: the wrapper builds an `axum::Router` and needs `Handler`,
+# `MethodRouter` and `Route`. Consumers bring the features they serve with;
+# unification makes this the same axum.
+axum = { version = "0.8", default-features = false }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+# `layer` passthrough: axum's bounds name these traits, not re-exports.
+tower-layer = "0.3"
+tower-service = "0.3"
+# The TypeScript names in a descriptor are ts-rs's (`<T as TS>::name()`),
+# resolved in the export test at run time — the same crate and version the
+# consumer's DTOs derive, so a name here is a file in its bindings/.
+ts-rs = "10"
+
+[dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["tokio", "json", "query"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

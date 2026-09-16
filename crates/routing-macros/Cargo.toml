@@ -1,0 +1,16 @@
+[package]
+name = "common-routing-macros"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "#[client] for common-routing: an axum handler's signature becomes a TypeScript client descriptor, exported by a generated test"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+# `full`: the attribute sits on an `async fn` item, which syn's default
+# feature set (derive input only) cannot parse.
+syn = { version = "2", features = ["full"] }

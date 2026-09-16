@@ -7,6 +7,8 @@ members = [
     "crates/ui-build",
     "crates/config",
     "crates/config-derive",
+    "crates/routing",
+    "crates/routing-macros",
 ]
 
 [workspace.package]
@@ -19,6 +21,8 @@ common-logging = { path = "crates/logging", version = "0.3.0" }
 common-templating = { path = "crates/templating", version = "0.3.0" }
 common-config = { path = "crates/config", version = "0.3.0" }
 common-config-derive = { path = "crates/config-derive", version = "0.3.0" }
+common-routing = { path = "crates/routing", version = "0.3.0" }
+common-routing-macros = { path = "crates/routing-macros", version = "0.3.0" }
 
 # Shared by two or more members.
 serde = "1"
