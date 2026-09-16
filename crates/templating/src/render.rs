@@ -1,8 +1,11 @@
-//! Stamping a built shell with the two values only the request knows: the
-//! asset origin and the config block. Build-time values (title, page css,
-//! page module, prefix, hashes) are a service's build.rs, not this; WHAT the
-//! config block says is the service's (and common-oidc's) business, not this
-//! crate's — it takes any `Serialize` and only escapes it for its block.
+//! Stamping a built shell with the three values only the request knows: the
+//! asset origin, the config block and the theme-override link. Build-time
+//! values (title, page css, page module, prefix, hashes) are a service's
+//! build.rs, not this; WHAT the config block says is the service's (and
+//! common-oidc's) business, not this crate's — it takes any `Serialize` and
+//! only escapes it for its block. The theme link is the service's business
+//! too: it is built from pattern-validated cookie values and passed RAW,
+//! exactly like the asset origin.
 //!
 //! The engine is `upon` with no functions, no filters and no escaping: a
 //! `{{name}}` expression is the whole grammar a shell uses. Two rules of its
@@ -20,6 +23,7 @@ use crate::{AssetsOrigin, RenderError};
 
 pub const ORIGIN_MARKER: &str = "{{assets_origin}}";
 pub const CONFIG_MARKER: &str = "{{config}}";
+pub const THEME_MARKER: &str = "{{theme_override}}";
 
 /// The name the shell has in error messages; there is only ever one.
 const NAME: &str = "shell";
@@ -41,16 +45,21 @@ fn json_for_script_block(config: &impl Serialize) -> Result<String, RenderError>
         .replace('&', "\\u0026"))
 }
 
-/// Exactly the two values a shell may ask for at runtime. A third field here
-/// would be a third runtime marker, which is a shell-contract change first.
+/// Exactly the three values a shell may ask for at runtime: the asset origin,
+/// the config block and the theme-override link. All three are declared in the
+/// shell contract (`shell-markers.json`'s `runtime` array), so adding one here
+/// followed the contract change rather than driving it. `assets_origin` and
+/// `theme_override` are passed RAW; only `config` is escaped, for its block.
 #[derive(Serialize)]
 struct Values<'a> {
     assets_origin: &'a str,
     config: &'a str,
+    theme_override: &'a str,
 }
 
-/// A compiled shell: the build-stamped document with only [`ORIGIN_MARKER`]
-/// and [`CONFIG_MARKER`] left in it. Compile once at boot, render per request.
+/// A compiled shell: the build-stamped document with only [`ORIGIN_MARKER`],
+/// [`CONFIG_MARKER`] and [`THEME_MARKER`] left in it. Compile once at boot,
+/// render per request.
 pub struct Shell {
     engine: upon::Engine<'static>,
     template: upon::Template<'static>,
@@ -68,18 +77,23 @@ impl Shell {
         Ok(Self { engine, template })
     }
 
-    /// Renders with `assets_origin` raw and `config` serialised and escaped
-    /// for its block. Any other `{{name}}` still in the shell is a render
+    /// Renders with `assets_origin` and `theme_override` raw and `config`
+    /// serialised and escaped for its block. `theme_override` is a `<link>`
+    /// the service built from pattern-validated cookie values (R113), so it is
+    /// emitted verbatim — HTML-escaping it would break the tag; an empty slot
+    /// is the common case. Any other `{{name}}` still in the shell is a render
     /// error whose message quotes the offending line.
     pub fn render(
         &self,
         origin: &AssetsOrigin,
         config: &impl Serialize,
+        theme_override: &str,
     ) -> Result<String, RenderError> {
         let block = json_for_script_block(config)?;
         let values = Values {
             assets_origin: origin.as_str(),
             config: &block,
+            theme_override,
         };
         self.template
             .render(&self.engine, values)
@@ -92,12 +106,17 @@ impl Shell {
 /// build that stamped it.
 ///
 /// Total by design. It panics only if the shell fails to compile or still
-/// holds a `{{name}}` other than the two runtime markers — both are defects
+/// holds a `{{name}}` other than the three runtime markers — both are defects
 /// in the build-time stamping, not conditions a request can produce. A
 /// service that wants to refuse at boot instead compiles a [`Shell`] there.
-pub fn render(shell: &str, origin: &AssetsOrigin, config: &impl Serialize) -> String {
+pub fn render(
+    shell: &str,
+    origin: &AssetsOrigin,
+    config: &impl Serialize,
+    theme_override: &str,
+) -> String {
     Shell::compile(shell)
-        .and_then(|shell| shell.render(origin, config))
+        .and_then(|shell| shell.render(origin, config, theme_override))
         .unwrap_or_else(|e| panic!("{e}"))
 }
 
@@ -138,13 +157,14 @@ mod tests {
 
     const SHELL: &str = concat!(
         "<link rel=stylesheet href=\"{{assets_origin}}/common-ui@abc/base.css\">\n",
+        "{{theme_override}}\n",
         "<script type=\"module\" src=\"{{assets_origin}}/common-ui@abc/common-ui.js\"></script>\n",
         "<script type=\"application/json\" id=\"config\">{{config}}</script>\n",
     );
 
     #[test]
-    fn both_runtime_markers_are_filled_everywhere_they_appear() {
-        let html = render(SHELL, &origin(), &config("/oidc/login"));
+    fn every_runtime_marker_is_filled_everywhere_it_appears() {
+        let html = render(SHELL, &origin(), &config("/oidc/login"), "");
         assert_eq!(
             html.matches("https://assets.dev.local/common-ui@abc/")
                 .count(),
@@ -158,10 +178,41 @@ mod tests {
         );
     }
 
+    /// The theme slot is the third runtime marker (the shell contract lists it
+    /// in `shell-markers.json`'s `runtime` array). An empty string is the
+    /// common case — no cookie, so the default palette stands — and the marker
+    /// must still be consumed, never shipped to a browser.
+    #[test]
+    fn an_empty_theme_override_fills_the_slot_rather_than_leaving_it() {
+        let html = render(SHELL, &origin(), &config("/oidc/login"), "");
+        assert!(
+            !html.contains("{{theme_override}}"),
+            "the theme marker must be filled even when empty: {html}"
+        );
+    }
+
+    /// The theme link is a `<link>` the service built from pattern-validated
+    /// cookie values, so it is passed RAW — an HTML escaper here would turn its
+    /// quotes and angle brackets into entities and break the tag. The value
+    /// reaches the page byte-for-byte.
+    #[test]
+    fn a_raw_theme_link_passes_through_unescaped() {
+        let link = r#"<link rel="stylesheet" href="https://assets.dev.local/common-ui@abc/theme-dusk/palette.css" crossorigin="anonymous">"#;
+        let html = render(SHELL, &origin(), &config("/oidc/login"), link);
+        assert!(
+            html.contains(link),
+            "the theme link must reach the page verbatim, not entity-escaped: {html}"
+        );
+        assert!(
+            !html.contains("&lt;link") && !html.contains("&quot;"),
+            "no character of the link may be HTML-escaped: {html}"
+        );
+    }
+
     #[test]
     fn a_config_value_cannot_close_the_block_it_sits_in() {
         let hostile = "</script><script>alert(1)</script>";
-        let html = render(SHELL, &origin(), &config(hostile));
+        let html = render(SHELL, &origin(), &config(hostile), "");
 
         assert!(
             !html.contains("</script><script>"),
@@ -180,7 +231,7 @@ mod tests {
 
     #[test]
     fn an_ampersand_is_escaped_so_an_entity_cannot_form() {
-        let html = render(SHELL, &origin(), &config("/login?a=1&amp;lt;b"));
+        let html = render(SHELL, &origin(), &config("/login?a=1&amp;lt;b"), "");
         assert!(
             !html.contains('&'),
             "no raw ampersand may reach the page: {html}"
@@ -191,7 +242,7 @@ mod tests {
     #[test]
     fn the_escaped_block_is_still_the_json_the_page_parses() {
         let hostile = "</script>&<>";
-        let html = render(SHELL, &origin(), &config(hostile));
+        let html = render(SHELL, &origin(), &config(hostile), "");
         let start = html.find(r#"id="config">"#).unwrap() + r#"id="config">"#.len();
         let end = html[start..].find("</script>").unwrap() + start;
 
@@ -212,7 +263,7 @@ mod tests {
         config.user = Some(Who {
             name: "</script><script>alert(1)</script>".to_owned(),
         });
-        let html = render(SHELL, &origin(), &config);
+        let html = render(SHELL, &origin(), &config, "");
 
         assert!(
             !html.contains("</script><script>"),
@@ -239,7 +290,7 @@ mod tests {
         let shell =
             Shell::compile("<title>{{title}}</title>{{config}}").expect("the grammar is fine");
         let err = shell
-            .render(&origin(), &config("/oidc/login"))
+            .render(&origin(), &config("/oidc/login"), "")
             .expect_err("a marker the build did not stamp must not reach a browser");
         assert!(
             matches!(err, RenderError::Render(..)),
@@ -271,7 +322,7 @@ mod tests {
         let unserialisable: std::collections::BTreeMap<(u8, u8), u8> =
             [((1, 2), 3)].into_iter().collect();
         let err = shell
-            .render(&origin(), &unserialisable)
+            .render(&origin(), &unserialisable, "")
             .expect_err("serde_json refuses a non-string map key");
         assert!(matches!(err, RenderError::Render(..)), "{err}");
     }
