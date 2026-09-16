@@ -91,11 +91,9 @@ fn app() -> Router {
             "/",
             get(|State(app): State<Arc<App>>| async move {
                 match app.shell.render(&app.origin, &app.config) {
-                    Ok(html) => (
-                        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-                        html,
-                    )
-                        .into_response(),
+                    Ok(html) => {
+                        ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
+                    }
                     Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
                 }
             }),

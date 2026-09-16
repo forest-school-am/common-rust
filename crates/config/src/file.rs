@@ -23,12 +23,10 @@ pub(crate) fn read(
         Ok(text) => text,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
         Err(e) => {
-            return Err(Refusal::new(
-                source,
-                shown,
-                "the path of a readable TOML file",
+            return Err(
+                Refusal::new(source, shown, "the path of a readable TOML file")
+                    .with_detail(format!("cannot read: {e}")),
             )
-            .with_detail(format!("cannot read: {e}")))
         }
     };
     let table: toml::Table = toml::from_str(&text).map_err(|e| {
@@ -36,12 +34,8 @@ pub(crate) fn read(
             .span()
             .map(|span| text[..span.start].lines().count().max(1))
             .map_or(String::new(), |line| format!(" (line {line})"));
-        Refusal::new(
-            source,
-            shown.clone(),
-            "a well-formed TOML file",
-        )
-        .with_detail(format!("{}{line}", e.message()))
+        Refusal::new(source, shown.clone(), "a well-formed TOML file")
+            .with_detail(format!("{}{line}", e.message()))
     })?;
 
     let by_key: HashMap<String, &Path> = fields.iter().map(|f| (f.toml(), &f.path)).collect();

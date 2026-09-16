@@ -235,7 +235,11 @@ fn schema_spells_every_field_three_ways() {
             "APP_MID__DEEP__LEVEL",
             "mid.deep.level",
         ),
-        ("--common--deployment", "DEPLOYMENT_TYPE", "common.deployment"),
+        (
+            "--common--deployment",
+            "DEPLOYMENT_TYPE",
+            "common.deployment",
+        ),
         ("--common--log-format", "LOG_FORMAT", "common.log_format"),
         (
             "--common--log-designators",
@@ -494,7 +498,10 @@ fn a_bad_deployment_type_refuses_in_the_legacy_words() {
     let refusal = err(&["--name=x"], &[("DEPLOYMENT_TYPE", "staging")]);
     assert_eq!(refusal.variable, "DEPLOYMENT_TYPE");
     assert_eq!(refusal.value, "staging");
-    assert_eq!(refusal.accepted, r#"one of ["prod", "dev"] (unset means dev)"#);
+    assert_eq!(
+        refusal.accepted,
+        r#"one of ["prod", "dev"] (unset means dev)"#
+    );
 }
 
 // ---- missing required ----

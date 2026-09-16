@@ -104,7 +104,11 @@ mod tests {
         assert_eq!(
             spelled,
             [
-                ("--common--deployment", "DEPLOYMENT_TYPE", "common.deployment"),
+                (
+                    "--common--deployment",
+                    "DEPLOYMENT_TYPE",
+                    "common.deployment"
+                ),
                 ("--common--log-format", "LOG_FORMAT", "common.log_format"),
                 (
                     "--common--log-designators",
@@ -142,7 +146,10 @@ mod tests {
         let r = refused("LOG_FORMAT", "xml");
         assert_eq!(r.accepted, LOG_FORMAT_ACCEPTED);
         let r = refused("DEPLOYMENT_TYPE", "");
-        assert_eq!(r.value, "", "an empty value is set, and set-but-invalid refuses");
+        assert_eq!(
+            r.value, "",
+            "an empty value is set, and set-but-invalid refuses"
+        );
     }
 
     #[test]

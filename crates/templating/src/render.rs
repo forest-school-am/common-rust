@@ -236,7 +236,8 @@ mod tests {
 
     #[test]
     fn an_unstamped_build_time_marker_is_a_render_error_naming_it() {
-        let shell = Shell::compile("<title>{{title}}</title>{{config}}").expect("the grammar is fine");
+        let shell =
+            Shell::compile("<title>{{title}}</title>{{config}}").expect("the grammar is fine");
         let err = shell
             .render(&origin(), &config("/oidc/login"))
             .expect_err("a marker the build did not stamp must not reach a browser");

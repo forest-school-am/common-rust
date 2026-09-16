@@ -42,7 +42,13 @@ impl PageConfig {
         launcher_url: &str,
         assets_origin: &str,
     ) -> Self {
-        Self::build(&cfg.login_path, &cfg.logout_path, user, launcher_url, assets_origin)
+        Self::build(
+            &cfg.login_path,
+            &cfg.logout_path,
+            user,
+            launcher_url,
+            assets_origin,
+        )
     }
 
     /// For a deployment that mounts no OIDC router and so has no
@@ -104,11 +110,20 @@ mod tests {
         keys.sort();
         assert_eq!(
             keys,
-            ["assetsOrigin", "launcherUrl", "loginPath", "logoutPath", "user"],
+            [
+                "assetsOrigin",
+                "launcherUrl",
+                "loginPath",
+                "logoutPath",
+                "user"
+            ],
             "camelCase, and no key added without a reader for it"
         );
         assert_eq!(json["loginPath"], "/oidc/login", "taken off the OidcConfig");
-        assert_eq!(json["logoutPath"], "/common-oidc/logout", "taken off the OidcConfig");
+        assert_eq!(
+            json["logoutPath"], "/common-oidc/logout",
+            "taken off the OidcConfig"
+        );
         assert_eq!(json["assetsOrigin"], "https://assets.dev.local");
         assert_eq!(json["launcherUrl"], "https://launcher.dev.local");
         assert_eq!(json["user"]["name"], "Alice Ackroyd");

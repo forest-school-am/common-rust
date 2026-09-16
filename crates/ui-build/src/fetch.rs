@@ -102,12 +102,10 @@ fn fetch(prefix: &str, source: &dyn Source) -> Result<Pin> {
     let manifest = manifest_for(prefix, source)?;
     let text = |name: &str| -> Result<String> {
         let path = format!("{prefix}/{name}");
-        let bytes = source
-            .get(&path)?
-            .ok_or_else(|| Error::Http {
-                url: format!("{}/{path}", source.origin()),
-                status: 404,
-            })?;
+        let bytes = source.get(&path)?.ok_or_else(|| Error::Http {
+            url: format!("{}/{path}", source.origin()),
+            status: 404,
+        })?;
         utf8(bytes, &path)
     };
     let files = Files {

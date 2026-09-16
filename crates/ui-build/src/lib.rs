@@ -261,8 +261,9 @@ impl Pin {
     /// when present, fetches and caches it otherwise. Emits the `cargo:` lines
     /// for the pin's inputs.
     pub fn load() -> Result<Self> {
-        let manifest_dir =
-            PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").ok_or(Error::Env("CARGO_MANIFEST_DIR"))?);
+        let manifest_dir = PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").ok_or(Error::Env("CARGO_MANIFEST_DIR"))?,
+        );
         let cargo_toml = manifest_dir.join("Cargo.toml");
         println!("cargo:rerun-if-changed={}", cargo_toml.display());
         println!("cargo:rerun-if-env-changed={}", fetch::ORIGIN_VAR);

@@ -184,8 +184,7 @@ fn wrong_type(field: &Field, entry: &Entry, accepted: String, error: String) -> 
     } else {
         entry.text.clone()
     };
-    Refusal::new(source, shown, accepted)
-        .with_detail(format!("set by {}: {error}", entry.origin))
+    Refusal::new(source, shown, accepted).with_detail(format!("set by {}: {error}", entry.origin))
 }
 
 #[cfg(test)]

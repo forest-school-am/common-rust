@@ -126,12 +126,22 @@ fn a_manifest_without_the_pin_says_what_line_to_add() {
     let toml = "[package]\nname = \"x\"\nversion = \"0.1.0\"\n";
     let err = read_prefix(toml, Path::new("Cargo.toml")).unwrap_err();
     assert!(matches!(err, Error::NoPrefix { .. }), "{err}");
-    assert!(err.to_string().contains("[package.metadata.common-ui] prefix"), "{err}");
+    assert!(
+        err.to_string()
+            .contains("[package.metadata.common-ui] prefix"),
+        "{err}"
+    );
 }
 
 #[test]
 fn a_prefix_that_is_not_common_ui_at_hex_is_refused() {
-    for bad in ["b9f049d05d44", "common-ui@", "common-ui@../x", "common-ui@B9F049D05D44", "common-ui@zz"] {
+    for bad in [
+        "b9f049d05d44",
+        "common-ui@",
+        "common-ui@../x",
+        "common-ui@B9F049D05D44",
+        "common-ui@zz",
+    ] {
         let toml = format!("[package]\nname = \"x\"\nversion = \"0.1.0\"\n[package.metadata.common-ui]\nprefix = \"{bad}\"\n");
         let err = read_prefix(&toml, Path::new("Cargo.toml")).unwrap_err();
         assert!(matches!(err, Error::BadPrefix(_)), "{bad}: {err}");
@@ -143,11 +153,7 @@ fn a_prefix_that_is_not_common_ui_at_hex_is_refused() {
 #[test]
 fn every_fetched_file_must_match_the_manifest() {
     pin();
-    for (name, tamper) in [
-        (SHELL, "shell"),
-        (MARKERS, "markers"),
-        (TYPES, "dts"),
-    ] {
+    for (name, tamper) in [(SHELL, "shell"), (MARKERS, "markers"), (TYPES, "dts")] {
         let mut f = files();
         match tamper {
             "shell" => f.shell.push(' '),
@@ -174,7 +180,10 @@ fn a_file_the_manifest_does_not_list_cannot_be_verified() {
 fn sha384_is_the_integrity_spelling() {
     // 48 bytes → 64 base64 chars, never padded.
     let s = sha384(b"");
-    assert!(s.starts_with("sha384-") && s.len() == 7 + 64 && !s.ends_with('='), "{s}");
+    assert!(
+        s.starts_with("sha384-") && s.len() == 7 + 64 && !s.ends_with('='),
+        "{s}"
+    );
     assert_eq!(
         s,
         "sha384-OLBgp1GsljhM2TJ+sbHjaiH9txEUvgdDTAzHv2P24donTt6/529l+9Ua0vFImLlb"
@@ -206,7 +215,10 @@ fn the_root_manifest_stands_in_only_for_the_prefix_it_publishes() {
             ..
         } => {
             assert_eq!(prefix, "common-ui@000000000000");
-            assert_eq!(url, "https://origin.test/common-ui@000000000000/manifest.json");
+            assert_eq!(
+                url,
+                "https://origin.test/common-ui@000000000000/manifest.json"
+            );
             assert_eq!(published, PREFIX);
         }
         other => panic!("expected NoManifest, got {other}"),
@@ -223,17 +235,28 @@ fn the_first_load_fetches_and_the_second_is_offline() {
     let first = fetch::load(PREFIX, &cache, &src).unwrap();
     assert_eq!(first.prefix, PREFIX);
     let fetched = *src.gets.borrow();
-    assert_eq!(fetched, 5, "per-prefix manifest (404), root manifest, three files");
+    assert_eq!(
+        fetched, 5,
+        "per-prefix manifest (404), root manifest, three files"
+    );
     for name in [MANIFEST, SHELL, MARKERS, TYPES] {
         assert!(cache.join(name).is_file(), "{name} cached");
     }
     assert!(
-        std::fs::read_dir(&cache).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains(".tmp")),
+        std::fs::read_dir(&cache).unwrap().all(|e| !e
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .contains(".tmp")),
         "no temp file left behind"
     );
 
     let second = fetch::load(PREFIX, &cache, &src).unwrap();
-    assert_eq!(*src.gets.borrow(), fetched, "the second load made no request");
+    assert_eq!(
+        *src.gets.borrow(),
+        fetched,
+        "the second load made no request"
+    );
     assert_eq!(second.files.shell, first.files.shell);
     assert_eq!(second.manifest.raw, first.manifest.raw);
     let _ = std::fs::remove_dir_all(&cache);
@@ -251,7 +274,10 @@ fn a_tampered_cache_fails_the_build_rather_than_stamping() {
 
     let err = fetch::load(PREFIX, &cache, &src).unwrap_err();
     assert!(matches!(err, Error::Digest { .. }), "{err}");
-    assert!(err.to_string().contains(&cache.display().to_string()), "names the cache: {err}");
+    assert!(
+        err.to_string().contains(&cache.display().to_string()),
+        "names the cache: {err}"
+    );
     let _ = std::fs::remove_dir_all(&cache);
 }
 
@@ -263,7 +289,10 @@ fn a_partial_cache_is_fetched_over() {
     let src = Fake::root_only();
     let pin = fetch::load(PREFIX, &cache, &src).unwrap();
     assert!(*src.gets.borrow() > 0);
-    assert_eq!(std::fs::read_to_string(cache.join(SHELL)).unwrap(), pin.files.shell);
+    assert_eq!(
+        std::fs::read_to_string(cache.join(SHELL)).unwrap(),
+        pin.files.shell
+    );
     let _ = std::fs::remove_dir_all(&cache);
 }
 
@@ -274,16 +303,27 @@ fn the_sri_table_is_the_prefix_minus_the_three_embedded_files() {
     let pin = pin();
     let table = pin.sri_table();
     let names: Vec<&str> = table.iter().map(|(n, _)| n.as_str()).collect();
-    for linked in ["base.css", "theme-default/palette.css", "elements.css", "common-ui.js"] {
+    for linked in [
+        "base.css",
+        "theme-default/palette.css",
+        "elements.css",
+        "common-ui.js",
+    ] {
         assert!(names.contains(&linked), "{linked} missing from {names:?}");
     }
     for embedded in [SHELL, MARKERS, TYPES] {
-        assert!(!names.contains(&embedded), "{embedded} is embedded, not linked");
+        assert!(
+            !names.contains(&embedded),
+            "{embedded} is embedded, not linked"
+        );
     }
     assert!(table.iter().all(|(_, s)| s.starts_with("sha384-")));
     let mut sorted = names.clone();
     sorted.sort();
-    assert_eq!(names, sorted, "sorted by name so generated files are stable");
+    assert_eq!(
+        names, sorted,
+        "sorted by name so generated files are stable"
+    );
     assert_eq!(sri_table(&pin.manifest, PREFIX), table);
     // Nothing from another prefix leaks in.
     assert!(sri_table(&pin.manifest, "common-ui@000000000000").is_empty());
@@ -296,7 +336,11 @@ fn themes_are_derived_from_the_manifest_default_included() {
     let names: Vec<&str> = themes.iter().map(|(n, _)| n.as_str()).collect();
     assert!(names.contains(&"default"), "{names:?}");
     assert!(names.contains(&"ink"), "{names:?}");
-    assert_eq!(themes.len(), 16, "the fixture prefix ships sixteen palettes");
+    assert_eq!(
+        themes.len(),
+        16,
+        "the fixture prefix ships sixteen palettes"
+    );
     for (name, sri) in &themes {
         assert_eq!(pin.sri(&format!("theme-{name}/palette.css")).unwrap(), sri);
     }
@@ -307,12 +351,15 @@ fn the_csp_is_the_shells_with_the_origin_marker_in_it() {
     let pin = pin();
     assert!(pin.csp().contains("{{assets_origin}}"));
     assert_eq!(csp(&pin.files.markers).unwrap(), pin.csp());
-    let err = Markers::parse(r#"{"build":[],"runtime":[],"csp":"default-src 'self'"}"#).unwrap_err();
+    let err =
+        Markers::parse(r#"{"build":[],"runtime":[],"csp":"default-src 'self'"}"#).unwrap_err();
     assert!(matches!(err, Error::Markers(_)), "{err}");
     // The `build`/`runtime` arrays are not parsed (R114.2): a file with only
     // the csp is a complete contract to this crate.
     assert_eq!(
-        Markers::parse(r#"{"csp":"style-src {{assets_origin}}"}"#).unwrap().csp,
+        Markers::parse(r#"{"csp":"style-src {{assets_origin}}"}"#)
+            .unwrap()
+            .csp,
         "style-src {{assets_origin}}"
     );
 }
@@ -324,7 +371,10 @@ fn write_dts_and_write_manifest_land_in_out_dir_verbatim() {
     let pin = pin();
     let dts = pin.write_dts(&out).unwrap();
     assert_eq!(dts, out.join(TYPES));
-    assert_eq!(sha384(&std::fs::read(&dts).unwrap()), pin.sri(TYPES).unwrap());
+    assert_eq!(
+        sha384(&std::fs::read(&dts).unwrap()),
+        pin.sri(TYPES).unwrap()
+    );
     let m = pin.write_manifest(&out).unwrap();
     assert_eq!(m, out.join(OUT_MANIFEST));
     assert_eq!(std::fs::read_to_string(&m).unwrap(), fixture(MANIFEST));
@@ -341,7 +391,10 @@ fn a_full_stamp_fills_the_build_markers_and_leaves_the_runtime_ones() {
     let sri = |n: &str| pin.sri(n).unwrap().to_owned();
     let html = stamp_all(&pin, &values(&sri));
     for runtime in ["assets_origin", "config", "theme_override"] {
-        assert!(html.contains(&format!("{{{{{runtime}}}}}")), "{runtime} survives");
+        assert!(
+            html.contains(&format!("{{{{{runtime}}}}}")),
+            "{runtime} survives"
+        );
     }
     assert!(html.contains(&format!("integrity=\"{}\"", sri("base.css"))));
     assert!(!html.contains("{{title}}"));
@@ -349,5 +402,8 @@ fn a_full_stamp_fills_the_build_markers_and_leaves_the_runtime_ones() {
 
 #[test]
 fn stamp_is_plain_substitution_in_order() {
-    assert_eq!(stamp("a {{x}} b {{y}} {{x}}", &[("x", "1"), ("y", "{{x}}")]), "a 1 b {{x}} 1");
+    assert_eq!(
+        stamp("a {{x}} b {{y}} {{x}}", &[("x", "1"), ("y", "{{x}}")]),
+        "a 1 b {{x}} 1"
+    );
 }
