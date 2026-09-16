@@ -6,13 +6,13 @@ The common-ui pin for consumer build scripts (R114, "vendored" item):
 `Cargo.toml` is the whole pin. The crate fetches the prefix's manifest and
 its three build-time files, verifies every byte string against the
 manifest's sha384, caches them per prefix for offline builds, and gives a
-`build.rs` the stamp / marker-check / CSP / SRI-table / d.ts pieces the four
-consumers used to re-implement over a vendor directory and a lock.
+`build.rs` the stamp / CSP / SRI-table / d.ts pieces the four consumers used
+to re-implement over a vendor directory and a lock.
 
 ## Layout
-- `src/lib.rs` — `read_prefix`, `Manifest`, `Markers`, `Files`, `Pin`
-  (`load`, `from_parts`, `sri`, `sri_table`, `themes`, `csp`, `write_dts`,
-  `write_manifest`), `stamp`, `check_markers`, `sha384`, `Error`.
+- `src/lib.rs` — `read_prefix`, `Manifest`, `Markers` (the csp only),
+  `Files`, `Pin` (`load`, `from_parts`, `sri`, `sri_table`, `themes`, `csp`,
+  `write_dts`, `write_manifest`), `stamp`, `sha384`, `Error`.
 - `src/fetch.rs` — the `Source` trait, the cache (`cache_dir`, `load`), the
   manifest rule (`manifest_for`), `LazyHttps` (ureq + rustls with the stand
   CA as the only root).
@@ -37,9 +37,11 @@ consumers used to re-implement over a vendor directory and a lock.
 - `stamp` IS PLAIN `String::replace` IN ORDER, nothing escaped — today's
   consumer behaviour, kept byte-identical. Build-time templating on upon is
   a separate followup and lands here when it does.
-- `check_markers` IS BOTH WAYS (§12.24): filled set == declared `build` set,
-  survivors set == declared `runtime` set. Every consumer runs it; a marker
-  the shell gains fails the build with a name instead of shipping as braces.
+- NO MARKER-SET CHECK (user, R114.2). The app's boot renders every stamped
+  shell through `common_templating::Shell`; upon refuses an unfilled
+  `{{marker}}` by name. A build-time comparison against `shell-markers.json`'s
+  `build`/`runtime` arrays duplicated that with a second source of truth, so
+  those arrays are not parsed — the file is fetched and verified for its csp.
 - `sri_table` is every `<prefix>/` entry minus the three embedded files —
   exactly what the retired locks held under `assets` — sorted by name.
   `themes` includes `default`; a consumer that excludes it filters.

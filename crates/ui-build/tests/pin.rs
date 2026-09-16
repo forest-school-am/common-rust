@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use common_ui_build::fetch::{self, Source};
 use common_ui_build::{
-    check_markers, csp, read_prefix, sha384, sri_table, stamp, Error, Files, Manifest, Markers,
-    Pin, MANIFEST, MARKERS, OUT_MANIFEST, SHELL, TYPES,
+    csp, read_prefix, sha384, sri_table, stamp, Error, Files, Manifest, Markers, Pin, MANIFEST,
+    MARKERS, OUT_MANIFEST, SHELL, TYPES,
 };
 
 const PREFIX: &str = "common-ui@b9f049d05d44";
@@ -108,14 +108,9 @@ fn values<'a>(sri: &'a dyn Fn(&str) -> String) -> Vec<(&'static str, String)> {
     ]
 }
 
-fn stamp_all(pin: &Pin, values: &[(&str, String)]) -> (String, Vec<&'static str>) {
+fn stamp_all(pin: &Pin, values: &[(&str, String)]) -> String {
     let borrowed: Vec<(&str, &str)> = values.iter().map(|(m, v)| (*m, v.as_str())).collect();
-    let filled: Vec<&'static str> = values
-        .iter()
-        .map(|(m, _)| *m)
-        .map(|m: &str| -> &'static str { Box::leak(m.to_owned().into_boxed_str()) })
-        .collect();
-    (stamp(&pin.files.shell, &borrowed), filled)
+    stamp(&pin.files.shell, &borrowed)
 }
 
 // ---- the pin line -----------------------------------------------------------
@@ -314,8 +309,12 @@ fn the_csp_is_the_shells_with_the_origin_marker_in_it() {
     assert_eq!(csp(&pin.files.markers).unwrap(), pin.csp());
     let err = Markers::parse(r#"{"build":[],"runtime":[],"csp":"default-src 'self'"}"#).unwrap_err();
     assert!(matches!(err, Error::Markers(_)), "{err}");
-    let err = Markers::parse(r#"{"build":["csp"],"runtime":[],"csp":"{{assets_origin}}"}"#).unwrap_err();
-    assert!(matches!(err, Error::Markers(_)), "{err}");
+    // The `build`/`runtime` arrays are not parsed (R114.2): a file with only
+    // the csp is a complete contract to this crate.
+    assert_eq!(
+        Markers::parse(r#"{"csp":"style-src {{assets_origin}}"}"#).unwrap().csp,
+        "style-src {{assets_origin}}"
+    );
 }
 
 #[test]
@@ -332,65 +331,20 @@ fn write_dts_and_write_manifest_land_in_out_dir_verbatim() {
     let _ = std::fs::remove_dir_all(&out);
 }
 
-// ---- stamping and the both-ways check --------------------------------------
+// ---- stamping ---------------------------------------------------------------
+// No set check lives here (R114.2): a marker left unfilled is refused by the
+// app's boot render (common-templating `Shell`), which names it.
 
 #[test]
-fn a_full_stamp_passes_and_leaves_exactly_the_runtime_markers() {
+fn a_full_stamp_fills_the_build_markers_and_leaves_the_runtime_ones() {
     let pin = pin();
     let sri = |n: &str| pin.sri(n).unwrap().to_owned();
-    let vals = values(&sri);
-    let (html, filled) = stamp_all(&pin, &vals);
-    check_markers(&html, &pin.markers, &filled).unwrap();
-    for runtime in &pin.markers.runtime {
+    let html = stamp_all(&pin, &values(&sri));
+    for runtime in ["assets_origin", "config", "theme_override"] {
         assert!(html.contains(&format!("{{{{{runtime}}}}}")), "{runtime} survives");
     }
     assert!(html.contains(&format!("integrity=\"{}\"", sri("base.css"))));
     assert!(!html.contains("{{title}}"));
-}
-
-#[test]
-fn a_declared_marker_this_build_does_not_fill_is_named() {
-    let pin = pin();
-    let sri = |n: &str| pin.sri(n).unwrap().to_owned();
-    let mut vals = values(&sri);
-    vals.retain(|(m, _)| *m != "legal");
-    let (html, filled) = stamp_all(&pin, &vals);
-    let err = check_markers(&html, &pin.markers, &filled).unwrap_err();
-    let text = err.to_string();
-    assert!(text.contains("declared but not filled: [\"legal\"]"), "{text}");
-}
-
-#[test]
-fn a_marker_this_build_fills_that_the_shell_does_not_declare_is_named() {
-    let pin = pin();
-    let sri = |n: &str| pin.sri(n).unwrap().to_owned();
-    let mut vals = values(&sri);
-    vals.push(("theme_name", "ink".into()));
-    let (html, filled) = stamp_all(&pin, &vals);
-    let err = check_markers(&html, &pin.markers, &filled).unwrap_err();
-    assert!(err.to_string().contains("filled but not declared: [\"theme_name\"]"), "{err}");
-}
-
-#[test]
-fn a_value_that_consumes_a_runtime_marker_is_refused() {
-    let pin = pin();
-    let sri = |n: &str| pin.sri(n).unwrap().to_owned();
-    let vals = values(&sri);
-    let (mut html, filled) = stamp_all(&pin, &vals);
-    html = html.replace("{{config}}", "{}");
-    let err = check_markers(&html, &pin.markers, &filled).unwrap_err();
-    assert!(err.to_string().contains("{{config}}"), "{err}");
-}
-
-#[test]
-fn a_leftover_marker_the_shell_does_not_declare_is_refused() {
-    let pin = pin();
-    let sri = |n: &str| pin.sri(n).unwrap().to_owned();
-    let vals = values(&sri);
-    let (mut html, filled) = stamp_all(&pin, &vals);
-    html.push_str("{{surprise}}");
-    let err = check_markers(&html, &pin.markers, &filled).unwrap_err();
-    assert!(err.to_string().contains("{{surprise}}"), "{err}");
 }
 
 #[test]

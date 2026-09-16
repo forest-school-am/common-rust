@@ -21,11 +21,16 @@
 //! pins its bytes.
 //!
 //! What a `build.rs` then does with the pin: [`stamp`] the shell's build-time
-//! markers, [`check_markers`] the result both ways against the contract,
-//! embed the [`Pin::csp`] and the [`Pin::sri_table`], and [`Pin::write_dts`]
-//! for the typecheck. Nothing here runs at request time.
+//! markers, embed the [`Pin::csp`] and the [`Pin::sri_table`], and
+//! [`Pin::write_dts`] for the typecheck. Nothing here runs at request time.
+//!
+//! There is NO build-time check of the stamped marker set (R114.2). The app's
+//! boot renders every stamped shell through `common_templating::Shell`, and
+//! upon refuses any `{{marker}}` left unfilled, naming it; a set comparison
+//! here against `shell-markers.json`'s `build`/`runtime` arrays duplicated
+//! that with a second source of truth. Those arrays are no longer parsed.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
@@ -119,8 +124,6 @@ pub enum Error {
     NoCacheDir,
     #[error("shell-markers.json: {0}")]
     Markers(String),
-    #[error("{0}")]
-    MarkerCheck(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -213,12 +216,11 @@ pub struct Files {
     pub dts: String,
 }
 
-/// The shell's marker contract (`shell-markers.json`): which markers a build
-/// fills, which survive to the request, and the CSP its pages need.
+/// What this crate reads from `shell-markers.json`: the CSP its pages need.
+/// The file's `build` and `runtime` arrays are left unparsed (R114.2) — the
+/// boot render is what refuses an unfilled marker, not a set comparison here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Markers {
-    pub build: Vec<String>,
-    pub runtime: Vec<String>,
     pub csp: String,
 }
 
@@ -226,8 +228,6 @@ impl Markers {
     pub fn parse(json: &str) -> Result<Self> {
         #[derive(serde::Deserialize)]
         struct Wire {
-            build: Vec<String>,
-            runtime: Vec<String>,
             csp: String,
         }
         let wire: Wire = serde_json::from_str(json).map_err(|source| Error::Json {
@@ -235,24 +235,14 @@ impl Markers {
             source,
         })?;
         // A policy without the origin marker would block the shell's own
-        // stylesheets; `csp` is a field, not a marker, so it must not appear
-        // in the marker table either.
+        // stylesheets.
         if !wire.csp.contains("{{assets_origin}}") {
             return Err(Error::Markers(
                 "the csp has no {{assets_origin}}: it would block the shell's own stylesheets"
                     .into(),
             ));
         }
-        if wire.build.iter().any(|m| m == "csp") {
-            return Err(Error::Markers(
-                "`csp` is declared as a build marker — it is a field".into(),
-            ));
-        }
-        Ok(Self {
-            build: wire.build,
-            runtime: wire.runtime,
-            csp: wire.csp,
-        })
+        Ok(Self { csp: wire.csp })
     }
 }
 
@@ -403,62 +393,12 @@ pub fn csp(markers_json: &str) -> Result<String> {
 
 /// Fills `{{marker}}` for each `(marker, value)` by plain substitution, in
 /// order. Nothing is escaped: the values are the consumer's own constants
-/// and the digests the manifest pins.
+/// and the digests the manifest pins. A marker left unfilled is not checked
+/// here: the app's boot render refuses it by name (R114.2).
 pub fn stamp(shell: &str, values: &[(&str, &str)]) -> String {
     let mut stamped = shell.to_owned();
     for (marker, value) in values {
         stamped = stamped.replace(&format!("{{{{{marker}}}}}"), value);
     }
     stamped
-}
-
-/// The marker contract, checked BOTH WAYS (§12.24):
-///
-/// - the set this build filled equals the shell's declared `build` set — one
-///   direction alone is half a check: "nothing left unfilled" misses a
-///   marker the shell GAINED that this build knows nothing about, and that
-///   ships as literal braces; a marker filled but not declared is dead code
-///   pretending to fill something;
-/// - the markers that survive stamping are exactly the declared `runtime`
-///   set — every one of them still present, and nothing else left.
-pub fn check_markers(stamped: &str, markers: &Markers, filled: &[&str]) -> Result<()> {
-    let filled: BTreeSet<&str> = filled.iter().copied().collect();
-    let declared: BTreeSet<&str> = markers.build.iter().map(String::as_str).collect();
-    if filled != declared {
-        return Err(Error::MarkerCheck(format!(
-            "build.rs and shell-markers.json disagree about the shell.\n  \
-             declared but not filled: {:?}\n  filled but not declared: {:?}\n  \
-             The first list is the dangerous one: those markers are really in the shell \
-             and would reach a browser as literal text.",
-            declared.difference(&filled).collect::<Vec<_>>(),
-            filled.difference(&declared).collect::<Vec<_>>(),
-        )));
-    }
-
-    let runtime: BTreeSet<String> = markers
-        .runtime
-        .iter()
-        .map(|m| format!("{{{{{m}}}}}"))
-        .collect();
-    let survivors: BTreeSet<String> = stamped
-        .match_indices("{{")
-        .map(|(i, _)| {
-            let rest = &stamped[i..];
-            rest[..rest.find("}}").map(|j| j + 2).unwrap_or(rest.len().min(24))].to_owned()
-        })
-        .collect();
-    let left: Vec<&String> = survivors.difference(&runtime).collect();
-    if !left.is_empty() {
-        return Err(Error::MarkerCheck(format!(
-            "the stamped page still carries markers the shell does not declare as runtime: {left:?}"
-        )));
-    }
-    let consumed: Vec<&String> = runtime.difference(&survivors).collect();
-    if !consumed.is_empty() {
-        return Err(Error::MarkerCheck(format!(
-            "stamping consumed the runtime markers {consumed:?} — a build value must not fill \
-             what the request fills"
-        )));
-    }
-    Ok(())
 }

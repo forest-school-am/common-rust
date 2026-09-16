@@ -29,7 +29,6 @@ A bump is editing the `prefix` line.
 ```rust
 let pin = common_ui_build::Pin::load().unwrap_or_else(|e| panic!("{e}"));
 let html = common_ui_build::stamp(&pin.files.shell, &values);   // (marker, value) pairs
-common_ui_build::check_markers(&html, &pin.markers, &filled)?;  // both ways, §12.24
 pin.csp();          // the prefix's policy, {{assets_origin}} still in it
 pin.sri("base.css"); pin.sri_table(); pin.themes();  // digests from the manifest, never typed
 pin.write_dts(&out_dir);       // common-ui.d.ts for the typecheck (tsconfig `paths`)
@@ -58,6 +57,15 @@ root. The client is `ureq` 2 over rustls/ring — the provider reqwest's
 Trust is the vendor directories' trust: their lock digests were copied from
 this manifest over this TLS to this origin. A prefix is content-addressed and
 immutable, so its name pins its bytes.
+
+## No marker-set check (R114.2)
+
+There is no build-time check that the stamped page is complete. The app's
+boot renders every stamped shell through `common_templating::Shell`, and
+upon refuses any unfilled `{{marker}}` by name; a build-time comparison of
+the stamped set against `shell-markers.json`'s `build`/`runtime` arrays
+duplicated that with a second source of truth. The file is still fetched and
+verified — the CSP lives in it — but those two arrays are not parsed.
 
 ## Tests
 
