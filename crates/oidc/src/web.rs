@@ -332,14 +332,16 @@ async fn login(
 }
 
 async fn client_js() -> Response {
-    (
-        [
-            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
-            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
-        ],
-        crate::SHIM_JS,
-    )
-        .into_response()
+    // The bytes-and-Content-Type is common-routing's shared static-file
+    // helper (review followup #9); the immutable cache is this route's own —
+    // the shim is served under one stable URL and does not change per request.
+    let mut resp =
+        common_routing::serve_static(crate::SHIM_JS.as_bytes(), "text/javascript; charset=utf-8");
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("public, max-age=31536000, immutable"),
+    );
+    resp
 }
 
 async fn callback(
