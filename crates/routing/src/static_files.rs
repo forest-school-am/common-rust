@@ -283,6 +283,20 @@ mod tests {
         assert_eq!(m[0].path, "/a.css");
     }
 
+    // Regression: two static_file mounts share one closure TYPE, so recording
+    // their fqname from `type_name` collided them into one and the client
+    // generator refused the pair (HandlerMountedTwice) — which broke registry's
+    // codegen once it served two files this way. The fqname is now path-unique.
+    #[test]
+    fn two_static_files_get_distinct_fqnames() {
+        let r = Router::<()>::new()
+            .static_file("/a.css", b"x", "text/css", CachePolicy::NoCache)
+            .static_file("/b.js", b"y", "text/javascript", CachePolicy::NoCache);
+        let m = r.manifest();
+        assert_eq!(m.len(), 2);
+        assert_ne!(m[0].fqname, m[1].fqname, "static routes must not collide");
+    }
+
     static ASSETS: AssetSet = AssetSet::new(&[("app.js", b"CLIENT"), ("app.css", b"SHEET")]);
 
     #[tokio::test]

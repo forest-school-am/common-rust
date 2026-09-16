@@ -47,12 +47,29 @@ where
         }
     }
 
-    fn record<H, T>(mut self, method: Method, path: &str, method_router: MethodRouter<S>) -> Self
+    fn record<H, T>(self, method: Method, path: &str, method_router: MethodRouter<S>) -> Self
     where
         H: Handler<T, S>,
     {
+        self.record_raw(type_name::<H>().to_owned(), method, path, method_router)
+    }
+
+    /// Record a route with an EXPLICIT fqname, for handlers whose Rust type name
+    /// is not a useful (or unique) join key. The static-file helpers share one
+    /// closure type across every call site, so `type_name` would collide two
+    /// `static_file` mounts into one fqname (`HandlerMountedTwice`); they pass a
+    /// path-unique synthetic name here instead. Such a name never matches a real
+    /// `#[client]` handler fqname, so these routes are simply never joined to a
+    /// client function.
+    fn record_raw(
+        mut self,
+        fqname: String,
+        method: Method,
+        path: &str,
+        method_router: MethodRouter<S>,
+    ) -> Self {
         self.manifest.push(Registration {
-            fqname: type_name::<H>().to_owned(),
+            fqname,
             method: method.as_str().to_owned(),
             path: path.to_owned(),
             path_params: parse_path_params(path),
@@ -116,9 +133,13 @@ where
         content_type: &'static str,
         cache: CachePolicy,
     ) -> Self {
-        self.get(path, move || async move {
-            serve_static(bytes, content_type, cache)
-        })
+        let fqname = format!("<static_file> GET {path}");
+        self.record_raw(
+            fqname,
+            Method::GET,
+            path,
+            axum::routing::get(move || async move { serve_static(bytes, content_type, cache) }),
+        )
     }
 
     /// Serve a set of named embedded files under `<prefix>/{name}`: a recorded
@@ -128,14 +149,17 @@ where
     /// name is a plain `404`.
     pub fn static_dir(self, prefix: &str, files: &'static AssetSet, cache: CachePolicy) -> Self {
         let path = format!("{}/{{name}}", prefix.trim_end_matches('/'));
-        self.get(
+        let fqname = format!("<static_dir> GET {path}");
+        self.record_raw(
+            fqname,
+            Method::GET,
             &path,
-            move |AssetPath(name): AssetPath<String>| async move {
+            axum::routing::get(move |AssetPath(name): AssetPath<String>| async move {
                 match safe_asset_path(&name).and_then(|n| files.get(n)) {
                     Some(bytes) => serve_static(bytes, content_type_for(&name), cache),
                     None => StatusCode::NOT_FOUND.into_response(),
                 }
-            },
+            }),
         )
     }
 
