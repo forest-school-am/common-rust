@@ -231,9 +231,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "common-config"
+version = "0.3.0"
+dependencies = [
+ "common-config-derive",
+ "strum",
+ "toml",
+]
+
+[[package]]
+name = "common-config-derive"
+version = "0.3.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "common-logging"
 version = "0.3.0"
 dependencies = [
+ "common-config",
  "serde_json",
  "strum",
  "time",

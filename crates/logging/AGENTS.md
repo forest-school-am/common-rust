@@ -7,13 +7,19 @@ the request-span helper. Every Les Rust crate depends on it, `common-oidc`
 included. Change here ripples fleet-wide — treat the output contract as public.
 
 ## Layout
-- `src/lib.rs` — public API + `init`/`init_with` (builds the subscriber);
-  inline format/designator tests.
+- `src/lib.rs` — public API + `boot` (common-config load → `refuse!` →
+  `init_with` from the `Common` section → returns the config), `init`
+  (env-only, pre-migration binaries), `init_with` (builds the subscriber);
+  inline format/designator tests. Re-exports `common_config::{Refusal,
+  Deployment, Format}` under their old paths — those types moved out with
+  R114 item 9 so that common-config depends on nothing in the workspace.
 - `src/refuse.rs` — `refuse!`, `__refusal_line!` and the exit: the refusal
   path only.
 - `src/config.rs` — `LogConfig::resolve` (pure `LOG_FORMAT`/`DEPLOYMENT_TYPE`/
-  `RUST_LOG`/`LOG_DESIGNATORS` → `Result<LogConfig, Refusal>`) + one
-  refuse/default test per variable. `env_filter()` is the `RUST_LOG` check.
+  `RUST_LOG`/`LOG_DESIGNATORS` texts → `Result<LogConfig, Refusal>`),
+  `LogConfig::from_common(&Common, rust_log)` (the typed path `boot` takes),
+  one refuse/default test per variable. `env_filter()` is the `RUST_LOG`
+  check; `RUST_LOG` is deliberately NOT a config field.
 - `src/filter.rs` — `Designators`, the `LOG_DESIGNATORS` axis: parsing,
   validation, and the `Filter` impl that reads the designator FIELD. Anything
   about which events pass goes here; what a designator means stays in
@@ -77,11 +83,17 @@ included. Change here ripples fleet-wide — treat the output contract as public
   expand at the ADOPTER's call site, so the span and the refusal carry the
   adopter's module path rather than this crate's.
   `tests/request_span_callsite.rs` asserts both from outside the crate, which
-  is the only place either can be asserted.
+  is the only place either can be asserted. `boot` is a FUNCTION by design:
+  the refusals it raises are common-config's (a wrong type, a missing
+  required value, an unknown flag) and carry `common_logging` as target; an
+  adopter's own post-load refusal still goes through `refuse!` at its site.
+- No workspace dependency but common-config, which depends on nothing: the
+  arrow is config ← logging ← everything else.
 - `actor` renders `-` until `set_actor`; `reqid` is per request.
 - No network, no IO clients — this crate stays dependency-light (tracing,
-  tracing-subscriber, time, and strum + strum_macros/heck for the §4.5
-  declare-once mechanism, R17a). Adding a dep here taxes the whole fleet.
+  tracing-subscriber, time, common-config with its toml parser, and strum +
+  strum_macros/heck for the §4.5 declare-once mechanism, R17a). Adding a dep
+  here taxes the whole fleet.
 
 ## Run / test
 `nix develop --impure -c cargo test` at the WORKSPACE root (frozen 1.98.0

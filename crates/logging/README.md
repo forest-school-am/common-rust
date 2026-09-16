@@ -34,15 +34,22 @@ to the published crate and rewrites your lockfile to say so. Run
 
 ## Use
 
-One call at the top of `main` (reads `LOG_FORMAT`, `DEPLOYMENT_TYPE`,
-`RUST_LOG` and `LOG_DESIGNATORS`):
+One call at the top of `main`. `boot` loads the binary's `#[derive(Config)]`
+tree through common-config (defaults < file < env < args), refuses any config
+fault as the `startup` line below, brings the subscriber up from the tree's
+`common` section (`DEPLOYMENT_TYPE`, `LOG_FORMAT`, `LOG_DESIGNATORS`, plus
+`RUST_LOG` from the environment) and returns the config:
 
 ```rust
 fn main() {
-    common_logging::init();
+    let config: MyConfig = common_logging::boot();
     // …
 }
 ```
+
+`init()` is the environment-only form for a binary that has not moved to
+common-config yet (reads the four variables itself). `Refusal`, `Deployment`
+and `Format` are `common_config`'s, re-exported here under their old paths.
 
 Emit through `log::<level>::<designator>!` — the level is the module, the
 **designator** (§8.3) is the macro, and it becomes the event's `designator`
@@ -189,34 +196,36 @@ refusal with no special case:
 |---|---|
 | `level` | `ERROR` |
 | `designator` | `startup` |
-| `variable` | the environment variable that was rejected |
+| `variable` | the spelling that was rejected: an environment variable, a flag, a `file: key` |
 | `value` | what it was set to |
 | `accepted` | what would have been accepted |
 | `detail` | the underlying parser's own error, or `-` — for `RUST_LOG` it is tracing's message, the only part that says WHERE the filter is wrong |
 | `target` | the module that raised it |
 
 A service that wants to handle the refusal itself rather than exit calls
-`LogConfig::from_env()` (or `Format`/`Deployment::from_env`, or
-`Designators::parse`) and gets a [`Refusal`] as the `Err`: the same parts as
-fields, and `Display` renders them as one sentence.
+`LogConfig::from_common(&common, rust_log)` / `LogConfig::from_env()` (or
+`Format`/`Deployment::parse`, or `Designators::parse`) and gets a [`Refusal`]
+as the `Err`: the same parts as fields, and `Display` renders them as one
+sentence.
 
 ## Refusing your own boot (R51)
 
-A service's own boot refusals take the same shape — one `startup` line, then
-exit 1 — so build a `Refusal` and hand it to `refuse!`:
+Type and range faults are refused by `boot` before `main` sees the config. A
+service's own post-load checks (a taken port, two options that exclude each
+other, a directory it cannot create) take the same shape — one `startup`
+line, then exit 1 — so build a `Refusal` and hand it to `refuse!` AT THE SITE,
+which is what stamps the service's own target on the line:
 
 ```rust
 fn main() {
-    common_logging::init();
-
-    let bind = std::env::var("REGISTRY_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
-    let bind: std::net::SocketAddr = match bind.parse() {
-        Ok(addr) => addr,
+    let config: Registry = common_logging::boot();
+    let listener = match std::net::TcpListener::bind(&config.bind) {
+        Ok(listener) => listener,
         Err(e) => common_logging::refuse!(
             common_logging::Refusal::new(
                 "REGISTRY_BIND",
-                bind,
-                r#"a socket address such as "0.0.0.0:8080""#,
+                config.bind.clone(),
+                r#"a free socket address such as "0.0.0.0:8080""#,
             )
             .with_detail(e.to_string())
         ),

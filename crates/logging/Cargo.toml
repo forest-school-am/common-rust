@@ -3,9 +3,13 @@ name = "common-logging"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Shared logging for Les stand crates: subscriber setup, designators, emission macros, request-span helper"
+description = "Shared logging for Les stand crates: subscriber setup, designators, emission macros, request-span helper, boot (config load + refusal + init)"
 
 [dependencies]
+# Refusal, Deployment, Format and the Common section live there and are
+# re-exported here under their old paths; `boot` loads a consumer's config
+# through it.
+common-config.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "std",

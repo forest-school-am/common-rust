@@ -11,7 +11,8 @@ use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::{Context, Filter};
 
-use crate::config::Refusal;
+use common_config::{Refusal, LOG_DESIGNATORS_VARIABLE};
+
 use crate::designator::{Designator, CUSTOM_PREFIX, FIELD, STAND};
 
 const LEVELS: [&str; 6] = ["trace", "debug", "info", "warn", "error", "off"];
@@ -55,7 +56,7 @@ impl Designators {
     }
 
     pub fn from_env() -> Result<Self, Refusal> {
-        Self::parse(std::env::var("LOG_DESIGNATORS").ok().as_deref())
+        Self::parse(std::env::var(LOG_DESIGNATORS_VARIABLE).ok().as_deref())
     }
 
     fn admits(&self, designator: Option<&str>, level: &tracing::Level) -> bool {
@@ -73,11 +74,12 @@ impl Designators {
 }
 
 fn parse_level(text: &str) -> Result<LevelFilter, Refusal> {
-    LevelFilter::from_str(text).map_err(|_| Refusal {
-        variable: "LOG_DESIGNATORS",
-        value: text.to_owned(),
-        accepted: format!("a level, one of {LEVELS:?}"),
-        detail: None,
+    LevelFilter::from_str(text).map_err(|_| {
+        Refusal::new(
+            LOG_DESIGNATORS_VARIABLE,
+            text,
+            format!("a level, one of {LEVELS:?}"),
+        )
     })
 }
 
@@ -88,15 +90,14 @@ fn check_designator(name: &str) -> Result<(), Refusal> {
         return Ok(());
     }
     let stand: Vec<&str> = STAND.iter().map(AsRef::as_ref).collect();
-    Err(Refusal {
-        variable: "LOG_DESIGNATORS",
-        value: name.to_owned(),
-        accepted: format!(
+    Err(Refusal::new(
+        LOG_DESIGNATORS_VARIABLE,
+        name,
+        format!(
             "a designator, one of {stand:?}, or a project designator carrying \
              the {CUSTOM_PREFIX:?} prefix"
         ),
-        detail: None,
-    })
+    ))
 }
 
 #[derive(Default)]

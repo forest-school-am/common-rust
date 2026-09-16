@@ -29,7 +29,7 @@ macro_rules! __refusal_line {
         let refusal: $crate::Refusal = $refusal;
         $crate::__unfiltered(|| {
             $crate::error::startup!(
-                variable = refusal.variable,
+                variable = refusal.variable.as_str(),
                 value = %refusal.value,
                 accepted = %refusal.accepted,
                 detail = refusal.detail.as_deref().unwrap_or("-"),

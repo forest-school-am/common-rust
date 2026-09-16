@@ -1,6 +1,7 @@
 //! Subscriber setup and the crate's public surface. Assembly only — the
 //! pieces live in config.rs, filter.rs, format.rs, designator.rs, macros.rs
-//! and span.rs.
+//! and span.rs. `Refusal`, `Deployment` and `Format` are common-config's,
+//! re-exported here under their old paths.
 //!
 //! ```
 //! use common_logging as log;
@@ -24,7 +25,8 @@ mod span;
 
 pub use tracing;
 
-pub use config::{Deployment, Format, LogConfig, Refusal};
+pub use common_config::{Deployment, Format, Refusal};
+pub use config::{LogConfig, RUST_LOG_VARIABLE};
 pub use designator::{Designator, AUTH, BUSINESS, HTTP, STAND, STARTUP, STORAGE, UPSTREAM};
 pub use filter::Designators;
 pub use macros::{debug, error, info, trace, warn};
@@ -38,6 +40,30 @@ use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
+/// The one call at the top of a binary's `main`: loads `T` through
+/// common-config (defaults < file < env < args; `--help` and
+/// `--print-config` print and exit 0), refuses any config fault as the
+/// `startup` JSON line and exit 1, brings the subscriber up from `T`'s
+/// `common` section (`RUST_LOG` read from the environment, as tracing's own
+/// variable), and returns the config. Refusals raised here carry this
+/// crate's target; the binary's own post-load checks go through `refuse!`
+/// at their site and carry the binary's.
+pub fn boot<T: common_config::Root>() -> T {
+    let config = match common_config::load::<T>() {
+        Ok(config) => config,
+        Err(refusal) => crate::refuse!(refusal),
+    };
+    let rust_log = std::env::var(RUST_LOG_VARIABLE).ok();
+    match LogConfig::from_common(config.common(), rust_log.as_deref()) {
+        Ok(cfg) => init_with(cfg),
+        Err(refusal) => crate::refuse!(refusal),
+    }
+    config
+}
+
+/// Environment-only initialisation for a binary that has not moved to
+/// common-config yet: reads `LOG_FORMAT`, `DEPLOYMENT_TYPE`, `RUST_LOG` and
+/// `LOG_DESIGNATORS` itself.
 pub fn init() {
     match LogConfig::from_env() {
         Ok(cfg) => init_with(cfg),

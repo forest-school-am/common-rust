@@ -1,117 +1,20 @@
-//! What the logging environment says: formats, deployment class, filters.
-//! Resolution and parsing only — nothing here writes a log line.
+//! What the logging environment says: format, deployment class, filters.
+//! Resolution and parsing only — nothing here writes a log line. The value
+//! types (`Format`, `Deployment`) and `Refusal` are common-config's, so a
+//! binary's derived config carries them without a second parse.
 
-use std::fmt;
-use std::str::FromStr;
-
-use strum::{AsRefStr, Display, EnumString, VariantNames};
+use common_config::{Common, Deployment, Format, Refusal};
 use tracing_subscriber::EnvFilter;
 
 use crate::filter::Designators;
 
 pub(crate) const DEFAULT_FILTER: &str = "info";
 
+pub const RUST_LOG_VARIABLE: &str = "RUST_LOG";
+
 const RUST_LOG_ACCEPTED: &str = "comma-separated tracing directives such as \
      \"info\", \"my_crate=debug\" or \"my_crate::module=trace,sqlx=warn\" \
      (unset means \"info\" under DEPLOYMENT_TYPE=prod, \"debug\" under dev)";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Refusal {
-    pub variable: &'static str,
-    pub value: String,
-    pub accepted: String,
-    pub detail: Option<String>,
-}
-
-impl Refusal {
-    pub fn new(
-        variable: &'static str,
-        value: impl Into<String>,
-        accepted: impl Into<String>,
-    ) -> Self {
-        Self {
-            variable,
-            value: value.into(),
-            accepted: accepted.into(),
-            detail: None,
-        }
-    }
-
-    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
-        self.detail = Some(detail.into());
-        self
-    }
-}
-
-impl fmt::Display for Refusal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}={:?} is not valid — expected {}",
-            self.variable, self.value, self.accepted
-        )?;
-        match &self.detail {
-            Some(detail) => write!(f, " ({detail})"),
-            None => Ok(()),
-        }
-    }
-}
-
-impl std::error::Error for Refusal {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, Display, EnumString, VariantNames)]
-pub enum Format {
-    #[strum(serialize = "human")]
-    Human,
-    #[strum(serialize = "json")]
-    Json,
-}
-
-impl Format {
-    pub fn parse(value: Option<&str>) -> Result<Self, Refusal> {
-        let Some(text) = value else {
-            return Ok(Format::Json);
-        };
-        Format::from_str(text).map_err(|_| Refusal {
-            variable: "LOG_FORMAT",
-            value: text.to_owned(),
-            accepted: format!("one of {:?} (unset means json)", Format::VARIANTS),
-            detail: None,
-        })
-    }
-
-    pub fn from_env() -> Result<Self, Refusal> {
-        Self::parse(std::env::var("LOG_FORMAT").ok().as_deref())
-    }
-}
-
-/// Only the logging verbosity default is decided from this here; the
-/// prod-required / dev-only / neutral option rules are each service's own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, Display, EnumString, VariantNames)]
-pub enum Deployment {
-    #[strum(serialize = "prod")]
-    Prod,
-    #[strum(serialize = "dev")]
-    Dev,
-}
-
-impl Deployment {
-    pub fn parse(value: Option<&str>) -> Result<Self, Refusal> {
-        let Some(text) = value else {
-            return Ok(Deployment::Dev);
-        };
-        Deployment::from_str(text).map_err(|_| Refusal {
-            variable: "DEPLOYMENT_TYPE",
-            value: text.to_owned(),
-            accepted: format!("one of {:?} (unset means dev)", Deployment::VARIANTS),
-            detail: None,
-        })
-    }
-
-    pub fn from_env() -> Result<Self, Refusal> {
-        Self::parse(std::env::var("DEPLOYMENT_TYPE").ok().as_deref())
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct LogConfig {
@@ -122,6 +25,8 @@ pub struct LogConfig {
 }
 
 impl LogConfig {
+    /// From the four raw environment texts: the pre-common-config path, and
+    /// what `init()` still reads.
     pub fn resolve(
         log_format: Option<&str>,
         deployment_type: Option<&str>,
@@ -130,6 +35,26 @@ impl LogConfig {
     ) -> Result<Self, Refusal> {
         let format = Format::parse(log_format)?;
         let deployment = Deployment::parse(deployment_type)?;
+        Self::assemble(format, deployment, rust_log, log_designators)
+    }
+
+    /// From a loaded `Common` section plus `RUST_LOG`, which stays tracing's
+    /// own variable rather than a config field.
+    pub fn from_common(common: &Common, rust_log: Option<&str>) -> Result<Self, Refusal> {
+        Self::assemble(
+            common.log_format,
+            common.deployment,
+            rust_log,
+            common.log_designators.as_deref(),
+        )
+    }
+
+    fn assemble(
+        format: Format,
+        deployment: Deployment,
+        rust_log: Option<&str>,
+        log_designators: Option<&str>,
+    ) -> Result<Self, Refusal> {
         let filter = match rust_log {
             Some(s) if !s.is_empty() => s.to_owned(),
             _ => match deployment {
@@ -150,19 +75,17 @@ impl LogConfig {
     pub fn from_env() -> Result<Self, Refusal> {
         let get = |k: &str| std::env::var(k).ok();
         Self::resolve(
-            get("LOG_FORMAT").as_deref(),
-            get("DEPLOYMENT_TYPE").as_deref(),
-            get("RUST_LOG").as_deref(),
-            get("LOG_DESIGNATORS").as_deref(),
+            get(common_config::LOG_FORMAT_VARIABLE).as_deref(),
+            get(common_config::DEPLOYMENT_VARIABLE).as_deref(),
+            get(RUST_LOG_VARIABLE).as_deref(),
+            get(common_config::LOG_DESIGNATORS_VARIABLE).as_deref(),
         )
     }
 
     pub fn env_filter(&self) -> Result<EnvFilter, Refusal> {
-        EnvFilter::try_new(&self.filter).map_err(|e| Refusal {
-            variable: "RUST_LOG",
-            value: self.filter.clone(),
-            accepted: RUST_LOG_ACCEPTED.to_owned(),
-            detail: Some(e.to_string()),
+        EnvFilter::try_new(&self.filter).map_err(|e| {
+            Refusal::new(RUST_LOG_VARIABLE, self.filter.clone(), RUST_LOG_ACCEPTED)
+                .with_detail(e.to_string())
         })
     }
 }
@@ -299,29 +222,12 @@ mod tests {
     }
 
     #[test]
-    fn the_declared_spellings_are_the_ones_on_the_wire() {
-        assert_eq!(Format::VARIANTS, &["human", "json"]);
-        assert_eq!(Deployment::VARIANTS, &["prod", "dev"]);
-        assert_eq!(Deployment::Prod.as_ref(), "prod");
-        assert_eq!(Deployment::Dev.to_string(), "dev");
-    }
-
-    #[test]
     fn the_two_filter_axes_do_not_touch_each_other() {
         let cfg = ok(None, None, Some("mycrate=debug"), Some("auth=trace"));
         assert_eq!(cfg.filter, "mycrate=debug");
         assert_eq!(
             cfg.designators,
             Designators::parse(Some("auth=trace")).unwrap()
-        );
-    }
-
-    #[test]
-    fn the_rendered_refusal_names_the_variable_the_value_and_the_array() {
-        let rendered = Deployment::parse(Some("prd")).unwrap_err().to_string();
-        assert_eq!(
-            rendered,
-            r#"DEPLOYMENT_TYPE="prd" is not valid — expected one of ["prod", "dev"] (unset means dev)"#
         );
     }
 
@@ -349,51 +255,31 @@ mod tests {
         assert_eq!(d.designators, Designators::permissive());
         d.env_filter().expect("the default filter must be valid");
     }
-}
-
-#[cfg(test)]
-mod deployment_tests {
-    use super::*;
 
     #[test]
-    fn unset_is_dev_and_the_two_valid_values_parse() {
-        assert_eq!(Deployment::parse(None).unwrap(), Deployment::Dev);
-        assert_eq!(Deployment::parse(Some("dev")).unwrap(), Deployment::Dev);
-        assert_eq!(Deployment::parse(Some("prod")).unwrap(), Deployment::Prod);
-    }
-
-    #[test]
-    fn set_but_invalid_refuses_rather_than_defaulting_to_dev() {
-        for bad in ["Prod", "PROD", "Dev", "production", "prd", ""] {
-            assert!(
-                Deployment::parse(Some(bad)).is_err(),
-                "DEPLOYMENT_TYPE={bad:?} must be refused, not treated as dev"
-            );
-        }
-    }
-
-    #[test]
-    fn the_refusal_names_every_accepted_spelling() {
-        let r = Deployment::parse(Some("prd")).unwrap_err();
-        for value in Deployment::VARIANTS {
-            assert!(
-                r.accepted.contains(value),
-                "refusal must name {value:?}: {r:?}"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod deployment_str_tests {
-    use super::*;
-
-    #[test]
-    fn as_str_round_trips_through_parse() {
-        for d in [Deployment::Prod, Deployment::Dev] {
-            assert_eq!(Deployment::parse(Some(d.as_ref())).unwrap(), d);
-            assert_eq!(d.to_string(), d.as_ref());
-        }
-        assert!(Deployment::parse(Some(&format!("{:?}", Deployment::Prod))).is_err());
+    fn from_common_takes_the_typed_values_and_rust_log_separately() {
+        let common = Common {
+            deployment: Deployment::Prod,
+            log_format: Format::Human,
+            log_designators: Some("auth=trace".into()),
+        };
+        let cfg = LogConfig::from_common(&common, None).expect("resolves");
+        assert_eq!(cfg.format, Format::Human);
+        assert_eq!(cfg.deployment, Deployment::Prod);
+        assert_eq!(cfg.filter, "info", "prod default when RUST_LOG is unset");
+        assert_eq!(
+            cfg.designators,
+            Designators::parse(Some("auth=trace")).unwrap()
+        );
+        let cfg = LogConfig::from_common(&common, Some("mycrate=trace")).expect("resolves");
+        assert_eq!(cfg.filter, "mycrate=trace");
+        let r = LogConfig::from_common(&common, Some("=")).unwrap_err();
+        assert_eq!(r.variable, "RUST_LOG");
+        let bad = Common {
+            log_designators: Some("nonsense=info".into()),
+            ..common
+        };
+        let r = LogConfig::from_common(&bad, None).unwrap_err();
+        assert_eq!(r.variable, "LOG_DESIGNATORS");
     }
 }

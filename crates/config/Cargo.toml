@@ -1,0 +1,16 @@
+[package]
+name = "common-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Layered configuration for Les stand binaries: one derived schema spells every value as a toml key, an env var and a flag; defaults < file < env < args"
+
+# Depends on NOTHING else in the workspace: common-logging depends on this
+# crate (for Refusal, Deployment, Format and the Common section), not the
+# other way round.
+[dependencies]
+common-config-derive.workspace = true
+# Deployment and Format are strum enums, declared once (§4.5).
+strum = { version = "0.26", features = ["derive"] }
+# `parse` only: this crate reads a file and never writes one.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
