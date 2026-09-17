@@ -336,6 +336,27 @@ impl Pin {
         rows
     }
 
+    /// The build markers that are a pure function of the pin and identical in
+    /// EVERY consumer (R117, finding #3): the prefix and the SRI of the four
+    /// sheets/script each page links. A `build.rs` extends its app-specific
+    /// marker list with this, so a new shared linked sheet is added in one
+    /// place, not once per app. Every value is read from the manifest the pin
+    /// already verified — a hash is never hand-copied.
+    ///
+    /// Panics if the manifest omits one of the four core assets: every prefix
+    /// ships them, so a prefix missing one is a broken build, not a caller
+    /// error (the same `sri` panic the consumers' `build.rs` already take).
+    pub fn shared_markers(&self) -> Vec<(&'static str, String)> {
+        let sri = |name: &str| self.sri(name).unwrap_or_else(|e| panic!("{e}")).to_owned();
+        vec![
+            ("prefix", self.prefix.clone()),
+            ("sri_base_css", sri("base.css")),
+            ("sri_palette_css", sri("theme-default/palette.css")),
+            ("sri_elements_css", sri("elements.css")),
+            ("sri_common_ui_js", sri("common-ui.js")),
+        ]
+    }
+
     /// The policy the prefix declares, `{{assets_origin}}` still in it.
     pub fn csp(&self) -> &str {
         &self.markers.csp
@@ -432,4 +453,66 @@ pub fn stamp(shell: &str, values: &[(&str, &str)]) -> String {
              {e:#}\n\nshell:\n{shell}"
         )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PREFIX: &str = "common-ui@abc123def456";
+    const SHELL_HTML: &str = "<html>[[prefix]]</html>";
+    const MARKERS_JSON: &str = r#"{"csp":"default-src 'self' {{assets_origin}}"}"#;
+    const DTS: &str = "export {};\n";
+
+    /// A `Pin` over a fixture manifest: the three embedded files carry real
+    /// digests (so `from_parts` verification passes) and the linked assets
+    /// carry recognisable SRI strings we can assert on.
+    fn pin() -> Pin {
+        let mut files = BTreeMap::new();
+        // The three embedded files must hash to what the manifest pins.
+        files.insert(format!("{PREFIX}/{SHELL}"), sha384(SHELL_HTML.as_bytes()));
+        files.insert(
+            format!("{PREFIX}/{MARKERS}"),
+            sha384(MARKERS_JSON.as_bytes()),
+        );
+        files.insert(format!("{PREFIX}/{TYPES}"), sha384(DTS.as_bytes()));
+        // The linked assets: SRI is read from the manifest, not recomputed.
+        files.insert(format!("{PREFIX}/base.css"), "sha384-BASE".into());
+        files.insert(format!("{PREFIX}/elements.css"), "sha384-ELEMENTS".into());
+        files.insert(format!("{PREFIX}/common-ui.js"), "sha384-JS".into());
+        files.insert(
+            format!("{PREFIX}/theme-default/palette.css"),
+            "sha384-PALETTE".into(),
+        );
+        let manifest = Manifest {
+            prefix: Some(PREFIX.to_owned()),
+            files,
+            raw: String::new(),
+        };
+        Pin::from_parts(
+            PREFIX,
+            manifest,
+            Files {
+                shell: SHELL_HTML.to_owned(),
+                markers: MARKERS_JSON.to_owned(),
+                dts: DTS.to_owned(),
+            },
+        )
+        .expect("the fixture files match their pinned digests")
+    }
+
+    #[test]
+    fn shared_markers_are_the_five_keyed_from_the_manifest() {
+        let markers = pin().shared_markers();
+        assert_eq!(
+            markers,
+            vec![
+                ("prefix", PREFIX.to_owned()),
+                ("sri_base_css", "sha384-BASE".to_owned()),
+                ("sri_palette_css", "sha384-PALETTE".to_owned()),
+                ("sri_elements_css", "sha384-ELEMENTS".to_owned()),
+                ("sri_common_ui_js", "sha384-JS".to_owned()),
+            ]
+        );
+    }
 }

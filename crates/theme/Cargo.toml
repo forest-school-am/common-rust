@@ -1,0 +1,17 @@
+[package]
+name = "common-theme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The les_theme/les_theme_v cookie contract in ONE place: parse the two cookies, build the per-request theme override <link> (R113/R117). No baked theme table."
+
+[dependencies]
+# `AssetsOrigin` only — the validated, trailing-slash-free asset origin the
+# override link is built against. common-templating does NOT depend on this
+# crate, so there is no cycle: theme → templating is the only edge.
+common-templating.workspace = true
+
+[dev-dependencies]
+# `Deployment`, to build an `AssetsOrigin` in tests (its only constructor is
+# `parse`, which takes a deployment). Not needed at run time.
+common-logging.workspace = true
