@@ -1,0 +1,236 @@
+/* theme-soft — calm, rounded (0.75rem), tonal: near-neutral page, the violet
+   accent used sparingly with its tint living in chips and washes, coral only as
+   the secondary role, hairline borders, near-flat elevation. System fonts. */
+:root {
+  --bg: #f7f7f9;
+  --card: #ffffff;
+  --fg: #1e1b2e;
+  --mut: #5c5a72;
+  --acc: #6d28d9;
+  --ok: #11713a;
+  --warn: #9c5200;
+  --err: #b91c3c;
+  --refused: #a21caf;
+  --bd: #8b8797;
+  --chip: #ede9fe;
+  --chipfg: #4c1d95;
+
+  /* R80's second accent: a muted coral for the SECONDARY role only. */
+  --alt: #7c4dbd;
+  --alt-fg: #ffffff;
+
+  --acc-fg: #ffffff;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --err-fg: #ffffff;
+  --acc-wash: color-mix(in srgb, var(--acc) 10%, var(--card));
+  --ok-wash: color-mix(in srgb, var(--ok) 10%, var(--card));
+  --warn-wash: color-mix(in srgb, var(--warn) 10%, var(--card));
+  --err-wash: color-mix(in srgb, var(--err) 10%, var(--card));
+  --refused-wash: color-mix(in srgb, var(--refused) 10%, var(--card));
+
+  --lf-expr-keyword: #4f46e5;
+  --lf-expr-string: #11713a;
+  --lf-expr-number: #9c5200;
+  --lf-expr-binding: #b0277c;
+  --lf-expr-comment: #5c5a72;
+
+  --font-size: 1.05rem;
+  --font-size-sm: 0.875rem;
+
+  --roundness: 0.75rem;
+  --roundness-control: var(--roundness);
+  /* 1.125rem: at x2 a card was 1.5rem and read as a bubble beside 0.75rem controls. */
+  --roundness-card: calc(var(--roundness) * 1.5);
+  --roundness-pill: calc(var(--roundness) * 100);
+  --bw: 1px;
+  /* R95.2: an invalid field differs in greyscale, not by hue alone. */
+  --bw-invalid: calc(var(--bw) * 2);
+
+  --space: 0.625rem;
+  --pad-control: calc(var(--space) * 0.75);
+  --pad-card: calc(var(--space) * 2);
+  --gap: var(--space);
+  --gap-section: calc(var(--space) * 2.5);
+
+  --shadow-card: 0 1px 2px rgb(20 18 30 / 0.04), 0 4px 12px rgb(20 18 30 / 0.05);
+  --shadow-popup: 0 8px 24px rgb(20 18 30 / 0.12);
+  /* L2: the edge of a SURFACE (card, menu, listbox, panel, dialog, toast, bar);
+     controls keep --bw. L1: elevation for the floating surfaces and the bar. */
+  --bw-surface: var(--bw);
+  --shadow-float: none;
+  --shadow-bar: none;
+  /* L5: motion. 0s keeps every shipped theme still; reduced motion zeroes it anyway. */
+  --motion-duration: 0s;
+  --motion-easing: linear;
+  --motion-duration-enter: 0s;
+  --motion-easing-enter: linear;
+  /* L6: the surface ladder — 1 card, 2 panel, 3 menu/listbox/toast, 4 dialog —
+     and the bar's own ground. All --card here, so nothing moves. */
+  --surface-1: var(--card);
+  --surface-2: var(--card);
+  --surface-3: var(--card);
+  --surface-4: var(--card);
+  --bar-bg: var(--card);
+  /* L8: state layers — the element's own ink over its fill, as a percentage. */
+  --state-hover: 0%;
+  --state-press: 0%;
+  /* L15: a button's corner of its own. L16: the intent card's stripe. */
+  --roundness-btn: var(--roundness-control);
+  --bw-card-intent: var(--bw-surface);
+  /* L9: a raised control, a field's well, and the press. Nothing raised, nothing
+     sunk and nothing moves at these values. */
+  --shadow-control: none;
+  --shadow-field: none;
+  --shadow-press: var(--shadow-control);
+  --press-translate: none;
+  /* L11: the type system's shape, and L12's button label weight. These are the
+     values the sheets used as literals: body 1.5, bold headings, no tracking,
+     h2 at 1.2 of the body, labels at 600. */
+  --leading: 1.5;
+  --heading-weight: 700;
+  --heading-tracking: normal;
+  --heading-scale: 1.2;
+  --btn-weight: 600;
+  /* The card's own edge, 1 to 4 widths, so a card can be a single rule. The
+     other surfaces keep --bw-surface, which panel and bar read one side of. */
+  --bw-card: var(--bw-surface);
+  /* L17 (glass): the lit ground under the page, the frost behind a glass surface, a surface's own edge
+     colour, the frost behind a modal's scrim, and a link card's lift. At these values nothing moves. */
+  --bg-image: none;
+  --surface-blur: none;
+  --bd-surface: var(--bd);
+  --scrim-blur: none;
+  --hover-lift: none;
+  --ring: #6d28d9;
+  --ring-width: 2px;
+
+  --font: "Avenir Next", "Nunito", "Segoe UI", system-ui, sans-serif;
+  --font-heading: var(--font);
+  --font-mono: ui-monospace, "Cascadia Mono", Menlo, monospace;
+
+  --content-max: 64rem;
+  --control-min-height: 2.75rem;
+  --col-min: 20rem;
+
+  --field-max: 28rem;
+  --table-min: 34rem;
+  /* The band steps toward the ink from the ground NEARER to it, so it stands
+     off both: the page ground here, the card in the dark block. */
+  --table-header-bg: color-mix(in srgb, var(--fg) 5%, var(--bg));
+
+  --popover-offset: 0.25rem;
+  --popover-min-width: 12rem;
+
+  /* The modal scrim: neutral ink, the page dimming rather than a colour. */
+  --modal-backdrop: rgb(24 22 34 / 50%);
+  --toast-max: 28rem;
+
+  /* R87 spinner: the accent, sized to the taller control, a slower turn to
+     match the calmer feel. The keyframes name stays spin (elements.css). */
+  --spinner-color: var(--acc);
+  --spinner-size: 2.75rem;
+  --spinner-width: 0.25rem;
+  --spinner-duration: 1.1s;
+  --spinner-animation: spin;
+  --spinner-image: none;
+  --busy-min-height: 6.5rem;
+
+  /* R83's card grid: the default's placement, no reason to differ. */
+  --card-layout: "title actions" "body body" "footer footer";
+  --card-columns: 1fr auto;
+
+  /* Toolbar collapses at the one breakpoint; flipped in the mobile block. */
+  --toolbar-actions-display: flex;
+  --toolbar-overflow-display: none;
+
+  /* R94's side panel: 2rem wider than the default because controls and
+     padding are larger here and 18rem crowds them. */
+  --panel-width: 20rem;
+
+  --btn-font-sm: 0.875rem;
+  --btn-font-lg: 1.0625rem;
+
+  --picker-max-height: 15rem;
+  --picker-offset: 0.25rem;
+
+  /* 3.25rem bar: icon scaled with it (default 1.125rem in a 3rem bar). */
+  --bar-height: 3.25rem;
+  --bar-icon-size: 1.25rem;
+  --bar-portrait-size: 1.875rem;
+  --bar-menu-min-width: 12rem;
+  --bar-pages-display: flex;
+  --bar-burger-display: none;
+
+  --lf-agg-stat-size: 1.875rem;
+  --lf-agg-label-size: 0.75rem;
+  --lf-agg-row-font-size: 0.8125rem;
+  --lf-agg-label-col: 12.5rem;
+  --lf-agg-count-col: 3.25rem;
+  --lf-agg-bar-height: 1.25rem;
+  --row-hover: rgb(20 18 30 / 0.05);
+  --lf-agg-row-hover: var(--row-hover);
+  --lf-agg-track: rgb(20 18 30 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15141b;
+    --card: #1e1d26;
+    --table-header-bg: color-mix(in srgb, var(--fg) 6%, var(--card));
+    --fg: #e9e7f0;
+    --mut: #a5a2b5;
+    --acc: #b8a1ff;
+    --ok: #6ee7a4;
+    --warn: #fcd34d;
+    --err: #ff8a80;
+    --refused: #f0abfc;
+    --bd: #6d6a7e;
+    --chip: #2a2642;
+    --chipfg: #cfc3ff;
+
+    /* Stronger in dark: a scrim over an already dark page barely separates. */
+    --modal-backdrop: rgb(0 0 0 / 65%);
+
+    --alt: #c9a7f0;
+    --alt-fg: #2a120c;
+
+    --acc-fg: #1c1235;
+    --ok-fg: #0c2a1a;
+    --warn-fg: #2b1d02;
+    --err-fg: #3a0c0a;
+
+    --lf-expr-keyword: #9db4ff;
+    --lf-expr-string: #6ee7a4;
+    --lf-expr-number: #fcd34d;
+    --lf-expr-binding: #f0abfc;
+    --lf-expr-comment: #a5a2b5;
+
+    --row-hover: rgb(255 255 255 / 0.07);
+    --lf-agg-track: rgb(255 255 255 / 0.16);
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-popup: 0 8px 24px rgb(0 0 0 / 0.6);
+    --ring: #b8a1ff;
+  }
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --space: 0.5rem;
+    --gap-section: calc(var(--space) * 2);
+    --content-max: 100%;
+    --control-min-height: 3rem;
+    --field-max: 100%;
+    --bar-pages-display: none;
+    --bar-burger-display: inline-flex;
+
+    --toolbar-actions-display: none;
+    --toolbar-overflow-display: inline-flex;
+
+    --panel-width: 100%;
+
+    --card-layout: "title" "actions" "body" "footer";
+    --card-columns: 1fr;
+  }
+}

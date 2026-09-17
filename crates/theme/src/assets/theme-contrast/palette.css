@@ -1,0 +1,248 @@
+/* Theme "contrast": accessibility-first, contemporary. Tonal surfaces, every text role
+   AAA (>= 7:1) on bg and card, status text on its wash >= 5.4:1; 2px mid-grey borders
+   (4px invalid), a 3px foreground focus ring, no card shadow, one restrained accent. */
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --fg: #000000;
+  --mut: #454b55;
+  --acc: #1e40af;
+  --ok: #0f5f2f;
+  --warn: #8a3a00;
+  --err: #a80f0f;
+  --refused: #86198f;
+  --bd: #6b7280;
+  --chip: #e0e7ff;
+  --chipfg: #1e1b4b;
+
+  /* R80's second accent is a NEUTRAL: a secondary action reads as quieter
+     than primary, not as a second hue (Primer's grey secondary button). */
+  --alt: #374151;
+  --alt-fg: #ffffff;
+
+  --acc-fg: #ffffff;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --err-fg: #ffffff;
+  /* 14% rather than 10%: the darker roles have the headroom, and a fainter
+     tint is invisible to the readers this theme serves. */
+  --acc-wash: color-mix(in srgb, var(--acc) 10%, var(--card));
+  --ok-wash: color-mix(in srgb, var(--ok) 10%, var(--card));
+  --warn-wash: color-mix(in srgb, var(--warn) 10%, var(--card));
+  --err-wash: color-mix(in srgb, var(--err) 10%, var(--card));
+  --refused-wash: color-mix(in srgb, var(--refused) 10%, var(--card));
+
+  --lf-expr-keyword: #1e40af;
+  --lf-expr-string: #0f5f2f;
+  --lf-expr-number: #8a3a00;
+  --lf-expr-binding: #6b21a8;
+  --lf-expr-comment: #454b55;
+
+  /* Larger body for an accessibility theme; -sm stays >= 0.85rem and 0.8x body. */
+  --font-size: 1.125rem;
+  --font-size-sm: 0.9375rem;
+
+  --roundness: 0.5rem;
+  --roundness-control: var(--roundness);
+  --roundness-card: calc(var(--roundness) * 2);
+  --roundness-pill: calc(var(--roundness) * 100);
+  --bw: 2px;
+  /* R95.2: twice the ordinary border, so the invalid field differs in
+     greyscale even against this theme's already heavy edges. */
+  --bw-invalid: 4px;
+
+  --space: 0.625rem;
+  --pad-control: calc(var(--space) * 0.75);
+  --pad-card: calc(var(--space) * 2);
+  --gap: var(--space);
+  --gap-section: calc(var(--space) * 2.5);
+
+  /* Near-flat: cards sit on the tonal bg with no shadow; a popup gets one
+     soft low-alpha shadow because it floats over content it resembles. The
+     ring is the FOREGROUND colour, not a hue: it is an outline against the
+     page, and fg beats every fill (19:1 on bg, 8.7:1 beside an accent
+     button) where an accent or orange ring vanishes on an accent fill. */
+  --shadow-card: 0 0 0 0 transparent;
+  --shadow-popup: 0 8px 24px rgb(0 0 0 / 0.12);
+  /* L2: the edge of a SURFACE (card, menu, listbox, panel, dialog, toast, bar);
+     controls keep --bw. L1: elevation for the floating surfaces and the bar. */
+  --bw-surface: var(--bw);
+  --shadow-float: none;
+  --shadow-bar: none;
+  /* L5: motion. 0s keeps every shipped theme still; reduced motion zeroes it anyway. */
+  --motion-duration: 0s;
+  --motion-easing: linear;
+  --motion-duration-enter: 0s;
+  --motion-easing-enter: linear;
+  /* L6: the surface ladder — 1 card, 2 panel, 3 menu/listbox/toast, 4 dialog —
+     and the bar's own ground. All --card here, so nothing moves. */
+  --surface-1: var(--card);
+  --surface-2: var(--card);
+  --surface-3: var(--card);
+  --surface-4: var(--card);
+  --bar-bg: var(--card);
+  /* L8: state layers — the element's own ink over its fill, as a percentage. */
+  --state-hover: 0%;
+  --state-press: 0%;
+  /* L15: a button's corner of its own. L16: the intent card's stripe. */
+  --roundness-btn: var(--roundness-control);
+  --bw-card-intent: var(--bw-surface);
+  /* L9: a raised control, a field's well, and the press. Nothing raised, nothing
+     sunk and nothing moves at these values. */
+  --shadow-control: none;
+  --shadow-field: none;
+  --shadow-press: var(--shadow-control);
+  --press-translate: none;
+  /* L11: the type system's shape, and L12's button label weight. These are the
+     values the sheets used as literals: body 1.5, bold headings, no tracking,
+     h2 at 1.2 of the body, labels at 600. */
+  --leading: 1.5;
+  --heading-weight: 700;
+  --heading-tracking: normal;
+  --heading-scale: 1.2;
+  --btn-weight: 600;
+  /* The card's own edge, 1 to 4 widths, so a card can be a single rule. The
+     other surfaces keep --bw-surface, which panel and bar read one side of. */
+  --bw-card: var(--bw-surface);
+  /* L17 (glass): the lit ground under the page, the frost behind a glass surface, a surface's own edge
+     colour, the frost behind a modal's scrim, and a link card's lift. At these values nothing moves. */
+  --bg-image: none;
+  --surface-blur: none;
+  --bd-surface: var(--bd);
+  --scrim-blur: none;
+  --hover-lift: none;
+  --ring: #000000;
+  --ring-width: 3px;
+
+  --font: -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: var(--font);
+  --font-mono: ui-monospace, "Cascadia Mono", Menlo, monospace;
+
+  --content-max: 64rem;
+  --control-min-height: 2.75rem;
+  --col-min: 20rem;
+
+  --field-max: 28rem;
+  --table-min: 34rem;
+  /* The band steps toward the ink from the ground NEARER to it, so it stands
+     off both: the page ground here, the card in the dark block. */
+  --table-header-bg: color-mix(in srgb, var(--fg) 5%, var(--bg));
+
+  --popover-offset: 0.25rem;
+  --popover-min-width: 13rem;
+
+  /* Heavier than the default's 55%: the dialog has no shadow to lift it. */
+  --modal-backdrop: rgb(0 0 0 / 70%);
+  --toast-max: 30rem;
+
+  /* R87. Pure foreground, thicker stroke and larger than the default so the
+     spinner is a shape, not a tinted ring. Animation name and image are the
+     default's — see the default palette for why the name lives elsewhere. */
+  --spinner-color: var(--fg);
+  --spinner-size: 3rem;
+  --spinner-width: 0.375rem;
+  --spinner-duration: 0.9s;
+  --spinner-animation: spin;
+  --spinner-image: none;
+  --busy-min-height: 7rem;
+
+  /* R83's card grid: layout-typed, so the default's values. */
+  --card-layout: "title actions" "body body" "footer footer";
+  --card-columns: 1fr auto;
+
+  /* Toolbar collapse at the ONE breakpoint; flipped in the mobile block. */
+  --toolbar-actions-display: flex;
+  --toolbar-overflow-display: none;
+
+  /* R94's side panel: wider for the larger type, same stacking as default. */
+  --panel-width: 20rem;
+
+  --btn-font-sm: 0.9375rem;
+  --btn-font-lg: 1.125rem;
+
+  --picker-max-height: 15rem;
+  --picker-offset: 0.25rem;
+
+  /* Bar is 3.5rem, icon scaled with it (1.125 * 3.5 / 3). */
+  --bar-height: 3.5rem;
+  --bar-icon-size: 1.3125rem;
+  --bar-portrait-size: 2rem;
+  --bar-menu-min-width: 13rem;
+  --bar-pages-display: flex;
+  --bar-burger-display: none;
+
+  --lf-agg-stat-size: 2rem;
+  --lf-agg-label-size: 0.8125rem;
+  --lf-agg-row-font-size: 0.875rem;
+  --lf-agg-label-col: 12.5rem;
+  --lf-agg-count-col: 3.25rem;
+  --lf-agg-bar-height: 1.25rem;
+  /* Doubled overlays: a 6% hover is invisible to the readers of this theme. */
+  --row-hover: rgb(0 0 0 / 0.12);
+  --lf-agg-row-hover: var(--row-hover);
+  --lf-agg-track: rgb(0 0 0 / 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0d11;
+    --card: #15181e;
+    --table-header-bg: color-mix(in srgb, var(--fg) 6%, var(--card));
+    --fg: #ffffff;
+    --mut: #b3b9c4;
+    --acc: #66aaff;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #ff7b7b;
+    --refused: #e879f9;
+    --bd: #8a919e;
+    --chip: #1e293b;
+    --chipfg: #c7d2fe;
+
+    --modal-backdrop: rgb(0 0 0 / 80%);
+
+    --alt: #cbd5e1;
+    --alt-fg: #000000;
+
+    --acc-fg: #000000;
+    --ok-fg: #000000;
+    --warn-fg: #000000;
+    --err-fg: #000000;
+
+    --lf-expr-keyword: #93c5fd;
+    --lf-expr-string: #4ade80;
+    --lf-expr-number: #fbbf24;
+    --lf-expr-binding: #c4b5fd;
+    --lf-expr-comment: #b3b9c4;
+
+    --row-hover: rgb(255 255 255 / 0.2);
+    --lf-agg-track: rgb(255 255 255 / 0.3);
+
+    --shadow-card: 0 0 0 0 transparent;
+    --shadow-popup: 0 8px 24px rgb(0 0 0 / 0.6);
+    --ring: #ffffff;
+  }
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --space: 0.5rem;
+    --gap-section: calc(var(--space) * 2);
+    --content-max: 100%;
+    --control-min-height: 3rem;
+    --field-max: 100%;
+    --bar-pages-display: none;
+    --bar-burger-display: inline-flex;
+
+    /* The toolbar flips in the SAME block: one breakpoint on the stand. */
+    --toolbar-actions-display: none;
+    --toolbar-overflow-display: inline-flex;
+
+    /* Whole viewport on a phone, as the default. */
+    --panel-width: 100%;
+
+    /* One column on a phone: title over actions over body. */
+    --card-layout: "title" "actions" "body" "footer";
+    --card-columns: 1fr;
+  }
+}

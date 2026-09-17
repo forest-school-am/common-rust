@@ -1,0 +1,313 @@
+@layer theme, page;
+
+@layer theme {
+* { box-sizing: border-box; }
+
+/* The one html-level rule outside a theme (§12.11). Without it the UA keeps
+   rendering form controls, scrollbars and the canvas in light regardless of
+   the palette — and a palette-colour assertion cannot see that, because it
+   reads only what the palette set. */
+html {
+  color-scheme: light dark;
+  /* THE SCROLLBARS ARE THE THEME'S TOO. Left to `auto` the track renders
+     bright WHITE under every overflowing table, code block and editor in dark
+     mode — the only light surface on the page — and on a tinted LIGHT ground
+     a white track is just as wrong. color-scheme alone did not settle it, and
+     an inherited property set once here reaches shadow content as well, which
+     a rule could not. Thumb in the muted ink, track on the page ground. */
+  scrollbar-color: var(--mut) var(--bg);
+}
+
+/* R89: the footer sits at the viewport bottom on a short page and after the
+   content on a long one. A column flex body with a growing root does that
+   with no JS and no min-height guessing. */
+body {
+  margin: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  /* L17: a theme's lit ground (a gradient), fixed so the page scrolls over it. none here. */
+  background-image: var(--bg-image);
+  background-attachment: fixed;
+  color: var(--fg);
+  font: var(--font-size)/1.5 var(--font);
+  /* L11. A longhand AFTER the shorthand: a var() inside font: makes the whole
+     declaration invalid when the token is missing, and a page with no palette
+     would lose its font. With no palette this falls back to the 1.5 above. */
+  line-height: var(--leading, 1.5);
+}
+
+/* `width: 100%` is LOAD-BEARING, not belt and braces. AUTO MARGINS ON A FLEX
+   ITEM ABSORB FREE SPACE and override `align-items: stretch`, so the old
+   `margin: 0 auto` made this shrink to its CONTENT the moment body became a
+   flex column — which is exactly how les-forms' #root collapsed to 32px.
+   With an explicit width the auto margins have no free space to eat, and the
+   page still centres and still caps at the measure. */
+main {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-inline: auto;
+  padding: var(--pad-card);
+}
+
+/* The root grows so the footer is pushed down; on a long page it simply ends
+   after the content. */
+main#root {
+  flex: 1 1 auto;
+}
+/* A page that is a dashboard rather than a document (§12.11); the page says
+   why in its own CSS. */
+main.wide { max-width: none; }
+
+/* `header`, `.site`, `.nav`, `.who` are GONE: <les-bar> is the stand's header
+   now, and §12.11 promotes a class when a SECOND service needs it — the
+   converse being that vocabulary no consumer uses is removed, not kept.
+   les-forms and cron delete their hand-rolled headers in the same bump that
+   adopts this prefix. `.spacer` stays: it is generic (margin-left: auto) and
+   services use it outside a header. */
+.spacer { margin-left: auto; }
+
+/* --font-heading was declared by every theme and consumed by NOTHING, so a
+   theme that set a display face (one does) got no headings in it. Either the
+   token goes or a sheet uses it; headings are what it is for. */
+h1, h2, h3 {
+  font-family: var(--font-heading);
+  font-weight: var(--heading-weight, 700);
+  letter-spacing: var(--heading-tracking, normal);
+}
+h2 { margin: 1.5rem 0 0.5rem; font-size: calc(var(--font-size) * var(--heading-scale, 1.2)); }
+a { color: var(--acc); }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+.muted { color: var(--mut); }
+.note { font-size: var(--font-size-sm); color: var(--mut); }
+.error { color: var(--err); margin: 0.5rem 0; font-size: var(--font-size-sm); }
+.empty { color: var(--mut); text-align: center; padding: var(--gap-section); }
+
+/* .card and its .card-head helpers moved to elements.css as R83's grid
+   grouping, so a card works inside a shadow root as well as on page markup —
+   the same move .pill and .status-* already made.
+   
+   This comment used to claim no consumer referenced either. That was WRONG
+   when written — les-registry's launcher builds its tiles as el("a", "card")
+   and my survey grepped for class="card" attributes only — and a survey of
+   other repositories is not something a comment here can keep true anyway.
+   What remains true and checkable is the sentence above: the rules moved, and
+   .card-head's helpers went with the move. */
+.row { margin-top: 0.625rem; display: flex; gap: var(--gap); align-items: center; flex-wrap: wrap; }
+.row .lbl { font-size: var(--font-size-sm); color: var(--mut); width: 4.625rem; }
+
+.badge {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--mut);
+  border-style: solid;
+  border-color: var(--bd);
+  border-width: var(--bw);
+  border-radius: var(--roundness-pill);
+  padding: 0 var(--pad-card);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.chip {
+  background: var(--chip);
+  color: var(--chipfg);
+  border-radius: var(--roundness-pill);
+  padding: 0 var(--pad-card);
+  font: 600 0.75rem var(--font-mono);
+}
+
+.scroll-x { overflow-x: auto; margin: 0.5rem 0 1rem; }
+.scroll-x table { min-width: var(--table-min); }
+table { border-collapse: collapse; width: 100%; font-size: var(--font-size-sm); }
+th, td { text-align: left; padding: var(--pad-control); border-bottom-style: solid; border-bottom-color: var(--bd); border-bottom-width: var(--bw); }
+th { font-weight: 600; color: var(--mut); }
+
+/* R84 — a component that would be a class on markup with a native element is
+   a rule on that element. So the FIELD is a <label>: its text above its
+   control, a <small> inside it the hint. These four declarations are what
+   `form.stack label` already said; unscoped, they are a superset of it, which
+   is why retiring that class costs a consumer nothing.
+   
+   form.inline is gone as dead — no consumer anywhere. */
+label {
+  display: block;
+  margin: 0.5rem 0 0.1rem;
+  font-size: var(--font-size-sm);
+  color: var(--mut);
+}
+
+label small {
+  display: block;
+  font-weight: 400;
+  color: var(--mut);
+}
+
+/* A long unbreakable value — a digest, a token — otherwise pushes the
+   document sideways at narrow widths: measured at 105px of horizontal
+   overflow. The fieldset's own min-inline-size is NOT the cause and setting
+   it to 0 leaves every one of those pixels; the token has to be allowed to
+   break. */
+label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The FIELD GRID. --col-min is the theme's, so the column count follows the
+   viewport with no breakpoint of its own, and a <legend> is not a grid item
+   (measured) so it needs no special handling. */
+fieldset {
+  display: grid;
+  /* min() around the floor, because auto-fit takes the FLOOR literally: at a
+     real 360px viewport --col-min (20rem = 320px) is wider than the
+     fieldset's content box, so the single column came out 320px inside 286px
+     and every field overflowed its own fieldset. A theme cannot be relied on
+     to override --col-min for phones, and it should not have to. */
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--col-min), 100%), 1fr));
+  gap: var(--gap) var(--gap-section);
+  align-items: end;
+  margin: 0.5rem 0 1rem;
+  /* BORDERLESS, with the legend as a section label. A bordered, rounded,
+     padded box with a small grey caption notched into its edge is the form
+     chrome R101 names by decade — and since R84 made the fieldset the field
+     grid, every form in the fleet wears it, not just the ones that chose it.
+     The GRID is what a fieldset is here for; the box was never doing any
+     work. A consumer that wants a panel around a group puts it in a .card,
+     which is the vocabulary for that. */
+  padding: 0;
+  border: 0;
+  /* The UA gives a fieldset `min-inline-size: min-content`, which stops it
+     shrinking to its container: measured 350px wide inside 348px at a real
+     360 viewport, pushing the page sideways.
+     
+     This is NOT the same fix as the field's overflow-wrap, and I first
+     measured the two as alternatives. They are complementary: this lets the
+     FIELDSET shrink, and the wrapping lets an unbreakable VALUE inside it
+     break. Each leaves the other's symptom untouched. */
+  min-inline-size: 0;
+}
+
+/* A SECTION LABEL, not a caption notched into a border. Full ink and the
+   heading face, because it names a group of fields and a muted 0.85rem
+   whisper reads as a hint about the first one.
+   
+   TYPE ONLY — no float and no width. A legend already renders above the
+   fieldset's content rather than in it (measured, and the rule above depends
+   on it), and floating it to force a block took it out of flow: the first
+   field then moved up beside it and the check that asserts the legend sits
+   above the fields went red. */
+legend {
+  margin-block-end: var(--gap);
+  padding: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* Span the row: a textarea and a picker are not one column wide, and
+   `grid-column` does reach a custom element host (measured). */
+fieldset > textarea,
+fieldset > les-picker,
+fieldset > .wide {
+  grid-column: 1 / -1;
+}
+input, select, textarea {
+  font: inherit;
+  color: var(--fg);
+  background: var(--card);
+  border-style: solid;
+  border-color: var(--bd);
+  border-width: var(--bw);
+  border-radius: var(--roundness-control);
+  padding: var(--pad-control);
+  width: 100%;
+  max-width: var(--field-max);
+}
+
+/* THE SAME FLOOR AS A BUTTON. elements.css has held `button, .btn` to
+   --control-min-height since it existed, and these were left to their
+   padding — so every row mixing a field with a button had two heights, and
+   two consumers each added a private `min-height: var(--control-min-height)`
+   to their own inputs. Two copies of a rule this sheet should carry is the
+   signal that it belongs here.
+   
+   A textarea is excluded: its height is its rows. A checkbox and a radio are
+   excluded because their box is their glyph, and the touch target for those
+   is the label's business. */
+input:not([type="checkbox"]):not([type="radio"]),
+select {
+  min-height: var(--control-min-height);
+}
+
+/* L9: a field is a well when the theme sinks it. A checkbox and a radio are
+   glyphs, and the field inside a control box has no edge of its own. */
+input:not([type="checkbox"]):not([type="radio"]):not(.control-field),
+select,
+textarea {
+  box-shadow: var(--shadow-field);
+}
+
+/* Inside a field grid the CELL is the width. Measured at 1280: a capped input
+   is 448px in a 467px cell, which leaves 19px of ragged edge on every cell
+   and reads as a defect. Outside a grid the cap is the only thing stopping a
+   single field running the full content column, so it stays there. */
+fieldset input,
+fieldset select,
+fieldset textarea {
+  max-width: none;
+}
+
+/* The ERROR STATE, on the control and not on a class. TWO tokens, and the
+   second is the point: --err gives the hue and --bw-invalid gives a thicker
+   border, so an invalid field differs in GREYSCALE as well as in colour. An
+   error signalled by colour alone is invisible to the readers most likely to
+   need it, and the native validation bubble is no substitute — it is
+   transient and cannot be styled.
+   
+   :user-invalid, not :invalid: measured, an untouched required field is
+   :invalid and would be marked red on load, while :user-invalid waits for the
+   user to have tried. */
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"],
+input:user-invalid,
+select:user-invalid,
+textarea:user-invalid {
+  border-color: var(--err);
+  border-width: var(--bw-invalid);
+}
+input[type=checkbox] {
+  width: auto;
+  min-height: 1.5rem;
+  min-width: 1.5rem;
+  accent-color: var(--acc);
+}
+/* A CHECKBOX's label is the exception to "text above the control": the box
+   belongs beside its text, so this one goes back to a row. Unscoped with the
+   rest, since :has() names the case precisely and a class adds nothing. */
+label:has(> input[type=checkbox]) {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  min-height: var(--control-min-height);
+  margin: 0.5rem 0 0;
+}
+/* form.filters, .filter-wide and .filter-actions are GONE (R84): a filter
+   form is <form method=get> with a <fieldset>, and the wide rows are the
+   spanning rules above. cron was the only consumer. */
+
+/* R80: the RESET only. The whole button vocabulary lives in elements.css,
+   which is linked into the document AND adopted into every shadow root, so a
+   button inside les-table or les-toolbar gets the same rules with no
+   duplication — the same argument that moved .status-*. */
+button, .btn {
+  font: inherit;
+}
+
+/* The eight status words moved to elements.css: rules do not cross a shadow
+   boundary, and <les-table> renders status badges INSIDE one. elements.css is
+   linked into the document AND carried into every shadow root, so the
+   word-to-role mapping has one home on both sides instead of being duplicated
+   into each element that needs it. */
+
+}

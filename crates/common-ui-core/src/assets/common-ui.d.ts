@@ -466,6 +466,20 @@ export declare const STATUS: readonly [
 /* §12.11 — a ninth status word is a type error, not an unstyled badge. */
 export type Status = (typeof STATUS)[number];
 
+/**
+ * The shape of the shell's `<script type="application/json" id="config">`
+ * block, written by the server's `common_oidc::PageConfig`. Consumers read it
+ * with `JSON.parse(document.getElementById("config").textContent)`. Published
+ * here so apps import ONE type instead of hand-keeping a `page-config.d.ts`.
+ */
+export interface PageConfig {
+  assetsOrigin: string;
+  loginPath: string;
+  launcherUrl: string;
+  logoutPath: string;
+  user: { name: string; portrait: string | null } | null;
+}
+
 declare global {
   interface HTMLElementTagNameMap {
     "les-picker": LesPicker;

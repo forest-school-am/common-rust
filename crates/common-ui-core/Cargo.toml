@@ -1,0 +1,11 @@
+[package]
+name = "common-ui-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The BUILT common-ui core carried in a crate (R117): base.css, elements.css, common-ui.js, the shell and the d.ts as committed consts, plus their SRI and the CSP. No Garage fetch — the Cargo version is the pin."
+
+# No dependencies: this crate is nothing but bytes. common-ui-e's build.sh
+# emits the assets under src/assets/ (committed) and this crate include_str!s
+# them, exactly the "built assets in a crate" model the oidc shim uses.
+[dependencies]

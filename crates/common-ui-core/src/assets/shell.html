@@ -9,12 +9,27 @@
      its app chip. Single quotes inside so the attribute stays double-quoted.
      An empty app_icon leaves a blank SVG here and no chip in the bar. -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>[[app_icon]]</text></svg>">
-<link rel="stylesheet" href="{{assets_origin}}/[[prefix]]/base.css" integrity="[[sri_base_css]]" crossorigin="anonymous">
-<link rel="stylesheet" href="{{assets_origin}}/[[prefix]]/theme-default/palette.css" integrity="[[sri_palette_css]]" crossorigin="anonymous">
-{{theme_override}}
-<link rel="stylesheet" href="{{assets_origin}}/[[prefix]]/elements.css" integrity="[[sri_elements_css]]" crossorigin="anonymous">
+<!-- R117 crate-carried delivery: core + the default palette are served by the
+     app itself from /assets (the common_routing static-file mechanism), NOT
+     from a Garage prefix. The Cargo version of common-ui-core / common-theme
+     IS the pin, so no {{assets_origin}}/common-ui@<hash> prefix appears here.
+     integrity+crossorigin still ride the shared sheets/script (the SRI comes
+     from the crates the bytes ship in). -->
+<link rel="stylesheet" href="/assets/base.css" integrity="[[sri_base_css]]" crossorigin="anonymous">
+<!-- The default palette. data-theme-default marks it for the loader to swap;
+     data-assets-origin carries the runtime {{assets_origin}} so the loader can
+     build a Garage URL for a hashed (experimental) theme without the loader
+     file itself being per-request stamped. -->
+<link rel="stylesheet" href="/assets/theme-default/palette.css" integrity="[[sri_palette_css]]" crossorigin="anonymous" data-theme-default data-assets-origin="{{assets_origin}}">
+<!-- The theme loader replaces the old server-side {{theme_override}} link. A
+     CLASSIC (non-module) script in <head> runs SYNCHRONOUSLY before first
+     paint, so it swaps the default <link> for a non-default cookie with no
+     flash for default users. Not hash-pinned: it is app-served page-adjacent
+     code, like [[page_css]] and [[page_module]]. -->
+<script src="/assets/theme-loader.js"></script>
+<link rel="stylesheet" href="/assets/elements.css" integrity="[[sri_elements_css]]" crossorigin="anonymous">
 <link rel="stylesheet" href="[[page_css]]">
-<script type="module" src="{{assets_origin}}/[[prefix]]/common-ui.js" integrity="[[sri_common_ui_js]]" crossorigin="anonymous"></script>
+<script type="module" src="/assets/common-ui.js" integrity="[[sri_common_ui_js]]" crossorigin="anonymous"></script>
 <script type="module" src="[[page_module]]"></script>
 </head>
 <body>
@@ -23,7 +38,7 @@
      a shadow root with no slot stops rendering them once the element upgrades.
      The bar_pages marker below is ONE marker holding the whole list with
      aria-current already on the current link, so the current page costs no
-     extra marker. NO MARKER IS SPELLED WITH ITS BRACKETS IN THIS COMMENT:
+     extra marker. NO MARKER IS SPELLED WITH ITS BRACES IN THIS COMMENT:
      stamping substitutes them here too, which shipped the page list twice on
      every consumer's pages — and a label containing an end-comment sequence
      would have broken out of the comment into live markup. build.sh refuses

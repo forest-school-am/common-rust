@@ -1,0 +1,195 @@
+/* neo-brutal — 3px ink outlines, 4px hard offset shadows, flat saturated fills on warm paper,
+   2px corners, heavy grotesk. Light: deep-register hues, white on fills. Dark: pastel hues,
+   black on fills, off-white outlines and shadows. */
+:root {
+  --bg: #f3eee2;
+  --card: #fffcf5;
+  --fg: #000000;
+  --mut: #4b4b4b;
+  --acc: #2a2ae6;
+  --ok: #166b28;
+  --warn: #9c5200;
+  --err: #c8173a;
+  --refused: #7a1fd1;
+  --bd: #000000;
+  --chip: #ffe14d;
+  --chipfg: #000000;
+  /* Second accent is the signature pink, deep enough for white text (5.70). */
+  --alt: #c8006f;
+  --alt-fg: #ffffff;
+  --acc-fg: #ffffff;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --err-fg: #ffffff;
+  /* 12%: the deep hues need no more, and 22% put --ok/--err on their washes under 4.5. */
+  --acc-wash: color-mix(in srgb, var(--acc) 12%, var(--card));
+  --ok-wash: color-mix(in srgb, var(--ok) 12%, var(--card));
+  --warn-wash: color-mix(in srgb, var(--warn) 12%, var(--card));
+  --err-wash: color-mix(in srgb, var(--err) 12%, var(--card));
+  --refused-wash: color-mix(in srgb, var(--refused) 12%, var(--card));
+  --lf-expr-keyword: #2a2ae6;
+  --lf-expr-string: #166b28;
+  --lf-expr-number: #9c5200;
+  --lf-expr-binding: #7a1fd1;
+  --lf-expr-comment: #4b4b4b;
+  /* 2px, not 0: the pill gate wants a capsule (>4px) DERIVED from --roundness, so the
+     straight-theme gate can zero it. 2px on a 3px outline still reads as a square corner. */
+  --roundness: 0.125rem;
+  --roundness-control: var(--roundness);
+  --roundness-card: var(--roundness);
+  --roundness-pill: calc(var(--roundness) * 100);
+  --bw: 3px;
+  --bw-invalid: 5px;
+  /* 8px grid, chunky: cards pad 20px, controls 8px. */
+  --space: 0.5rem;
+  --pad-control: var(--space);
+  --pad-card: calc(var(--space) * 2.5);
+  --gap: var(--space);
+  --gap-section: calc(var(--space) * 3);
+  /* THE signature: zero blur, zero spread, ink colour. Popups cast twice as far. */
+  --shadow-card: 4px 4px 0 0 #000000;
+  --shadow-popup: 8px 8px 0 0 #000000;
+
+  /* Feel levers (R104). Every box is a 3px ink outline with a hard offset
+     shadow; a press moves the box INTO its shadow. Loud on purpose (R111). */
+  --bw-surface: var(--bw);
+  --bw-card: var(--bw-surface);
+  /* L17 (glass): the lit ground under the page, the frost behind a glass surface, a surface's own edge
+     colour, the frost behind a modal's scrim, and a link card's lift. At these values nothing moves. */
+  --bg-image: none;
+  --surface-blur: none;
+  --bd-surface: var(--bd);
+  --scrim-blur: none;
+  --hover-lift: none;
+  --shadow-float: var(--shadow-popup);
+  --shadow-bar: none;
+  --surface-1: var(--card);
+  --surface-2: var(--card);
+  --surface-3: var(--card);
+  --surface-4: var(--card);
+  --bar-bg: var(--card);
+  --state-hover: 0%;
+  --state-press: 0%;
+  --motion-duration: 0s;
+  --motion-easing: linear;
+  --motion-duration-enter: 0s;
+  --motion-easing-enter: linear;
+  --roundness-btn: var(--roundness-control);
+  --bw-card-intent: var(--bw-surface);
+  --shadow-control: 4px 4px 0 0 #000000;
+  --shadow-field: 4px 4px 0 0 #000000;
+  --shadow-press: none;
+  --press-translate: 4px 4px;
+  --leading: 1.5;
+  --heading-weight: 900;
+  --heading-tracking: normal;
+  --heading-scale: 1.2;
+  --btn-weight: 800;
+  /* Ink ring, as theme-contrast: on a black-outlined control it is a thicker edge (greyscale
+     cue); beside an accent fill it is 18:1 against the page. */
+  --ring: #000000;
+  --ring-width: 3px;
+  --font-size: 1rem;
+  --font-size-sm: 0.875rem;
+  /* Space Grotesk (OFL) if installed; Public Sans (OFL) is the metric-near open fallback;
+     then the system sans. Headings: Archivo Black (OFL), else Arial Black (system), else body. */
+  --font: "Space Grotesk", "Public Sans", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-heading: "Archivo Black", "Arial Black", var(--font);
+  --font-mono: "JetBrains Mono", "Space Mono", ui-monospace, "Cascadia Mono", Menlo, monospace;
+  --content-max: 64rem;
+  --control-min-height: 2.75rem;
+  --col-min: 20rem;
+  --field-max: 28rem;
+  --table-min: 34rem;
+  /* A yellow band, the reference's table header: black type 16:1, --mut 6.7:1 on it. */
+  --table-header-bg: #ffe14d;
+  --popover-offset: 0.25rem;
+  --popover-min-width: 13rem;
+  --modal-backdrop: rgb(0 0 0 / 60%);
+  --toast-max: 28rem;
+  --spinner-color: var(--fg);
+  --spinner-size: 2.5rem;
+  --spinner-width: 0.375rem;
+  --spinner-duration: 0.7s;
+  --spinner-animation: spin;
+  --spinner-image: none;
+  --busy-min-height: 6rem;
+  --card-layout: "title actions" "body body" "footer footer";
+  --card-columns: 1fr auto;
+  --toolbar-actions-display: flex;
+  --toolbar-overflow-display: none;
+  --panel-width: 18rem;
+  --btn-font-sm: 0.875rem;
+  --btn-font-lg: 1.125rem;
+  --picker-max-height: 15rem;
+  --picker-offset: 0.25rem;
+  --bar-height: 3.25rem;
+  --bar-icon-size: 1.25rem;
+  --bar-portrait-size: 1.75rem;
+  --bar-menu-min-width: 13rem;
+  --bar-pages-display: flex;
+  --bar-burger-display: none;
+  --lf-agg-stat-size: 2rem;
+  --lf-agg-label-size: 0.75rem;
+  --lf-agg-row-font-size: 0.875rem;
+  --lf-agg-label-col: 12.5rem;
+  --lf-agg-count-col: 3.25rem;
+  --lf-agg-bar-height: 1.25rem;
+  --row-hover: rgb(0 0 0 / 0.08);
+  --lf-agg-row-hover: var(--row-hover);
+  --lf-agg-track: rgb(0 0 0 / 0.16);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141414;
+    --card: #1f1f1f;
+    --fg: #f5f5f5;
+    --mut: #b8b8b8;
+    --acc: #8ab4ff;
+    --ok: #7ef29a;
+    --warn: #ffde59;
+    --err: #ff7373;
+    --refused: #c9a3ff;
+    --bd: #f5f5f5;
+    /* Not the yellow: --mut on yellow is 2.3:1 and the neutral status pills are --mut on
+       --chip. Dark grey capsule, yellow word (8.58). */
+    --chip: #3a3a3a;
+    --chipfg: #ffde59;
+    --modal-backdrop: rgb(0 0 0 / 75%);
+    --alt: #ff90e8;
+    --alt-fg: #000000;
+    --acc-fg: #000000;
+    --ok-fg: #000000;
+    --warn-fg: #000000;
+    --err-fg: #000000;
+    --lf-expr-keyword: #5ee8ff;
+    --lf-expr-string: #7ef29a;
+    --lf-expr-number: #ffde59;
+    --lf-expr-binding: #c9a3ff;
+    --lf-expr-comment: #b8b8b8;
+    --table-header-bg: #353535;
+    --row-hover: rgb(255 255 255 / 0.1);
+    --lf-agg-track: rgb(255 255 255 / 0.2);
+    --shadow-card: 4px 4px 0 0 #f5f5f5;
+    --shadow-popup: 8px 8px 0 0 #f5f5f5;
+    --shadow-control: 4px 4px 0 0 #f5f5f5;
+    --shadow-field: 4px 4px 0 0 #f5f5f5;
+    --ring: #f5f5f5;
+  }
+}
+@media (max-width: 40rem) {
+  :root {
+    --space: 0.4375rem;
+    --gap-section: calc(var(--space) * 2);
+    --content-max: 100%;
+    --control-min-height: 3rem;
+    --field-max: 100%;
+    --bar-pages-display: none;
+    --bar-burger-display: inline-flex;
+    --toolbar-actions-display: none;
+    --toolbar-overflow-display: inline-flex;
+    --panel-width: 100%;
+    --card-layout: "title" "actions" "body" "footer";
+    --card-columns: 1fr;
+  }
+}

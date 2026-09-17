@@ -1,0 +1,202 @@
+/* neumorph — Soft UI (2020): page and card are ONE ground (#e0e5ec), surfaces extruded by a
+   light/dark shadow pair, wells for inputs, 1rem/1.25rem radii. Surfaces borderless (--bw-surface 0);
+   controls keep a 1px hairline in the shadow ink deepened to 3:1, because the reference's own edge
+   (#a3b1c6 on #e0e5ec) is 1.72:1 and cannot be a control's edge. */
+:root {
+  --bg: #e0e5ec;
+  --card: #e0e5ec;
+  --fg: #262c38;
+  --mut: #576274;
+  --acc: #2a49bf;
+  --ok: #14633a;
+  --warn: #7f4a00;
+  --err: #b01818;
+  --refused: #8b1e9e;
+  /* The dark shadow ink (#a3b1c6, hue 216°) deepened until it clears 3:1 on the ground: 3.09. */
+  --bd: #76828f;
+  /* A chip is a shallow WELL: a step darker than the ground, not a tint of a hue. */
+  --chip: #d2d9e3;
+  --chipfg: #243d78;
+  /* Second accent: deep teal, 43° from the indigo primary, same depth. */
+  --alt: #0a646c;
+  --alt-fg: #ffffff;
+  --acc-fg: #ffffff;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --err-fg: #ffffff;
+  /* A 10% wash lands DARKER than a grey card (a well); status roles sit one step darker for AA on it. */
+  --acc-wash: color-mix(in srgb, var(--acc) 10%, var(--card));
+  --ok-wash: color-mix(in srgb, var(--ok) 10%, var(--card));
+  --warn-wash: color-mix(in srgb, var(--warn) 10%, var(--card));
+  --err-wash: color-mix(in srgb, var(--err) 10%, var(--card));
+  --refused-wash: color-mix(in srgb, var(--refused) 10%, var(--card));
+  --lf-expr-keyword: #2a49bf;
+  --lf-expr-string: #14633a;
+  --lf-expr-number: #7f4a00;
+  --lf-expr-binding: #6f2fb8;
+  --lf-expr-comment: #576274;
+  /* 16px controls, 20px cards, per the reference's 12–20px band. */
+  --roundness: 1rem;
+  --roundness-control: var(--roundness);
+  --roundness-card: calc(var(--roundness) * 1.25);
+  --roundness-pill: calc(var(--roundness) * 100);
+  /* 1px on CONTROLS (see §3 --bw-surface: 0 for surfaces). */
+  --bw: 1px;
+  --bw-invalid: 2px;
+  /* 10px grid: pillows need air, and stacked shadows need ≥ 20px between siblings. */
+  --space: 0.625rem;
+  --pad-control: calc(var(--space) * 0.75);
+  --pad-card: calc(var(--space) * 2);
+  --gap: var(--space);
+  --gap-section: calc(var(--space) * 2.5);
+  /* THE extrusion: light top-left, shadow ink bottom-right, 6/14. Popup: farther and wider. */
+  --shadow-card: -6px -6px 14px #ffffff, 6px 6px 14px #a3b1c6;
+  --shadow-popup: -10px -10px 24px #ffffff, 12px 12px 30px #98a6bb;
+
+  /* Feel levers (R104). Surfaces borderless: the extrusion is their edge (G4);
+     controls keep the 1px shadow-ink hairline (--bd, 3.09:1, manager decision A). */
+  --bw-surface: 0;
+  --bw-card: var(--bw-surface);
+  /* L17 (glass): the lit ground under the page, the frost behind a glass surface, a surface's own edge
+     colour, the frost behind a modal's scrim, and a link card's lift. At these values nothing moves. */
+  --bg-image: none;
+  --surface-blur: none;
+  --bd-surface: var(--bd);
+  --scrim-blur: none;
+  --hover-lift: none;
+  --shadow-float: var(--shadow-popup);
+  --shadow-bar: var(--shadow-card);
+  --surface-1: var(--card);
+  --surface-2: var(--card);
+  --surface-3: var(--card);
+  --surface-4: var(--card);
+  --bar-bg: var(--card);
+  --state-hover: 0%;
+  --state-press: 0%;
+  --motion-duration: 160ms;
+  --motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  --motion-duration-enter: 160ms;
+  --motion-easing-enter: cubic-bezier(0.2, 0, 0, 1);
+  --roundness-btn: var(--roundness-control);
+  /* A borderless card still carries its intent: a 3px stripe (L16). */
+  --bw-card-intent: 3px;
+  /* L9: pillows raised, fields sunk, and a press sinks a pillow into a well. */
+  --shadow-control: -4px -4px 10px #ffffff, 4px 4px 10px #a3b1c6;
+  --shadow-field: inset 3px 3px 7px #a3b1c6, inset -3px -3px 7px #ffffff;
+  --shadow-press: var(--shadow-field);
+  --press-translate: none;
+  --leading: 1.5;
+  --heading-weight: 700;
+  --heading-tracking: normal;
+  --heading-scale: 1.2;
+  --btn-weight: 600;
+  --ring: #2a49bf;
+  --ring-width: 2px;
+  --font-size: 1rem;
+  --font-size-sm: 0.875rem;
+  /* Rounded geometric sans was the wave's face; no network fonts, so Nunito Sans (OFL) only if installed. */
+  --font: "Nunito Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: var(--font);
+  --font-mono: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  --content-max: 64rem;
+  /* Taller controls: a pillow at 40px is a sliver. */
+  --control-min-height: 2.75rem;
+  --col-min: 20rem;
+  --field-max: 28rem;
+  --table-min: 34rem;
+  /* 7%: a shallow well; delta 39 vs the one ground. */
+  --table-header-bg: color-mix(in srgb, var(--fg) 7%, var(--card));
+  /* Room for the popup's 12px shadow so it does not sit on its anchor's edge. */
+  --popover-offset: 0.5rem;
+  --popover-min-width: 12rem;
+  /* The shadow ink as a veil, not black: delta 183 over --card (floor 40). */
+  --modal-backdrop: rgb(94 106 124 / 50%);
+  --toast-max: 28rem;
+  --spinner-color: var(--acc);
+  --spinner-size: 2.75rem;
+  --spinner-width: 0.3rem;
+  --spinner-duration: 1s;
+  --spinner-animation: spin;
+  --spinner-image: none;
+  --busy-min-height: 6.5rem;
+  --card-layout: "title actions" "body body" "footer footer";
+  --card-columns: 1fr auto;
+  --toolbar-actions-display: flex;
+  --toolbar-overflow-display: none;
+  --panel-width: 19rem;
+  --btn-font-sm: 0.875rem;
+  --btn-font-lg: 1.0625rem;
+  --picker-max-height: 15rem;
+  --picker-offset: 0.5rem;
+  /* 3.5rem: the bar is a raised slab; icon scaled 1.125 × 3.5/3. */
+  --bar-height: 3.5rem;
+  --bar-icon-size: 1.3125rem;
+  --bar-portrait-size: 2rem;
+  --bar-menu-min-width: 12rem;
+  --bar-pages-display: flex;
+  --bar-burger-display: none;
+  --lf-agg-stat-size: 1.875rem;
+  --lf-agg-label-size: 0.75rem;
+  --lf-agg-row-font-size: 0.8125rem;
+  --lf-agg-label-col: 12.5rem;
+  --lf-agg-count-col: 3.25rem;
+  --lf-agg-bar-height: 1.25rem;
+  /* Hover and track are the shadow ink at low alpha — a shallow well, not black. */
+  --row-hover: rgb(163 177 198 / 0.25);
+  --lf-agg-row-hover: var(--row-hover);
+  --lf-agg-track: rgb(163 177 198 / 0.5);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #2c3037;
+    --card: #2c3037;
+    --fg: #e4e7ec;
+    --mut: #a4acb9;
+    --acc: #8fb0ff;
+    --ok: #5fd08a;
+    --warn: #e7bb48;
+    --err: #ff8585;
+    --refused: #e58ff5;
+    /* The dark scheme's light-shadow ink lifted to 3.55:1. */
+    --bd: #7c8593;
+    --chip: #373c45;
+    --chipfg: #c5d3ff;
+    /* Black over a mid-dark ground: delta 88 (floor 40). */
+    --modal-backdrop: rgb(0 0 0 / 60%);
+    --alt: #5fd3dc;
+    --alt-fg: #05262a;
+    --acc-fg: #0b1a3a;
+    --ok-fg: #062d17;
+    --warn-fg: #2e1d00;
+    --err-fg: #3a0a0a;
+    --lf-expr-keyword: #8fb0ff;
+    --lf-expr-string: #5fd08a;
+    --lf-expr-number: #f0b64a;
+    --lf-expr-binding: #cdb3ff;
+    --lf-expr-comment: #a4acb9;
+    --row-hover: rgb(255 255 255 / 0.06);
+    --lf-agg-track: rgb(255 255 255 / 0.14);
+    /* Highlight a lighter grey, shadow near-black, both ~1.2:1 — the reference's weak spot; the hairline is the edge. */
+    --shadow-card: -6px -6px 14px #565f6f, 6px 6px 14px #0d0f11;
+    --shadow-popup: -10px -10px 24px #4d5563, 12px 12px 30px #0f1113;
+    --shadow-control: -4px -4px 10px #565f6f, 4px 4px 10px #0d0f11;
+    --shadow-field: inset 3px 3px 7px #1e2126, inset -3px -3px 7px #383e48;
+    --ring: #8fb0ff;
+  }
+}
+@media (max-width: 40rem) {
+  :root {
+    --space: 0.5rem;
+    --gap-section: calc(var(--space) * 2);
+    --content-max: 100%;
+    --control-min-height: 3rem;
+    --field-max: 100%;
+    --bar-pages-display: none;
+    --bar-burger-display: inline-flex;
+    --toolbar-actions-display: none;
+    --toolbar-overflow-display: inline-flex;
+    --panel-width: 100%;
+    --card-layout: "title" "actions" "body" "footer";
+    --card-columns: 1fr;
+  }
+}

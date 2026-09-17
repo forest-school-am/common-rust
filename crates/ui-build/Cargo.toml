@@ -3,25 +3,16 @@ name = "common-ui-build"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Build-script helper for common-ui consumers: one prefix pin in Cargo.toml; the shell, markers and types fetched, verified against the origin manifest and cached for offline builds"
+description = "Build-script helper for common-ui consumers (R117): stamp the shell's [[build markers]], expose the shared SRI/prefix markers and the CSP, and write the d.ts to OUT_DIR — all read from the common-ui-core / common-theme crates. No Garage fetch."
 
 [dependencies]
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-sha2.workspace = true
-thiserror.workspace = true
-base64 = "0.22"
+# The assets themselves: this crate is the build-time glue around them, so the
+# SRIs, the d.ts and the CSP are read straight from the crates that carry the
+# bytes — no fetch, no manifest, no pin machinery.
+common-ui-core.workspace = true
+common-theme.workspace = true
 # The stamp engine: `[[name]]` BUILD markers filled here, `{{name}}` RUNTIME
 # markers left for common-templating's render. Same version/features as that
 # crate so the workspace keeps one `upon` — and no dep cycle: `upon` is a leaf
 # and common-templating does not depend on this crate.
 upon = { version = "0.11", default-features = false, features = ["serde", "syntax"] }
-# `parse` only: the one thing read is `[package.metadata.common-ui] prefix`.
-toml = { version = "0.8", default-features = false, features = ["parse"] }
-# The fetch. ureq over rustls, no gzip/json/cookies: four small files over
-# TLS with the stand's own CA. `tls` is rustls with `ring` — the same
-# provider reqwest's `rustls-tls` selects in every consumer, so no second
-# crypto backend enters a build.
-ureq = { version = "2", default-features = false, features = ["tls"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
-rustls-pki-types = { version = "1", features = ["std"] }

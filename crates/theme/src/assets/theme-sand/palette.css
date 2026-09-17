@@ -1,0 +1,232 @@
+/* sand — warm-neutral product console in the Stripe / Anthropic-console manner: greige page, near-white
+   cards, warm near-black type, one terracotta accent with a deep slate blue for the secondary role,
+   warm hairlines, soft warm-tinted shadows, 0.5rem radius. Dark is warm charcoal with cream type. */
+:root {
+  --bg: #f5f3ee;
+  --card: #fdfcfa;
+  --fg: #1f1d1a;
+  --mut: #6b665e;
+  --acc: #6e4dbc;
+  --ok: #446a0e;
+  --warn: #7e5a00;
+  --err: #b3261c;
+  --refused: #a0287f;
+  --bd: #8a837a;
+  --chip: #ece5d8;
+  --chipfg: #5a4632;
+
+  /* R80's second accent: a deep slate blue, cool against the terracotta so a
+     button marked `alt` reads as a different job, not a lighter primary. */
+  --alt: #35588a;
+  --alt-fg: #ffffff;
+
+  --acc-fg: #ffffff;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --err-fg: #ffffff;
+  --acc-wash: color-mix(in srgb, var(--acc) 10%, var(--card));
+  --ok-wash: color-mix(in srgb, var(--ok) 10%, var(--card));
+  --warn-wash: color-mix(in srgb, var(--warn) 10%, var(--card));
+  --err-wash: color-mix(in srgb, var(--err) 10%, var(--card));
+  --refused-wash: color-mix(in srgb, var(--refused) 10%, var(--card));
+
+  --lf-expr-keyword: #2f558a;
+  --lf-expr-string: #446a0e;
+  --lf-expr-number: #b23606;
+  --lf-expr-binding: #7a3aa6;
+  --lf-expr-comment: #6b665e;
+
+  /* Body 1rem; small text 0.875rem for notes, table cells, labels, hints. */
+  --font-size: 1rem;
+  --font-size-sm: 0.875rem;
+
+  --roundness: 0.5rem;
+  --roundness-control: var(--roundness);
+  --roundness-card: calc(var(--roundness) * 2);
+  --roundness-pill: calc(var(--roundness) * 100);
+  --bw: 1px;
+  /* R95.2: invalid differs in greyscale, not by hue alone. */
+  --bw-invalid: 2px;
+
+  --space: 0.5rem;
+  --pad-control: calc(var(--space) * 0.75);
+  --pad-card: calc(var(--space) * 2);
+  --gap: var(--space);
+  --gap-section: calc(var(--space) * 2.5);
+
+  /* Warm-tinted, low alpha: the shadow is the page's own brown, not neutral grey. */
+  --shadow-card: 0 1px 2px rgb(64 48 24 / 0.06);
+  --shadow-popup: 0 8px 24px rgb(64 48 24 / 0.14);
+  /* L2: the edge of a SURFACE (card, menu, listbox, panel, dialog, toast, bar);
+     controls keep --bw. L1: elevation for the floating surfaces and the bar. */
+  --bw-surface: var(--bw);
+  --shadow-float: none;
+  --shadow-bar: none;
+  /* L5: motion. 0s keeps every shipped theme still; reduced motion zeroes it anyway. */
+  --motion-duration: 0s;
+  --motion-easing: linear;
+  --motion-duration-enter: 0s;
+  --motion-easing-enter: linear;
+  /* L6: the surface ladder — 1 card, 2 panel, 3 menu/listbox/toast, 4 dialog —
+     and the bar's own ground. All --card here, so nothing moves. */
+  --surface-1: var(--card);
+  --surface-2: var(--card);
+  --surface-3: var(--card);
+  --surface-4: var(--card);
+  --bar-bg: var(--card);
+  /* L8: state layers — the element's own ink over its fill, as a percentage. */
+  --state-hover: 0%;
+  --state-press: 0%;
+  /* L15: a button's corner of its own. L16: the intent card's stripe. */
+  --roundness-btn: var(--roundness-control);
+  --bw-card-intent: var(--bw-surface);
+  /* L9: a raised control, a field's well, and the press. Nothing raised, nothing
+     sunk and nothing moves at these values. */
+  --shadow-control: none;
+  --shadow-field: none;
+  --shadow-press: var(--shadow-control);
+  --press-translate: none;
+  /* L11: the type system's shape, and L12's button label weight. These are the
+     values the sheets used as literals: body 1.5, bold headings, no tracking,
+     h2 at 1.2 of the body, labels at 600. */
+  --leading: 1.5;
+  --heading-weight: 700;
+  --heading-tracking: normal;
+  --heading-scale: 1.2;
+  --btn-weight: 600;
+  /* The card's own edge, 1 to 4 widths, so a card can be a single rule. The
+     other surfaces keep --bw-surface, which panel and bar read one side of. */
+  --bw-card: var(--bw-surface);
+  /* L17 (glass): the lit ground under the page, the frost behind a glass surface, a surface's own edge
+     colour, the frost behind a modal's scrim, and a link card's lift. At these values nothing moves. */
+  --bg-image: none;
+  --surface-blur: none;
+  --bd-surface: var(--bd);
+  --scrim-blur: none;
+  --hover-lift: none;
+  --ring: #6e4dbc;
+  --ring-width: 2px;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-heading: var(--font);
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, Menlo, monospace;
+
+  --content-max: 64rem;
+  --control-min-height: 2.5rem;
+  --col-min: 20rem;
+
+  --field-max: 28rem;
+  --table-min: 34rem;
+  /* The band steps toward the ink from the ground NEARER to it, so it stands
+     off both: the page ground here, the card in the dark block. */
+  --table-header-bg: color-mix(in srgb, var(--fg) 5%, var(--bg));
+
+  --popover-offset: 0.2rem;
+  --popover-min-width: 12rem;
+
+  /* Warm scrim: a neutral black over a greige page reads as a grey film. */
+  --modal-backdrop: rgb(40 30 18 / 50%);
+  --toast-max: 28rem;
+
+  --spinner-color: var(--acc);
+  --spinner-size: 2.5rem;
+  --spinner-width: 0.25rem;
+  --spinner-duration: 0.9s;
+  --spinner-animation: spin;
+  --spinner-image: none;
+  --busy-min-height: 6rem;
+
+  --card-layout: "title actions" "body body" "footer footer";
+  --card-columns: 1fr auto;
+
+  --toolbar-actions-display: flex;
+  --toolbar-overflow-display: none;
+
+  --panel-width: 18rem;
+
+  --btn-font-sm: 0.8125rem;
+  --btn-font-lg: 1rem;
+
+  --picker-max-height: 15rem;
+  --picker-offset: 0.2rem;
+
+  --bar-height: 3rem;
+  --bar-icon-size: 1.125rem;
+  --bar-portrait-size: 1.75rem;
+  --bar-menu-min-width: 12rem;
+  --bar-pages-display: flex;
+  --bar-burger-display: none;
+
+  --lf-agg-stat-size: 1.875rem;
+  --lf-agg-label-size: 0.75rem;
+  --lf-agg-row-font-size: 0.8125rem;
+  --lf-agg-label-col: 12.5rem;
+  --lf-agg-count-col: 3.25rem;
+  --lf-agg-bar-height: 1.25rem;
+  --row-hover: rgb(64 48 24 / 0.06);
+  --lf-agg-row-hover: var(--row-hover);
+  --lf-agg-track: rgb(64 48 24 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1a17;
+    --card: #262320;
+    --table-header-bg: color-mix(in srgb, var(--fg) 6%, var(--card));
+    --fg: #f2ede4;
+    --mut: #a9a193;
+    --acc: #c1a7f8;
+    --ok: #a8c85a;
+    --warn: #e8bd4f;
+    --err: #ef7086;
+    --refused: #e59dda;
+    --bd: #756d61;
+    --chip: #3a342c;
+    --chipfg: #ecdcc2;
+
+    --modal-backdrop: rgb(8 6 3 / 72%);
+
+    /* Lifted apricot accent and a light slate blue: filled controls carry
+       dark warm type, as --acc-fg does, since white on either fails. */
+    --alt: #93b4de;
+    --alt-fg: #0d1b2e;
+
+    --acc-fg: #2a1607;
+    --ok-fg: #1a2306;
+    --warn-fg: #2a2006;
+    --err-fg: #2e0c08;
+
+    --lf-expr-keyword: #93b4de;
+    --lf-expr-string: #a8c85a;
+    --lf-expr-number: #f2a26e;
+    --lf-expr-binding: #d3b8f3;
+    --lf-expr-comment: #a9a193;
+
+    --row-hover: rgb(255 240 220 / 0.07);
+    --lf-agg-track: rgb(255 240 220 / 0.15);
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.45);
+    --shadow-popup: 0 8px 24px rgb(0 0 0 / 0.65);
+    --ring: #c1a7f8;
+  }
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --space: 0.4375rem;
+    --gap-section: calc(var(--space) * 2);
+    --content-max: 100%;
+    --control-min-height: 2.75rem;
+    --field-max: 100%;
+    --bar-pages-display: none;
+    --bar-burger-display: inline-flex;
+
+    --toolbar-actions-display: none;
+    --toolbar-overflow-display: inline-flex;
+
+    --panel-width: 100%;
+
+    --card-layout: "title" "actions" "body" "footer";
+    --card-columns: 1fr;
+  }
+}

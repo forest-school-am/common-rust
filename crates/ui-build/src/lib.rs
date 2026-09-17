@@ -1,441 +1,96 @@
-//! The common-ui pin for a consumer's `build.rs` (R114, "vendored" item).
+//! Build-script helper for common-ui consumers (R117, crate-carried delivery).
 //!
-//! A consumer pins common-ui with ONE line in its `Cargo.toml`:
+//! Since R117 there is no Garage fetch, no manifest and no prefix pin: the core
+//! assets are carried in [`common_ui_core`] and the palettes + loader in
+//! [`common_theme`], both as committed consts. This crate is the thin
+//! build-time glue a consumer's `build.rs` calls:
 //!
-//! ```toml
-//! [package.metadata.common-ui]
-//! prefix = "common-ui@b9f049d05d44"
-//! ```
+//! - [`stamp`] fills the shell's `[[build markers]]` (via `upon`), leaving the
+//!   `{{runtime markers}}` for `common_templating`'s per-request render.
+//! - [`shared_markers`] returns the build markers that are a pure function of
+//!   the shipped assets and identical in every consumer: the version-derived
+//!   `prefix` and the four SRI strings each page links. The SRIs come straight
+//!   from the crates, so a hash is never hand-copied.
+//! - [`write_dts`] writes [`common_ui_core::COMMON_UI_DTS`] to `OUT_DIR` for
+//!   the consumer's typecheck; the consumer keeps no vendored copy.
+//! - [`csp`] returns the policy the pages require ([`common_ui_core::CSP`]).
 //!
-//! [`Pin::load`] reads that line, fetches the prefix's manifest and the three
-//! files every build needs — `shell.html` (the template), `shell-markers.json`
-//! (the marker/CSP contract) and `common-ui.d.ts` (the typecheck) — verifies
-//! every byte string against the manifest's sha384, and caches them under
-//! `$XDG_CACHE_HOME/common-ui/<prefix>/` so every later build is offline.
-//! Digests are verified again on every read from the cache: a pin nobody
-//! checks is a comment.
+//! A consumer serves the assets themselves — `common_ui_core::{BASE_CSS,
+//! ELEMENTS_CSS, COMMON_UI_JS}`, `common_theme::{PALETTES, LOADER_JS}` — at
+//! `/assets/...` through `common_routing`'s static-file mechanism.
 //!
-//! Trust is unchanged from the vendor directories this replaces: those lock
-//! files were copied from the same manifest over the same TLS to the same
-//! origin. A prefix is content-addressed and immutable, so pinning its name
-//! pins its bytes.
+//! # The marker styles
 //!
-//! What a `build.rs` then does with the pin: [`stamp`] the shell's build-time
-//! markers, embed the [`Pin::csp`] and the [`Pin::sri_table`], and
-//! [`Pin::write_dts`] for the typecheck. Nothing here runs at request time.
-//!
-//! The shell carries TWO marker styles. The BUILD markers are `[[name]]`,
-//! filled here by [`stamp`] through `upon`, which ERRORS on any `[[marker]]`
-//! left unfilled — so a forgotten or misspelled build marker is a build-time
-//! failure, not a raw marker on the page. The RUNTIME markers are `{{name}}`
-//! (`assets_origin`, `config`, `theme_override`); [`stamp`] leaves them for
-//! the app's boot, which renders every stamped shell through
-//! `common_templating::Shell` and refuses any `{{marker}}` left unfilled,
-//! naming it. There is thus no set comparison here against
-//! `shell-markers.json`'s `build`/`runtime` arrays (R114.2) — the two engines
-//! refuse an unfilled marker of each kind by name; those arrays are not
-//! parsed.
+//! The shell carries TWO marker styles. BUILD markers are `[[name]]`, filled
+//! here by [`stamp`] through `upon`, which ERRORS on any `[[marker]]` left
+//! unfilled — a forgotten or misspelled build marker is a build-time failure,
+//! not a raw marker on the page. RUNTIME markers are `{{name}}`
+//! (`assets_origin`, `config`); [`stamp`] leaves them for the app's boot,
+//! which renders the stamped shell through `common_templating::Shell` and
+//! refuses any `{{marker}}` left unfilled, naming it.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use base64::Engine as _;
-use sha2::{Digest, Sha384};
-
-pub mod fetch;
-
-/// The three files fetched per prefix.
-pub const SHELL: &str = "shell.html";
-pub const MARKERS: &str = "shell-markers.json";
+/// The name the d.ts is written under in `OUT_DIR`.
 pub const TYPES: &str = "common-ui.d.ts";
-/// The manifest's name at the origin, under the prefix (and at the root).
-pub const MANIFEST: &str = "manifest.json";
-/// What [`Pin::write_manifest`] writes into `OUT_DIR`: the manifest the build
-/// used, for the consumer's own tests to read digests from.
-pub const OUT_MANIFEST: &str = "common-ui.manifest.json";
 
-/// The metadata table in the consumer's `Cargo.toml`.
-pub const METADATA_TABLE: &str = "common-ui";
-pub const METADATA_KEY: &str = "prefix";
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("{0} is not set — this crate runs inside a cargo build script")]
-    Env(&'static str),
-    #[error("cannot read {path}: {source}")]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("{path} is not TOML: {source}")]
-    Toml {
-        path: PathBuf,
-        #[source]
-        source: toml::de::Error,
-    },
-    #[error(
-        "{path} has no `[package.metadata.{METADATA_TABLE}] {METADATA_KEY} = \"common-ui@<hex>\"` — \
-         that one line is the whole common-ui pin"
-    )]
-    NoPrefix { path: PathBuf },
-    #[error("prefix {0:?} is not of the form common-ui@<hex>")]
-    BadPrefix(String),
-    #[error("{what} is not JSON: {source}")]
-    Json {
-        what: String,
-        #[source]
-        source: serde_json::Error,
-    },
-    #[error("the manifest lists no digest for {key}")]
-    NotInManifest { key: String },
-    #[error("{what} is not UTF-8 — every pinned file is text by contract")]
-    NotUtf8 { what: String },
-    #[error(
-        "{what} does not match the manifest.\n  got  {got}\n  want {want}\n  \
-         A prefix is immutable, so this is a corrupted copy or a served file that differs \
-         from what the manifest says — never something to edit around."
-    )]
-    Digest {
-        what: String,
-        got: String,
-        want: String,
-    },
-    #[error(
-        "no manifest for {prefix}: {url} is 404 and the root manifest {root_url} publishes \
-         {published} — common must publish a per-prefix manifest.json under each prefix \
-         (the root manifest's entries for that prefix), and backfill {prefix}"
-    )]
-    NoManifest {
-        prefix: String,
-        url: String,
-        root_url: String,
-        published: String,
-    },
-    #[error("{url} answered {status}")]
-    Http { url: String, status: u16 },
-    #[error("fetching {url}: {message}")]
-    Transport { url: String, message: String },
-    #[error("cannot read the CA at {path} ({source}) — set LES_CA to the stand CA certificate")]
-    Ca {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("the CA at {path} holds no certificate")]
-    EmptyCa { path: PathBuf },
-    #[error("tls setup: {0}")]
-    Tls(String),
-    #[error("no cache directory: neither XDG_CACHE_HOME nor HOME is set")]
-    NoCacheDir,
-    #[error("shell-markers.json: {0}")]
-    Markers(String),
+/// The Content-Security-Policy the shell's pages require, `{{assets_origin}}`
+/// still in it (a consumer resolves that when it sets the header).
+pub fn csp() -> &'static str {
+    common_ui_core::CSP
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
-
-/// `sha384-` + standard base64: the spelling an `integrity` attribute and the
-/// manifest both use, so the two compare by eye.
-pub fn sha384(bytes: &[u8]) -> String {
-    format!(
-        "sha384-{}",
-        base64::engine::general_purpose::STANDARD.encode(Sha384::digest(bytes))
-    )
+/// The build markers that are a pure function of the shipped assets and
+/// identical in EVERY consumer: the `prefix` (the common-ui-core version, so a
+/// page's footer names which common-ui it runs) and the SRI of the four
+/// sheets/script each page links. A `build.rs` extends its app-specific marker
+/// list with this. Every SRI is read from the crate the bytes ship in, so a
+/// hash is never hand-copied and cannot drift from the served file.
+pub fn shared_markers() -> Vec<(&'static str, String)> {
+    vec![
+        ("prefix", format!("common-ui {}", common_ui_core::VERSION)),
+        ("sri_base_css", common_ui_core::SRI_BASE_CSS.to_owned()),
+        // The default palette lives in common-theme, so its SRI does too.
+        (
+            "sri_palette_css",
+            common_theme::SRI_DEFAULT_PALETTE.to_owned(),
+        ),
+        (
+            "sri_elements_css",
+            common_ui_core::SRI_ELEMENTS_CSS.to_owned(),
+        ),
+        (
+            "sri_common_ui_js",
+            common_ui_core::SRI_COMMON_UI_JS.to_owned(),
+        ),
+    ]
 }
 
-/// The one pinned value, read from a consumer's `Cargo.toml` text.
-pub fn read_prefix(cargo_toml: &str, path: &Path) -> Result<String> {
-    let doc: toml::Value = toml::from_str(cargo_toml).map_err(|source| Error::Toml {
-        path: path.to_owned(),
-        source,
-    })?;
-    let prefix = doc
-        .get("package")
-        .and_then(|p| p.get("metadata"))
-        .and_then(|m| m.get(METADATA_TABLE))
-        .and_then(|c| c.get(METADATA_KEY))
-        .and_then(toml::Value::as_str)
-        .ok_or_else(|| Error::NoPrefix {
-            path: path.to_owned(),
-        })?;
-    validate_prefix(prefix)?;
-    Ok(prefix.to_owned())
-}
-
-/// `common-ui@<hex>`. The prefix names a cache directory and a URL segment,
-/// so its shape is checked before either is built from it.
-pub fn validate_prefix(prefix: &str) -> Result<()> {
-    let hex = prefix
-        .strip_prefix("common-ui@")
-        .filter(|h| (6..=40).contains(&h.len()) && h.bytes().all(|b| b.is_ascii_hexdigit()))
-        .filter(|h| h.bytes().all(|b| !b.is_ascii_uppercase()));
-    match hex {
-        Some(_) => Ok(()),
-        None => Err(Error::BadPrefix(prefix.to_owned())),
-    }
-}
-
-/// The origin's manifest: `files` is keyed `<prefix>/<path>` for every file
-/// the origin serves under that prefix. The root manifest also names the
-/// newest `prefix`; a per-prefix manifest carries that prefix's entries.
-#[derive(Debug, Clone)]
-pub struct Manifest {
-    pub prefix: Option<String>,
-    pub files: BTreeMap<String, String>,
-    /// The bytes as fetched, written verbatim by [`Pin::write_manifest`].
-    pub raw: String,
-}
-
-impl Manifest {
-    pub fn parse(raw: &str, what: &str) -> Result<Self> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            prefix: Option<String>,
-            files: BTreeMap<String, String>,
-        }
-        let wire: Wire = serde_json::from_str(raw).map_err(|source| Error::Json {
-            what: what.to_owned(),
-            source,
-        })?;
-        Ok(Self {
-            prefix: wire.prefix,
-            files: wire.files,
-            raw: raw.to_owned(),
-        })
-    }
-
-    /// The digest the manifest pins for `<prefix>/<name>`.
-    pub fn integrity(&self, prefix: &str, name: &str) -> Result<&str> {
-        let key = format!("{prefix}/{name}");
-        self.files
-            .get(&key)
-            .map(String::as_str)
-            .ok_or(Error::NotInManifest { key })
-    }
-}
-
-/// The three fetched files, as text (all three are UTF-8 by contract).
-#[derive(Debug, Clone)]
-pub struct Files {
-    pub shell: String,
-    pub markers: String,
-    pub dts: String,
-}
-
-/// What this crate reads from `shell-markers.json`: the CSP its pages need.
-/// The file's `build` and `runtime` arrays are left unparsed (R114.2) — the
-/// boot render is what refuses an unfilled marker, not a set comparison here.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Markers {
-    pub csp: String,
-}
-
-impl Markers {
-    pub fn parse(json: &str) -> Result<Self> {
-        #[derive(serde::Deserialize)]
-        struct Wire {
-            csp: String,
-        }
-        let wire: Wire = serde_json::from_str(json).map_err(|source| Error::Json {
-            what: MARKERS.to_owned(),
-            source,
-        })?;
-        // A policy without the origin marker would block the shell's own
-        // stylesheets.
-        if !wire.csp.contains("{{assets_origin}}") {
-            return Err(Error::Markers(
-                "the csp has no {{assets_origin}}: it would block the shell's own stylesheets"
-                    .into(),
-            ));
-        }
-        Ok(Self { csp: wire.csp })
-    }
-}
-
-/// The verified pin: the prefix, its manifest, and the three files.
-#[derive(Debug, Clone)]
-pub struct Pin {
-    pub prefix: String,
-    pub files: Files,
-    pub manifest: Manifest,
-    pub markers: Markers,
-}
-
-impl Pin {
-    /// The whole build-script entry point. Reads the prefix from the calling
-    /// package's `Cargo.toml` (`CARGO_MANIFEST_DIR`), serves it from the cache
-    /// when present, fetches and caches it otherwise. Emits the `cargo:` lines
-    /// for the pin's inputs.
-    pub fn load() -> Result<Self> {
-        let manifest_dir = PathBuf::from(
-            std::env::var_os("CARGO_MANIFEST_DIR").ok_or(Error::Env("CARGO_MANIFEST_DIR"))?,
-        );
-        let cargo_toml = manifest_dir.join("Cargo.toml");
-        println!("cargo:rerun-if-changed={}", cargo_toml.display());
-        println!("cargo:rerun-if-env-changed={}", fetch::ORIGIN_VAR);
-        println!("cargo:rerun-if-env-changed={}", fetch::CA_VAR);
-
-        let text = std::fs::read_to_string(&cargo_toml).map_err(|source| Error::Io {
-            path: cargo_toml.clone(),
-            source,
-        })?;
-        let prefix = read_prefix(&text, &cargo_toml)?;
-        let cache = fetch::cache_dir()?.join(&prefix);
-        fetch::load(&prefix, &cache, &fetch::LazyHttps::from_env())
-    }
-
-    /// Verifies the three files against the manifest and parses the contract.
-    /// Every constructor goes through here: the cache, the fetch, a test.
-    pub fn from_parts(prefix: &str, manifest: Manifest, files: Files) -> Result<Self> {
-        validate_prefix(prefix)?;
-        for (name, bytes) in [
-            (SHELL, files.shell.as_bytes()),
-            (MARKERS, files.markers.as_bytes()),
-            (TYPES, files.dts.as_bytes()),
-        ] {
-            verify(&manifest, prefix, name, bytes)?;
-        }
-        let markers = Markers::parse(&files.markers)?;
-        Ok(Self {
-            prefix: prefix.to_owned(),
-            files,
-            manifest,
-            markers,
-        })
-    }
-
-    /// The digest the page stamps as `integrity=` for one asset under the
-    /// prefix, e.g. `base.css` or `theme-default/palette.css`.
-    pub fn sri(&self, name: &str) -> Result<&str> {
-        self.manifest.integrity(&self.prefix, name)
-    }
-
-    /// Every asset the prefix publishes that a page LINKS — the four
-    /// sheets/script and every theme palette — as `(name, integrity)`, sorted
-    /// by name. The three fetched files are not in it: they are embedded, not
-    /// linked. See [`sri_table`].
-    pub fn sri_table(&self) -> Vec<(String, String)> {
-        sri_table(&self.manifest, &self.prefix)
-    }
-
-    /// `(name, integrity)` for every `theme-<name>/palette.css` the prefix
-    /// ships, the default included, sorted by name. Derived from the same
-    /// manifest the `sri_*` markers come from (R91): a hash is never
-    /// hand-copied, and a prefix that adds a palette adds a row here on the
-    /// next build with no edit at all.
-    pub fn themes(&self) -> Vec<(String, String)> {
-        let mut rows: Vec<(String, String)> = self
-            .sri_table()
-            .into_iter()
-            .filter_map(|(name, sri)| {
-                let theme = name.strip_prefix("theme-")?.strip_suffix("/palette.css")?;
-                Some((theme.to_owned(), sri))
-            })
-            .collect();
-        rows.sort();
-        rows
-    }
-
-    /// The build markers that are a pure function of the pin and identical in
-    /// EVERY consumer (R117, finding #3): the prefix and the SRI of the four
-    /// sheets/script each page links. A `build.rs` extends its app-specific
-    /// marker list with this, so a new shared linked sheet is added in one
-    /// place, not once per app. Every value is read from the manifest the pin
-    /// already verified — a hash is never hand-copied.
-    ///
-    /// Panics if the manifest omits one of the four core assets: every prefix
-    /// ships them, so a prefix missing one is a broken build, not a caller
-    /// error (the same `sri` panic the consumers' `build.rs` already take).
-    pub fn shared_markers(&self) -> Vec<(&'static str, String)> {
-        let sri = |name: &str| self.sri(name).unwrap_or_else(|e| panic!("{e}")).to_owned();
-        vec![
-            ("prefix", self.prefix.clone()),
-            ("sri_base_css", sri("base.css")),
-            ("sri_palette_css", sri("theme-default/palette.css")),
-            ("sri_elements_css", sri("elements.css")),
-            ("sri_common_ui_js", sri("common-ui.js")),
-        ]
-    }
-
-    /// The policy the prefix declares, `{{assets_origin}}` still in it.
-    pub fn csp(&self) -> &str {
-        &self.markers.csp
-    }
-
-    /// Writes `common-ui.d.ts` into `out_dir` for the consumer's typecheck to
-    /// point its tsconfig `paths` at. Returns the path written.
-    pub fn write_dts(&self, out_dir: &Path) -> Result<PathBuf> {
-        write(out_dir.join(TYPES), self.files.dts.as_bytes())
-    }
-
-    /// Writes the manifest the build used into `out_dir` as
-    /// [`OUT_MANIFEST`], so the consumer's tests can compare what the build
-    /// embedded against what the origin pinned without a second fetch.
-    pub fn write_manifest(&self, out_dir: &Path) -> Result<PathBuf> {
-        write(out_dir.join(OUT_MANIFEST), self.manifest.raw.as_bytes())
-    }
-}
-
-fn write(path: PathBuf, bytes: &[u8]) -> Result<PathBuf> {
-    std::fs::write(&path, bytes).map_err(|source| Error::Io {
-        path: path.clone(),
-        source,
-    })?;
+/// Writes [`common_ui_core::COMMON_UI_DTS`] into `out_dir` as [`TYPES`] for the
+/// consumer's typecheck to point its tsconfig `paths` at. Returns the path.
+pub fn write_dts(out_dir: &Path) -> std::io::Result<PathBuf> {
+    let path = out_dir.join(TYPES);
+    std::fs::write(&path, common_ui_core::COMMON_UI_DTS)?;
     Ok(path)
 }
 
-/// `bytes` must hash to what the manifest pins for `<prefix>/<name>`.
-pub fn verify(manifest: &Manifest, prefix: &str, name: &str, bytes: &[u8]) -> Result<()> {
-    let want = manifest.integrity(prefix, name)?;
-    let got = sha384(bytes);
-    if got == want {
-        Ok(())
-    } else {
-        Err(Error::Digest {
-            what: format!("{prefix}/{name}"),
-            got,
-            want: want.to_owned(),
-        })
-    }
-}
-
-/// Every `files` entry under `<prefix>/` except the three fetched files, as
-/// `(name, integrity)` sorted by name — the same set the retired lock files
-/// held under `assets`.
-pub fn sri_table(manifest: &Manifest, prefix: &str) -> Vec<(String, String)> {
-    let head = format!("{prefix}/");
-    manifest
-        .files
-        .iter()
-        .filter_map(|(key, sri)| {
-            let name = key.strip_prefix(&head)?;
-            (![SHELL, MARKERS, TYPES].contains(&name)).then(|| (name.to_owned(), sri.clone()))
-        })
-        .collect()
-}
-
-/// The CSP out of raw `shell-markers.json`.
-pub fn csp(markers_json: &str) -> Result<String> {
-    Ok(Markers::parse(markers_json)?.csp)
-}
-
 /// Fills the shell's `[[marker]]` BUILD markers from `values`, leaving every
-/// `{{marker}}` RUNTIME marker (`assets_origin`, `config`, `theme_override`)
-/// for common-templating's per-request render.
+/// `{{marker}}` RUNTIME marker (`assets_origin`, `config`) for
+/// common-templating's per-request render.
 ///
 /// The engine is `upon` with `[[ ]]` expression delimiters and no escaping:
-/// the values are the consumer's own constants and the digests the manifest
-/// pins, so they reach the page verbatim exactly as the old raw replace left
-/// them. `{{ }}` is not this engine's delimiter, so runtime markers pass
-/// through untouched.
+/// the values are the consumer's own constants and the SRIs the crates carry,
+/// so they reach the page verbatim. `{{ }}` is not this engine's delimiter, so
+/// runtime markers pass through untouched.
 ///
-/// This runs inside a `build.rs`, so a defect must fail the build. Unlike the
-/// old blind `String::replace`, `upon` ERRORS on any `[[marker]]` the shell
-/// holds that `values` does not fill — naming it — and on a shell that does
-/// not parse as a `[[ ]]` template. Either is a PANIC here, which is the
-/// correct build failure: a forgotten or misspelled build marker is caught at
-/// build time, never shipped raw to a browser. (Runtime `{{ }}` markers are
-/// still refused at boot by common-templating's `Shell`, which names them.)
+/// This runs inside a `build.rs`, so a defect must fail the build. `upon`
+/// ERRORS on any `[[marker]]` the shell holds that `values` does not fill —
+/// naming it — and on a shell that does not parse as a `[[ ]]` template.
+/// Either is a PANIC here, the correct build failure: a forgotten or
+/// misspelled build marker is caught at build time, never shipped raw to a
+/// browser. (Runtime `{{ }}` markers are still refused at boot by
+/// common-templating's `Shell`, which names them.)
 pub fn stamp(shell: &str, values: &[(&str, &str)]) -> String {
     let syntax = upon::Syntax::builder().expr("[[", "]]").build();
     let mut engine = upon::Engine::new();
@@ -459,60 +114,71 @@ pub fn stamp(shell: &str, values: &[(&str, &str)]) -> String {
 mod tests {
     use super::*;
 
-    const PREFIX: &str = "common-ui@abc123def456";
-    const SHELL_HTML: &str = "<html>[[prefix]]</html>";
-    const MARKERS_JSON: &str = r#"{"csp":"default-src 'self' {{assets_origin}}"}"#;
-    const DTS: &str = "export {};\n";
-
-    /// A `Pin` over a fixture manifest: the three embedded files carry real
-    /// digests (so `from_parts` verification passes) and the linked assets
-    /// carry recognisable SRI strings we can assert on.
-    fn pin() -> Pin {
-        let mut files = BTreeMap::new();
-        // The three embedded files must hash to what the manifest pins.
-        files.insert(format!("{PREFIX}/{SHELL}"), sha384(SHELL_HTML.as_bytes()));
-        files.insert(
-            format!("{PREFIX}/{MARKERS}"),
-            sha384(MARKERS_JSON.as_bytes()),
+    #[test]
+    fn shared_markers_are_the_five_from_the_crates() {
+        let markers = shared_markers();
+        let names: Vec<&str> = markers.iter().map(|(n, _)| *n).collect();
+        assert_eq!(
+            names,
+            vec![
+                "prefix",
+                "sri_base_css",
+                "sri_palette_css",
+                "sri_elements_css",
+                "sri_common_ui_js",
+            ]
         );
-        files.insert(format!("{PREFIX}/{TYPES}"), sha384(DTS.as_bytes()));
-        // The linked assets: SRI is read from the manifest, not recomputed.
-        files.insert(format!("{PREFIX}/base.css"), "sha384-BASE".into());
-        files.insert(format!("{PREFIX}/elements.css"), "sha384-ELEMENTS".into());
-        files.insert(format!("{PREFIX}/common-ui.js"), "sha384-JS".into());
-        files.insert(
-            format!("{PREFIX}/theme-default/palette.css"),
-            "sha384-PALETTE".into(),
-        );
-        let manifest = Manifest {
-            prefix: Some(PREFIX.to_owned()),
-            files,
-            raw: String::new(),
+        // The SRIs are the crates' own, not hand-copied.
+        let by = |k: &str| {
+            markers
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| v.as_str())
+                .unwrap()
         };
-        Pin::from_parts(
-            PREFIX,
-            manifest,
-            Files {
-                shell: SHELL_HTML.to_owned(),
-                markers: MARKERS_JSON.to_owned(),
-                dts: DTS.to_owned(),
-            },
-        )
-        .expect("the fixture files match their pinned digests")
+        assert_eq!(by("sri_base_css"), common_ui_core::SRI_BASE_CSS);
+        assert_eq!(by("sri_palette_css"), common_theme::SRI_DEFAULT_PALETTE);
+        assert_eq!(by("sri_elements_css"), common_ui_core::SRI_ELEMENTS_CSS);
+        assert_eq!(by("sri_common_ui_js"), common_ui_core::SRI_COMMON_UI_JS);
+        assert!(by("prefix").starts_with("common-ui "));
     }
 
     #[test]
-    fn shared_markers_are_the_five_keyed_from_the_manifest() {
-        let markers = pin().shared_markers();
-        assert_eq!(
-            markers,
-            vec![
-                ("prefix", PREFIX.to_owned()),
-                ("sri_base_css", "sha384-BASE".to_owned()),
-                ("sri_palette_css", "sha384-PALETTE".to_owned()),
-                ("sri_elements_css", "sha384-ELEMENTS".to_owned()),
-                ("sri_common_ui_js", "sha384-JS".to_owned()),
-            ]
+    fn stamp_fills_build_markers_and_leaves_runtime_markers() {
+        let shell = "<x>[[prefix]]</x>{{assets_origin}}";
+        let out = stamp(shell, &[("prefix", "common-ui 0.3.0")]);
+        assert_eq!(out, "<x>common-ui 0.3.0</x>{{assets_origin}}");
+    }
+
+    #[test]
+    fn stamp_stamps_the_real_shell_leaving_only_runtime_markers() {
+        // Every [[build marker]] the real shell carries must be fillable, and
+        // the {{runtime markers}} must survive — the two-engine contract.
+        let mut values: Vec<(&str, String)> = shared_markers();
+        for (k, v) in [
+            ("title", "T"),
+            ("app_name", "app"),
+            ("app_icon", "x"),
+            ("bar_pages", ""),
+            ("page_css", "/p.css"),
+            ("page_module", "/p.js"),
+            ("root_class", ""),
+            ("footer_app", "app"),
+            ("footer_commit", "abc"),
+            ("legal", "L"),
+        ] {
+            values.push((k, v.to_owned()));
+        }
+        let refs: Vec<(&str, &str)> = values.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let out = stamp(common_ui_core::SHELL_HTML, &refs);
+        assert!(
+            !out.contains("[["),
+            "an unfilled build marker remains: {out}"
         );
+        assert!(
+            out.contains("{{assets_origin}}"),
+            "runtime marker was eaten"
+        );
+        assert!(out.contains("{{config}}"), "runtime marker was eaten");
     }
 }

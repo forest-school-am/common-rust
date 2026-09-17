@@ -1,0 +1,801 @@
+@layer theme {
+  /* Every selector here is a CLASS or a state. The SAME bytes are linked into
+     the document after base.css (§12.14) and adopted inside each element's
+     shadow root (§12.18), so a bare-tag reset such as `button { border: 0 }`
+     would win over base.css's own buttons in the document copy. */
+
+  /* base.css's `* { box-sizing: border-box }` is a DOCUMENT rule and rules do
+     not cross a shadow boundary (§12.11a), so without this every element's
+     internals are content-box: `max-width: var(--field-max)` measured 462px
+     instead of 448 once padding and border were added. Identical to base.css's
+     value, so the document copy of this sheet changes nothing there. */
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  /* The eight words of §12.11, and the distinction that earns three of them:
+     refused never ran BY POLICY, skipped never ran BY SCHEDULE, failed ran and
+     broke. A service maps its own states onto these rather than adding a
+     ninth. The four neutral states are told apart by the word, not the colour
+     — none of them means something went wrong.
+
+     Here rather than in base.css because rules do not cross a shadow boundary
+     and <les-table> badges its cells inside one; these bytes are linked into
+     the document and adopted into every element, so there is ONE mapping. */
+  .status-ok { color: var(--ok); }
+  .status-pending { color: var(--mut); }
+  .status-running { color: var(--acc); }
+  .status-failed { color: var(--err); }
+  .status-refused { color: var(--refused); }
+  .status-skipped { color: var(--mut); }
+  .status-disabled { color: var(--mut); }
+  .status-unknown { color: var(--mut); }
+
+  /* R86's footer: provenance, not chrome. One line that WRAPS on a phone
+     rather than scrolling, muted, and held to the page measure so it lines up
+     with the content above it. */
+  footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gap);
+    /* Same trap as `main`: without an explicit width the auto margins absorb
+       the free space of the flex column and the footer shrinks to its text. */
+    width: 100%;
+    max-width: var(--content-max);
+    margin-inline: auto;
+    padding: var(--pad-card);
+    color: var(--mut, GrayText);
+    border-top-style: solid;
+    border-top-color: var(--bd, CanvasText);
+    border-top-width: var(--bw);
+  }
+  /* THE FOOTER FOLLOWS MAIN'S MEASURE. Held to --content-max it lined up with
+     nothing on a dashboard page, where `main.wide` spans the viewport: the
+     rule under a 1252px-wide table stopped at 1152px. A footer is the page's
+     own bottom edge, so it takes the page's own width. */
+  body:has(main.wide) footer {
+    max-width: none;
+  }
+
+  footer a {
+    color: inherit;
+  }
+
+  /* R81's pill: one vocabulary for "a short labelled thing", absorbing the
+     badge so there are not two that drift. Static on a span; interactive only
+     when it IS a button or an anchor, which takes hover and focus from the
+     button rules above rather than a role= hack. */
+  /* ANCHORS, because page CSS cannot reach content this library MOVED into a
+     shadow root — les-table appends the consumer's own <table> into #scroll,
+     les-toolbar takes its tabs as children, and a panel and a modal move
+     theirs. base.css says `a { color: var(--acc) }` and that rule stops at
+     the boundary, so the UA colour took over: measured on cron-next's task
+     links as UA blue 0000EE against theme-ink accent 9a4026, while the les-bar
+     nav links on the same page were correctly themed. Invisible under
+     theme-default alone, where the UA blue and the accent are both "blue".
+     
+     These bytes are adopted into every element (§12.11a), which is why the
+     rule belongs here and not in each component's own sheet. `a` covers
+     :visited too — an author rule beats the UA one, so there is no purple to
+     undo and R101 gets no default link colours anywhere. */
+  a {
+    color: var(--acc, LinkText);
+  }
+
+  /* METERS AND FORM CONTROLS, the third thing page CSS cannot reach inside a
+     cell this library moved. A consumer measured a <progress> in a table cell
+     computing accent-color AUTO in both schemes, so its near-budget warning
+     was invisible: a task at 95% of its disk budget drew the same grey bar as
+     one at 5%. base.css themes a checkbox the same way and loses it at the
+     same boundary — a row-selection box in a cell is the common case.
+     
+     accent-color: currentColor is what makes the EXISTING status vocabulary
+     work here rather than a second one. The eight §12.11 words already set
+     `color`, so `<progress class="status-failed">` paints its fill in --err
+     with no new rule, no new token, and no list that can drift from the one
+     above. `color` is set here too, so a bar with no status class is the
+     accent rather than the body ink; a status class on the element wins it
+     back by specificity. */
+  progress {
+    accent-color: currentColor;
+    color: var(--acc, AccentColor);
+    block-size: calc(var(--font-size) * 0.5);
+    vertical-align: middle;
+    /* THE TRACK, PAINTED. accent-color alone colours the FILL and leaves the
+       track to the UA, which in dark mode is a solid bright white slab — the
+       only light surface on the page, reading as "full" on a bar at 504 B of
+       its budget, in all eleven themes. Light mode draws a modest outlined
+       grey track, so nothing caught it until a dark review.
+       
+       Longhands, per the rule this build enforces: a border shorthand fed
+       --bw is invalid as a whole when the palette is absent. */
+    background: var(--card, Canvas);
+    border-style: solid;
+    border-color: var(--bd, ButtonBorder);
+    border-width: var(--bw);
+    border-radius: var(--roundness-pill);
+  }
+
+  /* The FILL. Firefox paints it through this pseudo, and currentColor is what
+     keeps the eight status words working on it — the same mechanism as
+     accent-color above, which stays for the controls that have no pseudo. */
+  progress::-moz-progress-bar {
+    background: currentColor;
+    border-radius: var(--roundness-pill);
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--acc, AccentColor);
+    /* THE BOX ITSELF, not just the tick. In dark mode an unchecked control
+       is the UA's own widget surface — a cool blue-grey square that ignores
+       the palette, which is conspicuous on the warm grounds three themes
+       use. accent-color paints the CHECKED state only. The resize grip on a
+       textarea and the calendar glyph on a date input are drawn by the UA
+       and cannot be reached without appearance:none, which would mean
+       rebuilding both controls; they are left alone deliberately. */
+    background-color: var(--card, Canvas);
+  }
+
+  /* WIDTH, in a CELL only. A bar left at the UA size is a fixed 162px, which
+     made one consumer's disk column 240px wide against 94px for its
+     neighbour, and no page rule could reach in to shrink it.
+     
+     Scoped to a cell rather than written on `progress`, because these bytes
+     are ALSO the page's stylesheet: a blanket width here would resize every
+     page-level bar in five services, none of which asked for it, and a bar
+     on a page is one a page can already style.
+     
+     --progress-width is an instance knob with its fallback in the rule, not a
+     palette token — a token would have to be declared by all eleven themes
+     and would refuse every one of them until it was. Custom properties cross
+     a shadow boundary, so a consumer sets it on the table, or on one column
+     through ::part(cell-<column>), and gets any width it likes. */
+  [part~="cell"] progress {
+    inline-size: var(--progress-width, 100%);
+  }
+
+  /* MONO, for the same reason as the anchors above: base.css has this rule
+     and base.css cannot reach content moved into a shadow root. A consumer
+     put `code, .mono` in its page sheet, measured no pixel change, and found
+     out the hard way — eighteen version strings and every cron expression
+     rendering in the body font inside a table, with no way to fix it from
+     outside. The fleet had no mono vocabulary that crossed the boundary; now
+     the same two selectors work on both sides of it. */
+  code,
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gap);
+    min-width: 0;
+    /* SHRINK TO THE WORD. `display: inline-flex` is not enough when the pill
+       is a GRID ITEM, which is what a table cell makes it — a grid item
+       stretches to its track by default, so a status pill filled the whole
+       cell: a 320px capsule with "ok" floating in the middle of it, and at a
+       larger type size the longer words ran into the capsule edge. A pill
+       states one word and should be exactly as wide as that word. */
+    justify-self: start;
+    padding: 0 var(--pad-card);
+    border-radius: var(--roundness-pill);
+    background: var(--chip, Canvas);
+    color: var(--chipfg, CanvasText);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .pill > .icon {
+    flex: none;
+    display: inline-flex;
+  }
+  /* The label may be long even though the pill is one line. */
+  .pill > .label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Intents: the wash grounds it and the role carries the text, which is the
+     pairing the palette already asserts for AA. */
+  .pill.primary {
+    background: var(--acc-wash);
+    color: var(--acc, CanvasText);
+  }
+  .pill.alt {
+    background: var(--acc-wash);
+    color: var(--alt, CanvasText);
+  }
+  .pill.ok,
+  .pill.status-ok {
+    background: var(--ok-wash);
+    color: var(--ok, CanvasText);
+  }
+  .pill.warn,
+  .pill.status-pending {
+    background: var(--warn-wash);
+    color: var(--warn, CanvasText);
+  }
+  .pill.danger,
+  .pill.status-failed {
+    background: var(--err-wash);
+    color: var(--err, CanvasText);
+  }
+  .pill.status-refused {
+    background: var(--refused-wash);
+    color: var(--refused, CanvasText);
+  }
+  .pill.status-running {
+    background: var(--acc-wash);
+    color: var(--acc, CanvasText);
+  }
+  /* The four that mean nothing went wrong keep the neutral chip ground and
+     are told apart by the WORD, as §12.11 has it. */
+  .pill.status-skipped,
+  .pill.status-disabled,
+  .pill.status-unknown {
+    background: var(--chip, Canvas);
+    color: var(--mut, GrayText);
+  }
+
+  /* A pill that IS a control gets the touch floor and a pointer; a pill that
+     is a span must not pretend to be either. */
+  a.pill,
+  button.pill {
+    min-height: var(--control-min-height);
+    cursor: pointer;
+    text-decoration: none;
+    border-style: none;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* R80's button vocabulary: intent x emphasis x size x state, on native
+     <button> and .btn. Bare words as ruled, but every rule is SCOPED to a
+     button — a page's own `.ok` or `.solid` on something else does nothing,
+     which is most of the collision risk bare words would otherwise carry.
+     Specificity also keeps these BELOW .control-action, so a button inside a
+     shared element (the picker's chip remove, the account trigger, the bar's
+     burger) keeps its own shape. */
+  .btn,
+  button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--gap);
+    min-height: var(--control-min-height);
+    padding: 0 var(--pad-card);
+    border-style: solid;
+    border-width: var(--bw);
+    border-color: var(--bd, CanvasText);
+    border-radius: var(--roundness-btn);
+    background: transparent;
+    color: var(--fg, CanvasText);
+    font-weight: var(--btn-weight, 600);
+    cursor: pointer;
+    text-decoration: none;
+  }
+
+  /* Intent: outlined is the ABSENCE of an emphasis class, and `none` the
+     absence of an intent.
+     
+     PRIMARY IS THE EXCEPTION, and it is FILLED. It was outlined, with `solid`
+     as the modifier that filled it — so the same theme gave one host a filled
+     primary and two hosts outlined ones, and the page's one action weighed
+     the same as everything beside it. R101 wants one look for it, and primary
+     is the thing a page exists to do. `primary solid` is now a no-op rather
+     than a different button. */
+  .btn.primary,
+  button.primary {
+    background: var(--acc, LinkText);
+    color: var(--acc-fg, Canvas);
+    border-color: var(--acc, LinkText);
+  }
+  .btn.alt,
+  button.alt {
+    color: var(--alt, LinkText);
+    border-color: var(--alt, LinkText);
+  }
+  .btn.ok,
+  button.ok {
+    color: var(--ok, CanvasText);
+    border-color: var(--ok, CanvasText);
+  }
+  .btn.warn,
+  button.warn {
+    color: var(--warn, CanvasText);
+    border-color: var(--warn, CanvasText);
+  }
+  .btn.danger,
+  button.danger {
+    color: var(--err, CanvasText);
+    border-color: var(--err, CanvasText);
+  }
+
+  /* Solid. `none` + solid is the INVERTED neutral: --fg background with
+     --card text, because --fg on --bd measures 4.30 in dark mode and fails
+     AA, while this measures 13.96 and needs no new role. */
+  .btn.solid,
+  button.solid {
+    background: var(--fg, CanvasText);
+    color: var(--card, Canvas);
+    border-color: transparent;
+  }
+  .btn.alt.solid,
+  button.alt.solid {
+    background: var(--alt, LinkText);
+    color: var(--alt-fg, Canvas);
+  }
+  .btn.ok.solid,
+  button.ok.solid {
+    background: var(--ok, CanvasText);
+    color: var(--ok-fg, Canvas);
+  }
+  .btn.warn.solid,
+  button.warn.solid {
+    background: var(--warn, CanvasText);
+    color: var(--warn-fg, Canvas);
+  }
+  .btn.danger.solid,
+  button.danger.solid {
+    background: var(--err, CanvasText);
+    color: var(--err-fg, Canvas);
+  }
+
+  .btn.quiet,
+  button.quiet {
+    border-color: transparent;
+  }
+  .btn.quiet:hover,
+  button.quiet:hover {
+    background: var(--row-hover);
+  }
+
+  /* `sm` is smaller TYPE and padding, never a smaller min-height: §12.9's
+     touch floor is --control-min-height, the theme RAISES it on mobile, and a
+     genuinely shorter button undoes exactly that on the device in the user's
+     hand. */
+  .btn.sm,
+  button.sm {
+    padding: 0 var(--pad-control);
+    font-size: var(--btn-font-sm);
+  }
+  .btn.lg,
+  button.lg {
+    padding: 0 var(--gap-section);
+    font-size: var(--btn-font-lg);
+  }
+  .btn.block,
+  button.block {
+    width: 100%;
+  }
+
+  /* No spinner: an animation nothing exercises is unverified (§12.2), and it
+     can arrive with the first consumer that needs one. */
+  .btn[aria-busy="true"],
+  button[aria-busy="true"] {
+    cursor: progress;
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gap);
+    min-height: var(--control-min-height);
+    max-width: var(--field-max);
+    padding: 0 var(--pad-control);
+    /* Longhands for the same reason as the focus ring below: `border:
+       var(--bw) solid …` is invalid as a WHOLE when --bw is missing, and the
+       control loses the only edge that says where it begins. As longhands the
+       width falls back to `medium` and the edge survives. */
+    border-style: solid;
+    border-color: var(--bd, CanvasText);
+    border-width: var(--bw);
+    border-radius: var(--roundness-control);
+    background: var(--card, Canvas);
+    color: var(--fg, CanvasText);
+    font: inherit;
+  }
+  .control:focus-within { border-color: var(--acc, AccentColor); }
+
+  /* The field inside a control box owns no edge of its own — the box is the
+     edge, and a second border would read as two nested controls. */
+  .control-field {
+    flex: 1 1 8rem;
+    min-width: 8rem;
+    min-height: var(--control-min-height);
+    width: auto;
+    max-width: none;
+    padding: 0;
+    border: 0;
+    outline: 0;
+    font: inherit;
+    color: inherit;
+    background: transparent;
+  }
+
+  /* L5: STATE CHANGES MOVE AT THE THEME'S PACE. Longhands, because a var()
+     inside the transition shorthand is invalid as a whole when the token is
+     missing. :where() so any component rule that sets its own transition
+     still wins. At the 0s default nothing moves. */
+  :where(.btn, button, .control, a.card, a.pill) {
+    transition-property: background-color, border-color, color, box-shadow, translate;
+    transition-duration: var(--motion-duration);
+    transition-timing-function: var(--motion-easing);
+  }
+
+  /* L9: RAISED CONTROLS, WELLS AND THE PRESS. A button or a control pill is
+     raised by --shadow-control and pressed to --shadow-press, moving by
+     --press-translate while the press lasts, whether the press is a pointer
+     (:active) or a toggle ([aria-pressed="true"]). A quiet button and the
+     small actions inside a control box (the picker's clear, the burger) stay
+     flat: a raised chip inside a field reads as a second control. The control
+     box itself is a field and takes --shadow-field. :where() keeps all of it at
+     class specificity, so a page rule can still restyle a button. */
+  :where(.btn, button, a.pill, button.pill):not(.quiet, .control-action) {
+    box-shadow: var(--shadow-control);
+  }
+  :where(.btn, button, a.pill, button.pill):not(.quiet, .control-action):is(:active, [aria-pressed="true"]) {
+    box-shadow: var(--shadow-press);
+    translate: var(--press-translate);
+  }
+  .control {
+    box-shadow: var(--shadow-field);
+  }
+
+  /* L8: STATE LAYERS. A veil of the element's own ink over whatever fills
+     it, drawn as a background-image so the fill underneath is untouched and
+     an outlined button, a filled primary and a pill all get the same cue. At
+     the 0% default the veil is fully transparent. A quiet button keeps
+     --row-hover, which is its own hover language. */
+  :where(button, .btn, a.pill, .control-action, [part~="page"]):not(.quiet):hover {
+    background-image: linear-gradient(
+      color-mix(in srgb, currentColor var(--state-hover), transparent),
+      color-mix(in srgb, currentColor var(--state-hover), transparent)
+    );
+  }
+  :where(button, .btn, a.pill, .control-action, [part~="page"]):not(.quiet):active {
+    background-image: linear-gradient(
+      color-mix(in srgb, currentColor var(--state-press), transparent),
+      color-mix(in srgb, currentColor var(--state-press), transparent)
+    );
+  }
+
+  /* Reduced motion is the USER's, so it wins over every theme: a property
+     rule here reaches every shadow root that adopts this sheet, where a token
+     override would lose to the unlayered palette. */
+  @media (prefers-reduced-motion: reduce) {
+    :where(.btn, button, .control, a.card, a.pill,
+      [part~="panel"], [part~="listbox"], [part~="dialog"], [part~="toast"]) {
+      transition-duration: 0s;
+    }
+  }
+
+  /* The theme's ring on every focusable these sheets style. Only the control
+     vocabulary had it, so a button, a link or a bare field showed the UA's
+     ring whatever the theme's --ring said. Before the control rule below,
+     which has the same specificity and must keep its inset ring. */
+  :where(button, .btn, a, input, select, textarea):focus-visible {
+    outline-style: solid;
+    outline-color: var(--ring, AccentColor);
+    outline-width: var(--ring-width);
+    outline-offset: 2px;
+  }
+
+  /* Longhands, not the `outline` shorthand: with no palette linked
+     `var(--ring-width)` is invalid at computed-value time and takes the WHOLE
+     shorthand with it, so the focus ring disappears entirely. As longhands
+     only the width falls back — to `medium` — and the ring stays visible,
+     which is the one thing that must survive a palette that failed to load. */
+  :where(.control, .control-field, .control-action):focus-visible {
+    outline-style: solid;
+    outline-color: var(--ring, AccentColor);
+    outline-width: var(--ring-width);
+    outline-offset: calc(-1 * var(--ring-width, 2px));
+  }
+
+  .control-action {
+    min-height: var(--control-min-height);
+    font: inherit;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: var(--roundness-control);
+    cursor: pointer;
+  }
+
+  :where(.control, .control-field, .control-action)[disabled],
+  :where(.control, .control-field, .control-action):disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .control[disabled] { pointer-events: none; }
+
+  /* ---------- R87: one trigger, no element ---------- */
+
+  /* The CARRIER LIST is in the selector, not in prose. Buttons keep the R80
+     treatment above and get no spinner (R87); a link and the form controls
+     are excluded because the overlay is for a REGION. `input` is the measured
+     case: it generates the pseudo with ZERO width, so the overlay would be
+     invisible while the min-height still stretched the field — my first draft
+     made a busy button 96px tall, which is what put the list here.
+     
+     [data-busy-internal] is how an element says it draws its OWN overlay. A
+     host's pseudo paints beneath its shadow content, so a busy <les-table>
+     showed the host's ring THROUGH the gaps in its own content as well as the
+     one inside it — a pixel scan counted 238 ring pixels against a page
+     region's 126. The element sets this attribute on itself, which leaves
+     exactly one overlay and puts the min-height and pointer-events on the
+     wrapper that holds the content. */
+  :where([aria-busy="true"]):not(
+      button, a, input, select, textarea, [role="button"], [role="link"],
+      [data-busy-internal]
+    ) {
+    position: relative;
+    min-height: var(--busy-min-height);
+  }
+
+  /* Left in flow and unreachable, so the content stays measurable and a real
+     click cannot land on it. */
+  :where([aria-busy="true"]):not(
+      button, a, input, select, textarea, [role="button"], [role="link"],
+      [data-busy-internal]
+    ) > * {
+    pointer-events: none;
+  }
+
+  /* TWO pseudo-elements, because only the RING may rotate. With the ring as
+     a background image of the scrim layer, animating transform turned the
+     whole overlay — the dark rectangle and the label with it — which is both
+     wrong to look at and why a pixel probe could not find the arc where the
+     geometry said it was. ::before is the ring, ::after is the scrim and the
+     label, and z-index puts the ring above the scrim since ::before paints
+     first. */
+  :where([aria-busy="true"]):not(
+      button, a, input, select, textarea, [role="button"], [role="link"],
+      [data-busy-internal]
+    )::before {
+    content: "";
+    position: absolute;
+    z-index: 3;
+    /* CENTRED ON THE CARRIER, ring alone. */
+    inset-block-start: calc(50% - var(--spinner-size) / 2);
+    inset-inline-start: calc(50% - var(--spinner-size) / 2);
+    width: var(--spinner-size);
+    height: var(--spinner-size);
+    /* A BORDER ring, not a conic gradient. The gradient interpolated from
+       transparent to the colour, so most of the arc was semi-transparent and
+       composited over whatever was beneath it — two overlays over different
+       content could not be compared, and "same look" could not be measured.
+       A border arc is OPAQUE where it paints.
+       
+       The pill token is the library's "fully round"; a literal 50% is a
+       design constant (§12.13) and the box is square anyway. */
+    border-radius: var(--roundness-pill);
+    border-style: solid;
+    border-width: var(--spinner-width);
+    border-color: transparent;
+    border-block-start-color: var(--spinner-color);
+    /* A theme may replace the ring glyph entirely; a data: URI mask is
+       accepted under the crate's CSP (measured — img-src governs CSS images
+       too, which is what the favicon taught us). */
+    mask-image: var(--spinner-image);
+    mask-repeat: no-repeat;
+    mask-position: center;
+    mask-size: contain;
+
+    /* TWO animations: the ring, and a one-shot fade that keeps it invisible
+       for ~200ms so a fast fetch shows nothing.
+       
+       A transition cannot do this: the pseudo-element is CREATED when the
+       attribute appears, so there is no previous opacity to transition FROM
+       and it paints at its final value — measured at opacity 1 after 80ms
+       with a 200ms transition delay in place. */
+    opacity: 0;
+    animation:
+      var(--spinner-animation) var(--spinner-duration) linear infinite,
+      busy-in 0.12s linear 0.2s forwards;
+  }
+
+  /* WITH A LABEL, the PAIR is centred, not the ring. The label is one line
+     below the ring plus a gap, so the ring moves up by half that block and
+     the label centring in the padded box covers the other half.
+     
+     Before this rule the ring was placed a FULL spinner above centre whether
+     or not there was a label, which is fine in a tall carrier and wrong in a
+     short one: in the gallery's two-row busy example — a 95px carrier — the
+     ring sat ON the carrier top edge, clipped by it and overlapping the data
+     row, and a reviewer read it as the spinner straddling the boundary. It
+     was, and the arithmetic said so. */
+  :where([aria-busy="true"][data-busy-text]):not(
+      button, a, input, select, textarea, [role="button"], [role="link"],
+      [data-busy-internal]
+    )::before {
+    inset-block-start: calc(50% - var(--spinner-size) / 2 - (var(--gap) + 1lh) / 2);
+  }
+
+  :where([aria-busy="true"]):not(
+      button, a, input, select, textarea, [role="button"], [role="link"],
+      [data-busy-internal]
+    )::after {
+    content: attr(data-busy-text);
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* The label sits UNDER the ring: the ring is shifted up by half of this
+       reserved block and the label is centred in what is left, so the PAIR is
+       centred on the carrier at any height. See the ::before rule. */
+    padding-block-start: calc(var(--spinner-size) + var(--gap));
+    /* A VEIL OF THE SURFACE, not the modal's backdrop. It borrowed
+       --modal-backdrop, which is a dark curtain by design — the thing a
+       DIALOG sits in front of — and in light mode that made a loading table
+       the darkest thing on the page: it read as disabled rather than busy.
+       A translucent card veils the content in either scheme without blacking
+       it out, and it needs no palette token of its own because the surface
+       already knows what colour it is. */
+    background-color: color-mix(in srgb, var(--card, Canvas) 82%, transparent);
+    color: var(--fg, CanvasText);
+    text-align: center;
+    opacity: 0;
+    animation: busy-in 0.12s linear 0.2s forwards;
+  }
+
+  /* HERE, not in the palette: keyframes resolve in the tree scope of the
+     animating element, so a name defined in a page sheet does not reach an
+     element's shadow root — 0 running animations there against 1 on the page.
+     These bytes are adopted into every shadow root, so `spin` resolves in
+     both. A theme naming its own animation reaches page markup only. */
+  @keyframes spin {
+    to { transform: rotate(1turn); }
+  }
+
+  @keyframes busy-in {
+    to { opacity: 1; }
+  }
+
+  @keyframes busy-pulse {
+    50% { opacity: 0.45; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* BOTH names: animation-name is a list, and naming only the pulse drops
+       the fade and takes the 200ms delay with it. On ::before, which is where
+       the ring's animation lives. */
+    :where([aria-busy="true"]):not(
+        button, a, input, select, textarea, [role="button"], [role="link"],
+        [data-busy-internal]
+      )::before {
+      animation-name: busy-pulse, busy-in;
+    }
+  }
+
+  /* ---------- R83: the card, a class and pure grouping ---------- */
+
+  /* Children named by CLASS take the grid-area of that name, so the layout is
+     a parameter (--card-layout) exactly as the table's is, and a phone gets a
+     different arrangement from a media query with no JS. */
+  .card {
+    display: grid;
+    grid-template-areas: var(--card-layout);
+    grid-template-columns: var(--card-columns);
+    gap: var(--gap) var(--gap-section);
+    padding: var(--pad-card);
+    border-style: solid;
+    border-width: var(--bw-card);
+    border-color: var(--bd-surface, var(--bd, ButtonBorder));
+    border-radius: var(--roundness-card);
+    background: var(--surface-1, Canvas);
+    box-shadow: var(--shadow-card);
+    color: var(--fg, CanvasText);
+    /* The glass layer below is positioned against the card and stacked inside it. */
+    position: relative;
+    isolation: isolate;
+    /* L17: with no backdrop-filter a translucent step would be see-through with no frost, so the opaque card instead. */
+    @supports not (backdrop-filter: blur(1px)) {
+      background: var(--card, Canvas);
+    }
+  }
+
+  /* L17 .SURFACE: a panel that PAINTS like a card and does nothing to layout. No display, grid, padding,
+     margin or gap, so a consumer's own panel keeps its box and only its paint changes: in every theme that is
+     not glass it computes the same background, border, radius and shadow as .card, and in a glass theme it is
+     frosted glass like one. position and isolation are there for the glass layer: like a card, a surface is a
+     stacking context, so something fixed inside it is stacked inside it (les-panel is in the top layer and
+     escapes it). */
+  .surface {
+    border-style: solid;
+    border-width: var(--bw-card);
+    border-color: var(--bd-surface, var(--bd, ButtonBorder));
+    border-radius: var(--roundness-card);
+    background: var(--surface-1, Canvas);
+    box-shadow: var(--shadow-card);
+    position: relative;
+    isolation: isolate;
+    /* L17: with no backdrop-filter a translucent step would be see-through with no frost, so the opaque card instead. */
+    @supports not (backdrop-filter: blur(1px)) {
+      background: var(--card, Canvas);
+    }
+  }
+
+  /* L17 GLASS LAYER: the frost is a backdrop-filter on ::before, never on the host, so the host never becomes the containing block for anything fixed inside it. The layer has no background: it blurs the host's own translucent background over what lies behind.
+     A busy card or surface leaves ::before to the busy ring and keeps its tint under the scrim. */
+  .card:not([aria-busy="true"])::before,
+  .surface:not([aria-busy="true"])::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    backdrop-filter: var(--surface-blur);
+  }
+
+  .card > .title { grid-area: title; font-weight: 600; }
+  .card > .actions {
+    grid-area: actions;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gap);
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .card > .body { grid-area: body; }
+  .card > .footer { grid-area: footer; color: var(--mut, GrayText); }
+  .card > .media { grid-area: media; }
+
+  /* Intent and emphasis, mirroring R80's buttons: absence of an emphasis
+     class is bordered, absence of an intent is neutral. Scoped to .card for
+     the same reason the button rules are scoped to a button — a page's own
+     `.ok` on something else does nothing. */
+  .card.primary { border-color: var(--acc, LinkText); }
+  .card.alt { border-color: var(--alt, LinkText); }
+  .card.ok { border-color: var(--ok, CanvasText); }
+  .card.warn { border-color: var(--warn, CanvasText); }
+  .card.danger { border-color: var(--err, CanvasText); }
+  /* L16: the intent's colour on a stripe of its own width, so a borderless
+     card (--bw-surface: 0) keeps the cue on its leading edge. */
+  .card:is(.primary, .alt, .ok, .warn, .danger) { border-inline-start-width: var(--bw-card-intent); }
+
+  /* Solid is a WASH, not an inversion: a card is a surface holding text, and
+     --acc-fg on --acc is right for a button's label and wrong for a
+     paragraph. */
+  .card.solid { background: color-mix(in srgb, var(--fg, CanvasText) 6%, var(--card, Canvas)); }
+  .card.primary.solid { background: color-mix(in srgb, var(--acc, LinkText) 10%, var(--card, Canvas)); }
+  .card.alt.solid { background: color-mix(in srgb, var(--alt, LinkText) 10%, var(--card, Canvas)); }
+  .card.ok.solid { background: color-mix(in srgb, var(--ok, CanvasText) 10%, var(--card, Canvas)); }
+  .card.warn.solid { background: color-mix(in srgb, var(--warn, CanvasText) 10%, var(--card, Canvas)); }
+  .card.danger.solid { background: color-mix(in srgb, var(--err, CanvasText) 10%, var(--card, Canvas)); }
+
+  .card.quiet { border-color: transparent; background: none; }
+
+  /* The link case. */
+  a.card { text-decoration: none; }
+  a.card:hover { border-color: var(--acc, LinkText); translate: var(--hover-lift); }
+
+  /* The card grid. --col-min is the theme's, so the tile count follows the
+     viewport with no breakpoint of its own. */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(var(--col-min), 1fr));
+    gap: var(--gap-section);
+  }
+}

@@ -1,0 +1,273 @@
+:root {
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --fg: #1a1d21;
+  --mut: #5f6673;
+  --acc: #2563eb;
+  --ok: #137638;
+  --warn: #a64c08;
+  --err: #b81c1c;
+  --refused: #a21caf;
+  --bd: #868e9c;
+  --chip: #eef2ff;
+  --chipfg: #3730a3;
+
+  /* R80's second accent. The default theme sets it EQUAL to --acc, so an app
+     that marks a button `alt` just gets primary until a theme distinguishes
+     them — which is the point: the vocabulary exists before the look does. */
+  --alt: #2563eb;
+  --alt-fg: #ffffff;
+
+  --acc-fg: #ffffff;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --err-fg: #ffffff;
+  --acc-wash: color-mix(in srgb, var(--acc) 10%, var(--card));
+  --ok-wash: color-mix(in srgb, var(--ok) 10%, var(--card));
+  --warn-wash: color-mix(in srgb, var(--warn) 10%, var(--card));
+  --err-wash: color-mix(in srgb, var(--err) 10%, var(--card));
+  --refused-wash: color-mix(in srgb, var(--refused) 10%, var(--card));
+
+  --lf-expr-keyword: #0b62d6;
+  --lf-expr-string: #0a7d33;
+  --lf-expr-number: #b45309;
+  --lf-expr-binding: #7c3aed;
+  --lf-expr-comment: #5f6673;
+
+  --roundness: 0.375rem;
+  --roundness-control: var(--roundness);
+  --roundness-card: calc(var(--roundness) * 2);
+  --roundness-pill: calc(var(--roundness) * 100);
+  --bw: 1px;
+  /* R95.2: an invalid field is thicker as well as differently coloured, so it
+     differs in GREYSCALE and not by hue alone. Two tokens because colour
+     alone fails the readers most likely to need the error. */
+  --bw-invalid: 2px;
+
+  --space: 0.5rem;
+  --pad-control: calc(var(--space) * 0.75);
+  --pad-card: calc(var(--space) * 2);
+  --gap: var(--space);
+  --gap-section: calc(var(--space) * 2.5);
+
+  --shadow-card: 0 1px 2px rgb(16 18 22 / 0.06);
+  --shadow-popup: 0 8px 24px rgb(16 18 22 / 0.16);
+  /* L2: the edge of a SURFACE (card, menu, listbox, panel, dialog, toast, bar);
+     controls keep --bw. L1: elevation for the floating surfaces and the bar. */
+  --bw-surface: var(--bw);
+  --shadow-float: none;
+  --shadow-bar: none;
+  /* L5: motion. 0s keeps every shipped theme still; reduced motion zeroes it anyway. */
+  --motion-duration: 0s;
+  --motion-easing: linear;
+  --motion-duration-enter: 0s;
+  --motion-easing-enter: linear;
+  /* L6: the surface ladder — 1 card, 2 panel, 3 menu/listbox/toast, 4 dialog —
+     and the bar's own ground. All --card here, so nothing moves. */
+  --surface-1: var(--card);
+  --surface-2: var(--card);
+  --surface-3: var(--card);
+  --surface-4: var(--card);
+  --bar-bg: var(--card);
+  /* L8: state layers — the element's own ink over its fill, as a percentage. */
+  --state-hover: 0%;
+  --state-press: 0%;
+  /* L15: a button's corner of its own. L16: the intent card's stripe. */
+  --roundness-btn: var(--roundness-control);
+  --bw-card-intent: var(--bw-surface);
+  /* L9: a raised control, a field's well, and the press. Nothing raised, nothing
+     sunk and nothing moves at these values. */
+  --shadow-control: none;
+  --shadow-field: none;
+  --shadow-press: var(--shadow-control);
+  --press-translate: none;
+  /* L11: the type system's shape, and L12's button label weight. These are the
+     values the sheets used as literals: body 1.5, bold headings, no tracking,
+     h2 at 1.2 of the body, labels at 600. */
+  --leading: 1.5;
+  --heading-weight: 700;
+  --heading-tracking: normal;
+  --heading-scale: 1.2;
+  --btn-weight: 600;
+  /* The card's own edge, 1 to 4 widths, so a card can be a single rule. The
+     other surfaces keep --bw-surface, which panel and bar read one side of. */
+  --bw-card: var(--bw-surface);
+  /* L17 (glass): the lit ground under the page, the frost behind a glass surface, a surface's own edge
+     colour, the frost behind a modal's scrim, and a link card's lift. At these values nothing moves. */
+  --bg-image: none;
+  --surface-blur: none;
+  --bd-surface: var(--bd);
+  --scrim-blur: none;
+  --hover-lift: none;
+  --ring: #2563eb;
+  --ring-width: 2px;
+
+  /* R101 — TYPE SIZE IS THE THEME'S. base.css spent nine literals on what is
+     really two sizes, and the body font shorthand hard-coded 0.875rem — BELOW
+     the 1rem floor, with no way for a theme to lift it. Two roles: the body
+     size, and the one smaller step that notes, table text, labels and hints
+     share. Headings scale off the body size; inline code stays in `em` so it
+     follows whatever it sits in. */
+  --font-size: 1rem;
+  --font-size-sm: 0.85rem;
+  --font: -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: var(--font);
+  --font-mono: ui-monospace, "Cascadia Mono", Menlo, monospace;
+
+  --content-max: 64rem;
+  --control-min-height: 2.5rem;
+  --col-min: 20rem;
+
+  --field-max: 28rem;
+  --table-min: 34rem;
+  /* The band steps toward the ink from the ground NEARER to it, so it stands
+     off both: the page ground here, the card in the dark block. */
+  --table-header-bg: color-mix(in srgb, var(--fg) 5%, var(--bg));
+
+  /* The shared top-layer panel (popover.ts): every element that opens one —
+     the bar's pages, the account menu, and next the toolbar overflow, toasts
+     and hints — reads these, so the offset and width are set once. */
+  --popover-offset: 0.2rem;
+  --popover-min-width: 12rem;
+
+  /* The modal scrim. A knob rather than a §12.9 role, and a THEME value
+     rather than a fallback in the element, because there is no system colour
+     for a scrim — Canvas is opaque — so an element-side default would be a
+     design constant hiding in a component (§12.13). With no palette linked
+     the backdrop is simply absent, which is the documented ugly floor. */
+  --modal-backdrop: rgb(24 28 35 / 55%);
+  --toast-max: 28rem;
+
+  /* R87. --spinner-animation is a keyframes NAME, and `spin` is defined in
+     elements.css rather than here on purpose: keyframes resolve in the tree
+     scope of the animating element, so a name defined in this sheet reaches
+     page markup and NOT an element's shadow root — measured, 0 animations
+     there against 1 on the page. A theme may name its own animation; it will
+     apply to page markup only, and the README says so. */
+  --spinner-color: var(--acc);
+  --spinner-size: 2.5rem;
+  --spinner-width: 0.25rem;
+  --spinner-duration: 0.9s;
+  --spinner-animation: spin;
+  --spinner-image: none;
+  --busy-min-height: 6rem;
+
+  /* R83's card: children named by class take the grid-area of that name. */
+  --card-layout: "title actions" "body body" "footer footer";
+  --card-columns: 1fr auto;
+
+  /* The toolbar collapses at the BREAKPOINT, like the bar — no measurement of
+     what fits, so no ResizeObserver and no thrash. Wide values here, flipped
+     in the one mobile block below. */
+  --toolbar-actions-display: flex;
+  --toolbar-overflow-display: none;
+
+  /* R94's side panel. role-ui's is 18rem, and its top offset is the bar's
+     height — already a token here, which is the 3rem it hardcodes. */
+  --panel-width: 18rem;
+  /* Below a modal, which is in the top layer and beats any z-index anyway,
+     and above ordinary page content. A knob because a consumer may have
+     stacking of its own; in the PALETTE because every other default the panel
+     reads is here, and a literal fallback in the element would be the one
+     design constant hiding in a component. */
+
+  --btn-font-sm: 0.8125rem;
+  --btn-font-lg: 1rem;
+
+  --picker-max-height: 15rem;
+  --picker-offset: 0.2rem;
+
+  --bar-height: 3rem;
+  --bar-icon-size: 1.125rem;
+  --bar-portrait-size: 1.75rem;
+  --bar-menu-min-width: 12rem;
+  --bar-pages-display: flex;
+  --bar-burger-display: none;
+
+  --lf-agg-stat-size: 1.875rem;
+  --lf-agg-label-size: 0.75rem;
+  --lf-agg-row-font-size: 0.8125rem;
+  --lf-agg-label-col: 12.5rem;
+  --lf-agg-count-col: 3.25rem;
+  --lf-agg-bar-height: 1.25rem;
+  /* Promoted to a shared role: cron's tables and les-forms' aggregation view
+     are §12.11's second call site. les-forms keeps its own name pointing at
+     the shared value rather than breaking, so there is ONE value and their
+     CSS needs no edit to benefit. */
+  --row-hover: rgb(0 0 0 / 0.06);
+  --lf-agg-row-hover: var(--row-hover);
+  --lf-agg-track: rgb(0 0 0 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --card: #171a20;
+    --table-header-bg: color-mix(in srgb, var(--fg) 6%, var(--card));
+    --fg: #e6e6e6;
+    --mut: #9aa4b2;
+    --acc: #60a5fa;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --refused: #e879f9;
+    --bd: #616b7e;
+    --chip: #1e2536;
+    --chipfg: #a5b4fc;
+
+    /* Stronger in dark: a black scrim over an already dark page barely
+       separates the dialog from what it covers. */
+    --modal-backdrop: rgb(0 0 0 / 70%);
+
+    /* Dark text on a light filled control, exactly as --acc-fg is: white on
+       the dark-mode --ok (#4ade80) measures 1.74:1. les-forms' publish button
+       is white on var(--ok) TODAY, so that is a live failure the role fixes,
+       not a formality. */
+    --alt: #60a5fa;
+    --alt-fg: #04122e;
+
+    --acc-fg: #04122e;
+    --ok-fg: #04122e;
+    --warn-fg: #04122e;
+    --err-fg: #04122e;
+
+    --lf-expr-keyword: #6ea8fe;
+    --lf-expr-string: #4ade80;
+    --lf-expr-number: #fbbf24;
+    --lf-expr-binding: #c4b5fd;
+    --lf-expr-comment: #9aa4b2;
+
+    --row-hover: rgb(255 255 255 / 0.08);
+    --lf-agg-track: rgb(255 255 255 / 0.16);
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.5);
+    --shadow-popup: 0 8px 24px rgb(0 0 0 / 0.7);
+    --ring: #60a5fa;
+  }
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --space: 0.4375rem;
+    --gap-section: calc(var(--space) * 2);
+    --content-max: 100%;
+    --control-min-height: 2.75rem;
+    --field-max: 100%;
+    --bar-pages-display: none;
+    --bar-burger-display: inline-flex;
+
+    /* The same flip for the toolbar, in the SAME block: §12.8 allows a theme
+       one breakpoint, and the toolbar collapsing at a different width from
+       the bar would be two. */
+    --toolbar-actions-display: none;
+    --toolbar-overflow-display: inline-flex;
+
+    /* The whole viewport on a phone: 18rem of an 360px screen leaves the page
+       beneath unusable anyway, so it stops pretending to be beside it. */
+    --panel-width: 100%;
+
+    /* One column on a phone: title over actions over body. */
+    --card-layout: "title" "actions" "body" "footer";
+    --card-columns: 1fr;
+  }
+}

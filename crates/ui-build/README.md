@@ -1,74 +1,61 @@
 # common-ui-build
 
-The common-ui pin for a consumer's `build.rs` (R114, "vendored" item). One
-line in the app's `Cargo.toml` is the whole pin; this crate turns it into the
-verified shell, marker contract and types the build needs, and caches them so
-every later build is offline.
+The build-time glue a common-ui consumer's `build.rs` calls (R117,
+crate-carried delivery). Since R117 there is **no Garage fetch, no manifest and
+no prefix pin**: the assets are carried in `common-ui-core` (core: base/elements
+/js/shell/d.ts + SRIs + CSP) and `common-theme` (palettes + loader), both as
+committed consts. This crate just stamps and hands those to the build.
 
 - **Version:** `0.3.0` (workspace).
 - Member of the `common-rust` workspace (`crates/ui-build`).
 
-## Pin
+## Depend on it
 
 ```toml
-[package.metadata.common-ui]
-prefix = "common-ui@b9f049d05d44"
-
 [build-dependencies]
-common-ui-build = { path = "../common-rust/crates/ui-build" }   # relative to the app
+common-ui-build = { workspace = true }   # or path = "../common-rust/crates/ui-build"
 ```
 
-A path dependency, unlike the other three stand crates' git+patch shape:
-cargo loads a patched git source's original repo to resolve it, and this crate
-has no remote (nothing is pushed, R21; the three older URLs exist on GitHub at
-pre-merge tags). It becomes a git dependency on push day like the others.
-A bump is editing the `prefix` line.
+The pin is now the **Cargo version** of `common-ui-core` / `common-theme` — a
+bump is a version bump on those crates (bytes re-emitted by `common-ui-e`'s
+`build.sh`), not a `prefix` line. There is no `[package.metadata.common-ui]`.
 
 ## What a build.rs does
 
 ```rust
-let pin = common_ui_build::Pin::load().unwrap_or_else(|e| panic!("{e}"));
-let html = common_ui_build::stamp(&pin.files.shell, &values);   // (marker, value) pairs
-pin.csp();          // the prefix's policy, {{assets_origin}} still in it
-pin.sri("base.css"); pin.sri_table(); pin.themes();  // digests from the manifest, never typed
-pin.write_dts(&out_dir);       // common-ui.d.ts for the typecheck (tsconfig `paths`)
-pin.write_manifest(&out_dir);  // common-ui.manifest.json, for the app's own tests
+let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+
+let mut values = common_ui_build::shared_markers();   // prefix + the four SRIs
+values.push(("title", title));                        // app-specific [[markers]]
+// … the rest of the shell's build markers …
+let refs: Vec<(&str,&str)> = values.iter().map(|(k,v)| (*k, v.as_str())).collect();
+
+let html = common_ui_build::stamp(common_ui_core::SHELL_HTML, &refs);
+let csp  = common_ui_build::csp();          // policy, {{assets_origin}} still in it
+common_ui_build::write_dts(&out).unwrap();  // common-ui.d.ts for the typecheck
 ```
 
-`Pin::load` reads `[package.metadata.common-ui] prefix` from
-`$CARGO_MANIFEST_DIR/Cargo.toml`, emits `cargo:rerun-if-changed` for it and
-`rerun-if-env-changed` for `ASSETS_ORIGIN` and `LES_CA`, then:
+- `shared_markers()` — the build markers identical in every consumer: `prefix`
+  (the `common-ui-core` version, printed in the footer) and `sri_base_css`,
+  `sri_palette_css` (from `common-theme`), `sri_elements_css`, `sri_common_ui_js`.
+  Read straight from the crates, so a hash is never hand-copied.
+- `stamp(shell, values)` — fills the `[[build markers]]` via `upon`, ERRORS on
+  any unfilled/misspelled one, and leaves the `{{runtime markers}}`
+  (`assets_origin`, `config`) for `common_templating`'s per-request render.
+- `write_dts(out_dir)` — writes `common_ui_core::COMMON_UI_DTS` for tsconfig
+  `paths`; the consumer keeps no vendored copy.
+- `csp()` — `common_ui_core::CSP`.
 
-1. serves the pin from `$XDG_CACHE_HOME/common-ui/<prefix>/` (default
-   `~/.cache/common-ui/<prefix>/`) when all four files are there, re-verifying
-   every digest on read — a tampered cache is a build error naming the
-   directory, never a refetch;
-2. otherwise fetches `<origin>/<prefix>/manifest.json` — and if that is 404,
-   `<origin>/manifest.json` **only when its `prefix` is the pinned one**, else
-   fails naming the per-prefix manifest common has to publish — then
-   `shell.html`, `shell-markers.json`, `common-ui.d.ts`, verifies each against
-   the manifest's sha384, and stores all four in the cache.
+## Serving the assets
 
-Origin: `ASSETS_ORIGIN` (default `https://assets.dev.redaether`). CA: `LES_CA`
-(default `/mnt/host/workspace/Les/stand/certs/ca.crt`) as the **only** trust
-root. The client is `ureq` 2 over rustls/ring — the provider reqwest's
-`rustls-tls` already selects in every consumer.
-
-Trust is the vendor directories' trust: their lock digests were copied from
-this manifest over this TLS to this origin. A prefix is content-addressed and
-immutable, so its name pins its bytes.
-
-## No marker-set check (R114.2)
-
-There is no build-time check that the stamped page is complete. The app's
-boot renders every stamped shell through `common_templating::Shell`, and
-upon refuses any unfilled `{{marker}}` by name; a build-time comparison of
-the stamped set against `shell-markers.json`'s `build`/`runtime` arrays
-duplicated that with a second source of truth. The file is still fetched and
-verified — the CSP lives in it — but those two arrays are not parsed.
+The consumer serves the bytes itself at `/assets/...` (via `common_routing`'s
+static-file mechanism): `common_ui_core::{BASE_CSS, ELEMENTS_CSS, COMMON_UI_JS}`,
+`common_theme::{PALETTES, LOADER_JS}`, and each palette from `common_theme::palette(name)`.
+The shell links `/assets/base.css`, `/assets/theme-default/palette.css`,
+`/assets/theme-loader.js`, `/assets/elements.css`, `/assets/common-ui.js`.
 
 ## Tests
 
-`cargo test -p common-ui-build`: fixtures are the real `common-ui@b9f049d05d44`
-files and root manifest; a map-backed `Source` stands in for the origin, so no
-test touches the network.
+`cargo test -p common-ui-build`: `stamp` round-trips the real
+`common_ui_core::SHELL_HTML`, and `shared_markers` matches the crate consts. No
+network, no fixtures.

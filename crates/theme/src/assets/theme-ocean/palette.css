@@ -1,0 +1,242 @@
+/* ocean — GitHub Primer's shape and neutrals (6px everywhere, hairline borders, near-flat
+   elevation, 8px scale, system sans) on a blue-teal seed: deep teal-blue primary, deep sea-green
+   secondary, pale aqua tonal chip; dark is Primer dark (#0d1117/#161b22) with the teal lifted. */
+:root {
+  --bg: #f6f8fa;
+  --card: #ffffff;
+  --fg: #1f2328;
+  --mut: #656d76;
+  --acc: #0e6e8e;
+  --ok: #166f31;
+  --warn: #8a5c00;
+  --err: #c0202b;
+  --refused: #7a48d0;
+  /* Primer's #d0d7de hairline is 1.4:1; this is its border-emphasis grey, the
+     first neutral in the ramp that clears the 3:1 floor on canvas-subtle. */
+  --bd: #818b98;
+  --chip: #dbf0f7;
+  --chipfg: #0b4a63;
+
+  /* Second accent: a deep sea green, clearly a different hue from the
+     teal-blue primary at the same depth, so `alt` reads as a sibling, not a
+     variant. */
+  --alt: #0f6d5a;
+  --alt-fg: #ffffff;
+
+  --acc-fg: #ffffff;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --err-fg: #ffffff;
+  --acc-wash: color-mix(in srgb, var(--acc) 10%, var(--card));
+  --ok-wash: color-mix(in srgb, var(--ok) 10%, var(--card));
+  --warn-wash: color-mix(in srgb, var(--warn) 10%, var(--card));
+  --err-wash: color-mix(in srgb, var(--err) 10%, var(--card));
+  --refused-wash: color-mix(in srgb, var(--refused) 10%, var(--card));
+
+  /* Primer's prettylights syntax set, light: constant / string / variable /
+     entity / comment. */
+  --lf-expr-keyword: #0550ae;
+  --lf-expr-string: #0a3069;
+  --lf-expr-number: #953800;
+  --lf-expr-binding: #8250df;
+  --lf-expr-comment: #656d76;
+
+  /* Primer rounds controls AND cards at 6px, so the card derivation is the
+     base radius rather than twice it; the pill keeps its derivation. */
+  --roundness: 0.375rem;
+  --roundness-control: var(--roundness);
+  --roundness-card: var(--roundness);
+  --roundness-pill: calc(var(--roundness) * 100);
+  --bw: 1px;
+  --bw-invalid: 2px;
+
+  --space: 0.5rem;
+  --pad-control: calc(var(--space) * 0.75);
+  --pad-card: calc(var(--space) * 2);
+  --gap: var(--space);
+  --gap-section: calc(var(--space) * 2.5);
+
+  /* Primer shadow-resting-small and shadow-floating-large: a card barely
+     lifts; only an overlay casts. */
+  --shadow-card: 0 1px 0 rgb(31 35 40 / 0.04);
+  --shadow-popup: 0 8px 24px rgb(140 149 159 / 0.2);
+  /* L2: the edge of a SURFACE (card, menu, listbox, panel, dialog, toast, bar);
+     controls keep --bw. L1: elevation for the floating surfaces and the bar. */
+  --bw-surface: var(--bw);
+  --shadow-float: none;
+  --shadow-bar: none;
+  /* L5: motion. 0s keeps every shipped theme still; reduced motion zeroes it anyway. */
+  --motion-duration: 0s;
+  --motion-easing: linear;
+  --motion-duration-enter: 0s;
+  --motion-easing-enter: linear;
+  /* L6: the surface ladder — 1 card, 2 panel, 3 menu/listbox/toast, 4 dialog —
+     and the bar's own ground. All --card here, so nothing moves. */
+  --surface-1: var(--card);
+  --surface-2: var(--card);
+  --surface-3: var(--card);
+  --surface-4: var(--card);
+  --bar-bg: var(--card);
+  /* L8: state layers — the element's own ink over its fill, as a percentage. */
+  --state-hover: 0%;
+  --state-press: 0%;
+  /* L15: a button's corner of its own. L16: the intent card's stripe. */
+  --roundness-btn: var(--roundness-control);
+  --bw-card-intent: var(--bw-surface);
+  /* L9: a raised control, a field's well, and the press. Nothing raised, nothing
+     sunk and nothing moves at these values. */
+  --shadow-control: none;
+  --shadow-field: none;
+  --shadow-press: var(--shadow-control);
+  --press-translate: none;
+  /* L11: the type system's shape, and L12's button label weight. These are the
+     values the sheets used as literals: body 1.5, bold headings, no tracking,
+     h2 at 1.2 of the body, labels at 600. */
+  --leading: 1.5;
+  --heading-weight: 700;
+  --heading-tracking: normal;
+  --heading-scale: 1.2;
+  --btn-weight: 600;
+  /* The card's own edge, 1 to 4 widths, so a card can be a single rule. The
+     other surfaces keep --bw-surface, which panel and bar read one side of. */
+  --bw-card: var(--bw-surface);
+  /* L17 (glass): the lit ground under the page, the frost behind a glass surface, a surface's own edge
+     colour, the frost behind a modal's scrim, and a link card's lift. At these values nothing moves. */
+  --bg-image: none;
+  --surface-blur: none;
+  --bd-surface: var(--bd);
+  --scrim-blur: none;
+  --hover-lift: none;
+  --ring: #0e6e8e;
+  --ring-width: 2px;
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  --font-heading: var(--font);
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  /* Primer types body at 14px and small at 12px; the stand floors body at 1rem,
+     so the pair is 16/14 — the small step is Primer's own body size. */
+  --font-size: 1rem;
+  --font-size-sm: 0.875rem;
+
+  --content-max: 64rem;
+  --control-min-height: 2.5rem;
+  --col-min: 20rem;
+
+  --field-max: 28rem;
+  --table-min: 34rem;
+  /* Primer's table header sits on canvas-subtle, not on the card. */
+  /* The band steps toward the ink from the ground NEARER to it, so it stands
+     off both: the page ground here, the card in the dark block. */
+  --table-header-bg: color-mix(in srgb, var(--fg) 5%, var(--bg));
+
+  --popover-offset: 0.2rem;
+  --popover-min-width: 12rem;
+
+  /* Primer overlay-backdrop: fg-default at half alpha. */
+  --modal-backdrop: rgb(31 35 40 / 50%);
+  --toast-max: 28rem;
+
+  --spinner-color: var(--acc);
+  --spinner-size: 2.5rem;
+  --spinner-width: 0.25rem;
+  --spinner-duration: 0.9s;
+  --spinner-animation: spin;
+  --spinner-image: none;
+  --busy-min-height: 6rem;
+
+  --card-layout: "title actions" "body body" "footer footer";
+  --card-columns: 1fr auto;
+
+  --toolbar-actions-display: flex;
+  --toolbar-overflow-display: none;
+
+  --panel-width: 18rem;
+
+  --btn-font-sm: 0.8125rem;
+  --btn-font-lg: 1rem;
+
+  --picker-max-height: 15rem;
+  --picker-offset: 0.2rem;
+
+  --bar-height: 3rem;
+  --bar-icon-size: 1.125rem;
+  --bar-portrait-size: 1.75rem;
+  --bar-menu-min-width: 12rem;
+  --bar-pages-display: flex;
+  --bar-burger-display: none;
+
+  --lf-agg-stat-size: 1.875rem;
+  --lf-agg-label-size: 0.75rem;
+  --lf-agg-row-font-size: 0.8125rem;
+  --lf-agg-label-col: 12.5rem;
+  --lf-agg-count-col: 3.25rem;
+  --lf-agg-bar-height: 1.25rem;
+  /* Primer's row hover is its border grey at low alpha, not black. */
+  --row-hover: rgb(208 215 222 / 0.32);
+  --lf-agg-row-hover: var(--row-hover);
+  --lf-agg-track: rgb(208 215 222 / 0.64);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --table-header-bg: color-mix(in srgb, var(--fg) 6%, var(--card));
+    --fg: #e6edf3;
+    --mut: #8d96a0;
+    --acc: #4fb3d9;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --refused: #a371f7;
+    /* Primer dark's #30363d hairline is 1.7:1; this is its fg-subtle grey,
+       which clears 3:1 on the canvas. */
+    --bd: #636e7b;
+    --chip: #0f2a36;
+    --chipfg: #7fd0ec;
+
+    /* Primer dark overlay-backdrop. */
+    --modal-backdrop: rgb(1 4 9 / 80%);
+
+    --alt: #3fc4a6;
+    --alt-fg: #06201a;
+
+    --acc-fg: #04161d;
+    --ok-fg: #04161d;
+    --warn-fg: #1a1200;
+    --err-fg: #1f0405;
+
+    --lf-expr-keyword: #79c0ff;
+    --lf-expr-string: #a5d6ff;
+    --lf-expr-number: #ffa657;
+    --lf-expr-binding: #d2a8ff;
+    --lf-expr-comment: #8d96a0;
+
+    --row-hover: rgb(110 118 129 / 0.2);
+    --lf-agg-track: rgb(110 118 129 / 0.4);
+
+    --shadow-card: 0 0 transparent;
+    --shadow-popup: 0 8px 24px rgb(1 4 9 / 0.8);
+    --ring: #4fb3d9;
+  }
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --space: 0.4375rem;
+    --gap-section: calc(var(--space) * 2);
+    --content-max: 100%;
+    --control-min-height: 2.75rem;
+    --field-max: 100%;
+    --bar-pages-display: none;
+    --bar-burger-display: inline-flex;
+
+    --toolbar-actions-display: none;
+    --toolbar-overflow-display: inline-flex;
+
+    --panel-width: 100%;
+
+    --card-layout: "title" "actions" "body" "footer";
+    --card-columns: 1fr;
+  }
+}

@@ -1,0 +1,209 @@
+/* swiss — Müller-Brockmann/Vignelli: black/white, one signal red, 1px rules are the whole chrome. */
+:root {
+  --bg: #ffffff;
+  --card: #ffffff;              /* one paper: a card is rules and space, not a box */
+  --fg: #000000;
+  --mut: #595959;
+  --acc: #d3040e;               /* signal red, darkened from #e30613 until acc-on-wash clears 4.5 */
+  --ok: #0b7a34;
+  --warn: #865b00;              /* ochre, not orange: 41° from the red */
+  --err: #931b79;               /* crimson-magenta, the alarm moved 32° off the signal red (§5) */
+  --refused: #6d28d9;
+  --bd: #000000;                /* THE rule: bar, footer, rows, fields, popover, panel — all 1px black */
+  --chip: #ebebeb;
+  --chipfg: #000000;
+
+  --alt: #595959;               /* secondary is the GREY of the type system, never a second hue */
+  --alt-fg: #ffffff;
+
+  --acc-fg: #ffffff;
+  --ok-fg: #ffffff;
+  --warn-fg: #ffffff;
+  --err-fg: #ffffff;
+  --acc-wash: color-mix(in srgb, var(--acc) 10%, var(--card));
+  --ok-wash: color-mix(in srgb, var(--ok) 10%, var(--card));
+  --warn-wash: color-mix(in srgb, var(--warn) 10%, var(--card));
+  --err-wash: color-mix(in srgb, var(--err) 10%, var(--card));
+  --refused-wash: color-mix(in srgb, var(--refused) 10%, var(--card));
+
+  --lf-expr-keyword: #000000;   /* code is typeset, not painted: ink, grey, and the red for numbers */
+  --lf-expr-string: #595959;
+  --lf-expr-number: #d3040e;
+  --lf-expr-binding: #931b79;
+  --lf-expr-comment: #6b6b6b;
+
+  /* 1px, not 0: sub-perceptual square corners that keep the pill derivation
+     (6.25rem) alive — a literal pill radius would fail the straight-theme probe. */
+  --roundness: 0;
+  --roundness-control: var(--roundness);
+  --roundness-card: var(--roundness);
+  --roundness-pill: calc(var(--roundness) * 100);
+  --bw: 1px;
+  --bw-invalid: 3px;
+
+  --space: 0.5rem;              /* the 8pt grid */
+  --pad-control: calc(var(--space) * 0.75);
+  --pad-card: calc(var(--space) * 3);      /* 24px: whitespace does the grouping */
+  --gap: var(--space);
+  --gap-section: calc(var(--space) * 4);   /* 32px between sections */
+
+  --shadow-card: 0 0 0 0 transparent;
+  --shadow-popup: 0 0 0 0 transparent;     /* a popover is edged by its 1px rule, nothing floats */
+
+  /* Feel levers (R104). Rules and type are the whole chrome: a card is a top
+     rule, nothing floats, nothing moves, corners are square. */
+  --bw-surface: var(--bw);
+  --bw-card: 1px 0 0 0;
+  /* L17 (glass): the lit ground under the page, the frost behind a glass surface, a surface's own edge
+     colour, the frost behind a modal's scrim, and a link card's lift. At these values nothing moves. */
+  --bg-image: none;
+  --surface-blur: none;
+  --bd-surface: var(--bd);
+  --scrim-blur: none;
+  --hover-lift: none;
+  --shadow-float: none;
+  --shadow-bar: none;
+  --surface-1: var(--card);
+  --surface-2: var(--card);
+  --surface-3: var(--card);
+  --surface-4: var(--card);
+  --bar-bg: var(--card);
+  --state-hover: 0%;
+  --state-press: 0%;
+  --motion-duration: 0s;
+  --motion-easing: linear;
+  --motion-duration-enter: 0s;
+  --motion-easing-enter: linear;
+  --roundness-btn: var(--roundness-control);
+  --bw-card-intent: var(--bw-surface);
+  --shadow-control: none;
+  --shadow-field: none;
+  --shadow-press: var(--shadow-control);
+  --press-translate: none;
+  --leading: 1.35;
+  --heading-weight: 700;
+  --heading-tracking: -0.02em;
+  --heading-scale: 1.5;
+  --btn-weight: 600;
+  --ring: #000000;                         /* ink ring: 3.79 on the red primary, 21 on paper */
+  --ring-width: 2px;
+
+  --font-size: 1rem;
+  --font-size-sm: 0.875rem;
+  /* Helvetica; Nimbus Sans (URW) and TeX Gyre Heros are its open metric-compatible
+     clones, Liberation Sans the Arial-metric one; system sans last. Nothing fetched. */
+  --font: "Helvetica Neue", Helvetica, "Nimbus Sans", "TeX Gyre Heros", "Liberation Sans", Arial, system-ui, sans-serif;
+  --font-heading: var(--font);
+  --font-mono: ui-monospace, "Nimbus Mono PS", "Liberation Mono", Menlo, Consolas, monospace;
+
+  --content-max: 64rem;
+  --control-min-height: 2.5rem;
+  --col-min: 20rem;
+
+  --field-max: 28rem;
+  --table-min: 34rem;
+  --table-header-bg: color-mix(in srgb, var(--fg) 6%, var(--card));   /* #f0f0f0: the gate wants a band */
+
+  --popover-offset: 0rem;       /* the popover's top rule butts the trigger — no floating gap */
+  --popover-min-width: 12rem;
+
+  --modal-backdrop: rgb(0 0 0 / 55%);
+  --toast-max: 28rem;
+
+  --spinner-color: var(--fg);   /* a thin black arc, not a tinted ring */
+  --spinner-size: 2.5rem;
+  --spinner-width: 0.125rem;
+  --spinner-duration: 0.9s;
+  --spinner-animation: spin;
+  --spinner-image: none;
+  --busy-min-height: 6rem;
+
+  --card-layout: "title actions" "body body" "footer footer";
+  --card-columns: 1fr auto;
+
+  --toolbar-actions-display: flex;
+  --toolbar-overflow-display: none;
+
+  --panel-width: 18rem;
+
+  --btn-font-sm: 0.875rem;
+  --btn-font-lg: 1rem;
+
+  --picker-max-height: 15rem;
+  --picker-offset: 0rem;
+
+  --bar-height: 3.5rem;         /* a taller masthead: type and air, one rule beneath */
+  --bar-icon-size: 1.125rem;
+  --bar-portrait-size: 1.75rem;
+  --bar-menu-min-width: 12rem;
+  --bar-pages-display: flex;
+  --bar-burger-display: none;
+
+  --lf-agg-stat-size: 2.25rem;  /* the big figure is the Swiss poster move */
+  --lf-agg-label-size: 0.75rem;
+  --lf-agg-row-font-size: 0.875rem;
+  --lf-agg-label-col: 12.5rem;
+  --lf-agg-count-col: 3.25rem;
+  --lf-agg-bar-height: 1rem;
+  --row-hover: rgb(0 0 0 / 0.05);
+  --lf-agg-row-hover: var(--row-hover);
+  --lf-agg-track: rgb(0 0 0 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;              /* black paper, white ink, white rules; the red lifted to clear 4.5 */
+    --card: #000000;
+    --fg: #ffffff;
+    --mut: #a3a3a3;
+    --acc: #ff4a4a;
+    --ok: #34d06a;
+    --warn: #ecb833;
+    --err: #f364cd;
+    --refused: #b79cff;
+    --bd: #ffffff;
+    --chip: #262626;
+    --chipfg: #ffffff;
+
+    /* Light veil: a black scrim over black paper is invisible (build.sh floor 40; this is 107). */
+    --modal-backdrop: rgb(255 255 255 / 14%);
+
+    --alt: #a3a3a3;
+    --alt-fg: #000000;
+
+    --acc-fg: #000000;
+    --ok-fg: #000000;
+    --warn-fg: #000000;
+    --err-fg: #000000;
+
+    --lf-expr-keyword: #ffffff;
+    --lf-expr-string: #a3a3a3;
+    --lf-expr-number: #ff4a4a;
+    --lf-expr-binding: #f364cd;
+    --lf-expr-comment: #8c8c8c;
+
+    --row-hover: rgb(255 255 255 / 0.08);
+    --lf-agg-track: rgb(255 255 255 / 0.16);
+
+    --shadow-card: 0 0 0 0 transparent;
+    --shadow-popup: 0 0 0 0 transparent;
+    --ring: #ffffff;
+  }
+}
+
+@media (max-width: 40rem) {
+  :root {
+    --space: 0.4375rem;
+    --gap-section: calc(var(--space) * 3);
+    --content-max: 100%;
+    --control-min-height: 2.75rem;
+    --field-max: 100%;
+    --bar-pages-display: none;
+    --bar-burger-display: inline-flex;
+    --toolbar-actions-display: none;
+    --toolbar-overflow-display: inline-flex;
+    --panel-width: 100%;
+    --card-layout: "title" "actions" "body" "footer";
+    --card-columns: 1fr;
+  }
+}
