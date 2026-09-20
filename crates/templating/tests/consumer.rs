@@ -15,8 +15,6 @@ use common_templating::{AssetCache, AssetsOrigin, Builder, Shell};
 use http_body_util::BodyExt;
 use tower::util::ServiceExt;
 
-/// The config block as THIS consumer shapes it: the crate takes any
-/// `Serialize` and does not know the fields.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Config {
@@ -31,7 +29,7 @@ const PAGE: &str = "<!doctype html>\n\
 {{theme_override}}\n\
 <script type=\"application/json\" id=\"config\">{{config}}</script>\n";
 
-/// The per-request theme link a consumer builds from its cookies (R113); the
+/// The per-request theme link a consumer builds from its cookies; the
 /// origin is already resolved by the time it reaches `render`, and it is
 /// passed RAW as the third runtime value.
 const THEME_LINK: &str = "<link rel=\"stylesheet\" \
@@ -64,8 +62,6 @@ fn dir() -> std::path::PathBuf {
 fn app() -> Router {
     let d = dir();
     let assets = Builder::new(&d).build().expect("boot");
-    // The shell is compiled at BOOT, from the same validated dir, so a
-    // stamped shell that breaks the grammar refuses here, not per request.
     let shell = String::from_utf8(assets.static_file("index.html").expect("present").to_vec())
         .expect("utf-8");
     let shell = Shell::compile(&shell).expect("the vendored shell compiles");
@@ -76,10 +72,6 @@ fn app() -> Router {
         assets_origin: origin.as_str().to_owned(),
         login_path: "/oidc/login",
     };
-    /* The policy a consumer VENDORS, as build.rs would embed it from the
-    prefix's shell-markers.json. Spelled out here rather than read from a
-    file, because this test is the consumer and a consumer has these bytes
-    compiled in. */
     let declared = "default-src 'self'; script-src 'self' {{assets_origin}}; \
                     style-src 'self' {{assets_origin}}; img-src 'self' data:; \
                     connect-src 'self'; object-src 'none'; base-uri 'self'; \

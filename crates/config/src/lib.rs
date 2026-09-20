@@ -1,10 +1,8 @@
-//! The public surface and the load pipeline: schema → args → merge → typed
-//! parse, and the process-level `load` that prints help or hands back a
-//! refusal. Assembly only — spellings are path.rs, sources are
-//! layers.rs/args.rs/file.rs, parsing is values.rs, rendering is help.rs.
-//! The shared `Common` section (common.rs), `Deployment` (deployment.rs) and
-//! `Refusal` (refusal.rs) live here so that this crate depends on nothing
-//! else in the workspace; a consumer's own config STRUCT never does.
+//! The public surface and the load pipeline: schema → args → merge → typed parse.
+//! Assembly only — spellings are path.rs, sources are layers.rs/args.rs/file.rs,
+//! parsing is values.rs, rendering is help.rs. `Common`, `Deployment` and
+//! `Refusal` live here (not a submodule elsewhere) so this crate depends on
+//! nothing else in the workspace; a consumer's own config struct never does.
 //!
 //! ```
 //! use common_config::{Common, Config, Outcome};
@@ -71,14 +69,11 @@ pub trait Root: Config {
 #[derive(Debug)]
 pub enum Outcome<T> {
     Config(T),
-    /// `--help` text; print it and exit 0.
     Help(String),
-    /// `--print-config` text; print it and exit 0.
     PrintConfig(String),
 }
 
-/// The pure pipeline: `args` is argv without the program name; `env` is the
-/// process environment. Tests drive this directly.
+/// `args` is argv without the program name; `env` the process environment.
 pub fn load_from<T: Root>(
     args: &[String],
     env: &[(String, String)],
@@ -96,10 +91,6 @@ pub fn load_from<T: Root>(
     T::from_values(&values, &Path::root()).map(Outcome::Config)
 }
 
-/// Loads from the real argv and environment. `--help` and `--print-config`
-/// print to stdout and exit 0 here; a refusal is RETURNED, because printing
-/// it is a log line and belongs to the caller — `common_logging::boot` is the
-/// one call a binary makes, and it refuses through `refuse!`.
 pub fn load<T: Root>() -> Result<T, Refusal> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env: Vec<(String, String)> = std::env::vars_os()

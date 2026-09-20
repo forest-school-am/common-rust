@@ -1,21 +1,8 @@
-//! Stamping a built shell with the three values only the request knows: the
+//! Stamps a compiled shell with the three values only the request knows: the
 //! asset origin, the config block and the theme-override link. Build-time
-//! values (title, page css, page module, prefix, hashes) are a service's
-//! build.rs, not this; WHAT the config block says is the service's (and
-//! common-oidc's) business, not this crate's — it takes any `Serialize` and
-//! only escapes it for its block. The theme link is the service's business
-//! too: it is built from pattern-validated cookie values and passed RAW,
-//! exactly like the asset origin.
-//!
-//! The engine is `upon` with no functions, no filters and no escaping: a
-//! `{{name}}` expression is the whole grammar a shell uses. Two rules of its
-//! matter here and are pinned by tests below:
-//!
-//! - a `{{name}}` whose value is not supplied is a RENDER error naming the
-//!   expression, never a marker quietly shipped to a browser;
-//! - a `}}` outside an expression is a COMPILE error, so a build-time value
-//!   that happens to contain one is caught when the shell is compiled, not
-//!   when a page is served.
+//! values (title, page css, module, prefix, hashes) belong in a service's
+//! build.rs, not here; WHAT the config block says is the service's business,
+//! not this crate's — it takes any `Serialize` and only escapes it for its block.
 
 use serde::Serialize;
 
@@ -25,7 +12,6 @@ pub const ORIGIN_MARKER: &str = "{{assets_origin}}";
 pub const CONFIG_MARKER: &str = "{{config}}";
 pub const THEME_MARKER: &str = "{{theme_override}}";
 
-/// The name the shell has in error messages; there is only ever one.
 const NAME: &str = "shell";
 
 /// Serialised JSON with `<`, `>` and `&` as `\u00XX`, so no value can close
@@ -45,11 +31,6 @@ fn json_for_script_block(config: &impl Serialize) -> Result<String, RenderError>
         .replace('&', "\\u0026"))
 }
 
-/// Exactly the three values a shell may ask for at runtime: the asset origin,
-/// the config block and the theme-override link. All three are declared in the
-/// shell contract (`shell-markers.json`'s `runtime` array), so adding one here
-/// followed the contract change rather than driving it. `assets_origin` and
-/// `theme_override` are passed RAW; only `config` is escaped, for its block.
 #[derive(Serialize)]
 struct Values<'a> {
     assets_origin: &'a str,
@@ -57,18 +38,12 @@ struct Values<'a> {
     theme_override: &'a str,
 }
 
-/// A compiled shell: the build-stamped document with only [`ORIGIN_MARKER`],
-/// [`CONFIG_MARKER`] and [`THEME_MARKER`] left in it. Compile once at boot,
-/// render per request.
 pub struct Shell {
     engine: upon::Engine<'static>,
     template: upon::Template<'static>,
 }
 
 impl Shell {
-    /// Compiles the shell. Fails on anything `upon` cannot parse — including
-    /// a lone `}}` — so a stamped shell that breaks the grammar is refused
-    /// here rather than at the first request.
     pub fn compile(shell: &str) -> Result<Self, RenderError> {
         let engine = upon::Engine::new();
         let template = engine
@@ -77,12 +52,10 @@ impl Shell {
         Ok(Self { engine, template })
     }
 
-    /// Renders with `assets_origin` and `theme_override` raw and `config`
-    /// serialised and escaped for its block. `theme_override` is a `<link>`
-    /// the service built from pattern-validated cookie values (R113), so it is
-    /// emitted verbatim — HTML-escaping it would break the tag; an empty slot
-    /// is the common case. Any other `{{name}}` still in the shell is a render
-    /// error whose message quotes the offending line.
+    /// `config` is JSON-escaped for its `<script>` block; `assets_origin` and
+    /// `theme_override` are emitted VERBATIM — HTML-escaping the theme `<link>`
+    /// would break the tag, so the caller must pass an already-safe value (the
+    /// service builds it from pattern-validated cookie input).
     pub fn render(
         &self,
         origin: &AssetsOrigin,
@@ -125,9 +98,6 @@ mod tests {
     use super::*;
     use common_logging::Deployment;
 
-    /// A config block as a service might shape one. The crate does not know
-    /// or care what is in it; the tests need something with a string a hostile
-    /// value can land in.
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Page {
@@ -178,10 +148,6 @@ mod tests {
         );
     }
 
-    /// The theme slot is the third runtime marker (the shell contract lists it
-    /// in `shell-markers.json`'s `runtime` array). An empty string is the
-    /// common case — no cookie, so the default palette stands — and the marker
-    /// must still be consumed, never shipped to a browser.
     #[test]
     fn an_empty_theme_override_fills_the_slot_rather_than_leaving_it() {
         let html = render(SHELL, &origin(), &config("/oidc/login"), "");
@@ -191,10 +157,6 @@ mod tests {
         );
     }
 
-    /// The theme link is a `<link>` the service built from pattern-validated
-    /// cookie values, so it is passed RAW — an HTML escaper here would turn its
-    /// quotes and angle brackets into entities and break the tag. The value
-    /// reaches the page byte-for-byte.
     #[test]
     fn a_raw_theme_link_passes_through_unescaped() {
         let link = r#"<link rel="stylesheet" href="https://assets.dev.local/common-ui@abc/theme-dusk/palette.css" crossorigin="anonymous">"#;
@@ -254,9 +216,6 @@ mod tests {
         );
     }
 
-    /// A display name arrives from the IdP, so it is the likeliest hostile
-    /// string in the whole block — likelier than a login path, which a service
-    /// writes itself.
     #[test]
     fn a_hostile_display_name_cannot_close_the_data_block() {
         let mut config = config("/oidc/login");
@@ -303,9 +262,6 @@ mod tests {
         );
     }
 
-    /// upon's rule, and the reason a stamped shell should be compiled at boot:
-    /// a build-time value containing `}}` breaks the shell, and this is where
-    /// it shows.
     #[test]
     fn a_lone_close_brace_fails_to_compile() {
         let err = Shell::compile("body { a { b } } }} {{config}}")
@@ -314,8 +270,6 @@ mod tests {
         assert!(matches!(err, RenderError::Parse(..)), "{err}");
     }
 
-    /// The crate takes any `Serialize`; one that cannot serialise (a map with
-    /// non-string keys, say) is a render error, not a panic in a handler.
     #[test]
     fn a_config_that_cannot_serialise_is_a_render_error() {
         let shell = Shell::compile(SHELL).unwrap();

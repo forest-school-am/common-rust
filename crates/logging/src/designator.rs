@@ -61,8 +61,6 @@ impl<T: Into<String>> From<T> for Designator {
     }
 }
 
-/// The strum-`default` shape by hand: a stand name is its variant, anything
-/// else is `Custom` holding the string as given.
 impl FromStr for Designator {
     type Err = Infallible;
 

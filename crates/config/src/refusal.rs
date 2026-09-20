@@ -6,7 +6,6 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
-    /// The spelling the operator set: an env name, a flag, a file key.
     pub variable: String,
     pub value: String,
     pub accepted: String,
@@ -15,8 +14,7 @@ pub struct Refusal {
 
 impl Refusal {
     /// `variable` is `AsRef<str>` rather than `Into<String>` so that a `&&str`
-    /// (a name matched out of a table by reference) still passes, as it did
-    /// when the field was `&'static str`.
+    /// (a name matched out of a table by reference) still passes.
     pub fn new(
         variable: impl AsRef<str>,
         value: impl Into<String>,

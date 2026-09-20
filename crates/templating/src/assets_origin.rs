@@ -190,9 +190,6 @@ mod tests {
         }
     }
 
-    /// The `csp` field as common-ui publishes it in shell-markers.json. A
-    /// test FIXTURE, deliberately spelled out: a consumer vendors these bytes
-    /// and this is the shape the crate must accept.
     const DECLARED: &str = "default-src 'self'; script-src 'self' {{assets_origin}}; \
                             style-src 'self' {{assets_origin}}; img-src 'self' data:; \
                             connect-src 'self'; object-src 'none'; base-uri 'self'; \
@@ -222,8 +219,6 @@ mod tests {
         );
     }
 
-    /// The policy is the SHELL's: a crate that ignored the declared text and
-    /// emitted its own would pass every other test here.
     #[test]
     fn the_emitted_policy_is_the_declared_one_and_not_a_copy_held_here() {
         let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)
@@ -261,8 +256,6 @@ mod tests {
         );
     }
 
-    /// A `data:` favicon fails under `img-src 'self'` with no CSP report and
-    /// no failed request, so nothing but a test like this notices.
     #[test]
     fn the_csp_admits_the_inline_favicon_the_shell_ships() {
         let origin = AssetsOrigin::parse(Some("https://assets.dev.local"), Deployment::Prod)

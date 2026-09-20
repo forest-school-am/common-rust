@@ -55,7 +55,7 @@ impl OidcConfig {
     /// authentik is known to revoke refresh tokens at logout. Where it does
     /// not, a logged-out identity can be resurrected through the refresh token
     /// for the whole of its validity. `tests/live_canary.rs` is both the check
-    /// and the record of the last answer (R2).
+    /// and the record of the last answer.
     pub fn request_refresh_tokens(mut self) -> Self {
         if !self.scopes.iter().any(|s| s == "offline_access") {
             self.scopes.push("offline_access".into());

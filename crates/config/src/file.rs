@@ -12,7 +12,6 @@ use crate::path::Path;
 use crate::schema::Field;
 use crate::Refusal;
 
-/// `Ok(None)` when the file does not exist.
 pub(crate) fn read(
     fields: &[Field],
     source: &str,

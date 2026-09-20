@@ -1,11 +1,8 @@
 //! `#[derive(Config)]`: ONE struct's fields become its `schema`/`from_values`
-//! impl. The attribute grammar and per-field validation live here. How values
-//! are merged, spelled or rendered belongs in common-config itself — this
-//! macro never sees another struct's fields and must stay that way: a
-//! `nested` field is a call into the inner type's impl, not an expansion.
-//! A root (`#[config(app = …)]`) also gets `Root`, whose `common()` returns
-//! its `common` field — required by NAME, so the derive still reads only
-//! this struct.
+//! impl. How values are merged, spelled or rendered belongs in common-config —
+//! this macro never sees another struct's fields and must stay that way: a
+//! `nested` field is a CALL into the inner type's impl, not an expansion. A root
+//! (`#[config(app = …)]`) also gets `Root`, reading only this struct's `common` field.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;

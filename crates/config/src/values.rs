@@ -137,7 +137,6 @@ where
     })
 }
 
-/// `alloc::vec::Vec<alloc::string::String>` → `Vec<String>`.
 fn short_type_name(name: &str) -> String {
     let mut out = String::new();
     let mut word = String::new();

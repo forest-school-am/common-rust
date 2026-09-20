@@ -6,7 +6,6 @@ use quote::{format_ident, quote};
 use syn::spanned::Spanned;
 use syn::{Error, FnArg, GenericArgument, ItemFn, Pat, PathArguments, ReturnType, Type};
 
-/// Where in the request an argument travels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Path,
@@ -26,9 +25,7 @@ pub struct Arg {
 
 #[derive(Debug)]
 pub enum Response {
-    /// `Json<T>` in some wrapping: the client resolves to `T`.
     Json(Type),
-    /// `StatusCode` / `()`: the client resolves to nothing (204-style).
     NoContent,
     /// `#[client(link)]`: not inspected; only a URL builder is generated.
     Link,
@@ -50,7 +47,6 @@ const QUERY: &[&str] = &["Query", "ApiQuery"];
 const BODY: &[&str] = &["Json", "ApiJson"];
 const MULTIPART: &[&str] = &["Multipart"];
 
-/// `#[client]` → `false`; `#[client(link)]` → `true`; anything else is an error.
 pub fn parse_attr(attr: TokenStream) -> syn::Result<bool> {
     let text = attr.to_string();
     match text.trim() {
@@ -63,7 +59,6 @@ pub fn parse_attr(attr: TokenStream) -> syn::Result<bool> {
     }
 }
 
-/// The last segment of a path type plus its first generic argument.
 fn last_segment(ty: &Type) -> Option<(&syn::PathSegment, Option<&Type>)> {
     let Type::Path(p) = ty else { return None };
     let seg = p.path.segments.last()?;
@@ -102,8 +97,6 @@ fn classify(ty: &Type) -> syn::Result<Option<(Kind, Option<Type>)>> {
     }
 }
 
-/// The binding's name, for the descriptor: `ApiPath(id)` → `id`, `q` → `q`;
-/// a tuple pattern or anything else falls back to the kind's word.
 fn pat_name(pat: &Pat, kind: Kind) -> String {
     fn ident_of(pat: &Pat) -> Option<String> {
         match pat {
@@ -124,7 +117,6 @@ fn pat_name(pat: &Pat, kind: Kind) -> String {
     })
 }
 
-/// Peels `Result<X, _>` / `Result<X>`, then names `X`'s payload.
 fn response_of(name: &str, ty: &Type) -> syn::Result<Response> {
     let opaque = || {
         Error::new(
@@ -169,7 +161,6 @@ fn response_of(name: &str, ty: &Type) -> syn::Result<Response> {
     }
 }
 
-/// The descriptor of one handler, or the error the macro reports.
 pub fn describe(item: &ItemFn, link: bool) -> syn::Result<Descriptor> {
     let name = item.sig.ident.clone();
     if item.sig.asyncness.is_none() {
@@ -211,7 +202,6 @@ pub fn describe(item: &ItemFn, link: bool) -> syn::Result<Descriptor> {
     })
 }
 
-/// The handler, unchanged, plus its export test.
 pub fn expand(attr: TokenStream, item: &ItemFn) -> syn::Result<TokenStream> {
     let link = parse_attr(attr)?;
     let d = describe(item, link)?;

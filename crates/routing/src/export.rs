@@ -1,12 +1,8 @@
-//! The handler descriptors `#[client]` exports, and the file they go to.
-//!
-//! The macro emits a `#[test] fn export_client_<name>()` per handler that
-//! builds a [`Handler`] and calls [`append`]. The TypeScript type names are
-//! resolved HERE, at test run time, through ts-rs — `<T as TS>::name()` for a
-//! query or body, and for a path payload the SHAPE too (a primitive, a tuple
-//! of them, or a struct's fields), so the generator can bind template params
-//! by position or by field name. Gated on [`EXPORT_DIR`], like ts-rs's own
-//! `TS_RS_EXPORT_DIR`: unset, every export test is a no-op.
+//! The handler descriptors `#[client]` exports, and the file they go to. The
+//! macro emits a `#[test]` per handler that builds a [`Handler`] and calls
+//! [`append`]; the TypeScript type names resolve HERE, at test run time, through
+//! ts-rs. Gated on [`EXPORT_DIR`] like ts-rs's own `TS_RS_EXPORT_DIR`: unset,
+//! every export test is a no-op.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, Write};
@@ -15,12 +11,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// The environment variable naming the export directory.
 pub const EXPORT_DIR: &str = "COMMON_ROUTING_EXPORT_DIR";
-/// The file [`append`] maintains under the export directory.
 pub const HANDLERS_FILE: &str = "handlers.json";
 
-/// The export directory, if this run is an export.
 pub fn dir() -> Option<PathBuf> {
     std::env::var_os(EXPORT_DIR).map(PathBuf::from)
 }
@@ -34,25 +27,19 @@ pub enum Kind {
     Multipart,
 }
 
-/// A struct path payload's field, by name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Field {
     pub name: String,
     pub ts_type: String,
 }
 
-/// One client-visible argument, in signature order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Arg {
-    /// The binding's name in the handler (informational).
     pub name: String,
     pub kind: Kind,
-    /// ts-rs's name for the payload type; `FormData` for multipart.
     pub ts_type: String,
-    /// A tuple path payload: the element types, by position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub positions: Option<Vec<String>>,
-    /// A struct path payload: its fields, by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fields: Option<Vec<Field>>,
 }
@@ -60,7 +47,6 @@ pub struct Arg {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Response {
-    /// ts-rs's name for the `T` of `Json<T>`.
     Json(String),
     NoContent,
     /// Navigated to, not fetched: only a URL builder is generated.
@@ -79,7 +65,6 @@ pub struct Handler {
 
 const TS_PRIMITIVES: &[&str] = &["string", "number", "bigint", "boolean", "null"];
 
-/// Splits `a, b<c, d>, { e: f, g: h }` at depth-0 commas.
 fn split_top_level(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut depth = 0i32;
@@ -219,7 +204,6 @@ fn append_locked(file: &mut File, handler: Handler) -> std::io::Result<()> {
     file.write_all(out.as_bytes())
 }
 
-/// The descriptors a `handlers.json` holds.
 pub fn read(path: &Path) -> std::io::Result<Vec<Handler>> {
     let text = std::fs::read_to_string(path)?;
     Ok(serde_json::from_str(&text)?)

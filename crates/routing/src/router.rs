@@ -120,12 +120,6 @@ where
         self.record::<H, T>(Method::PATCH, path, axum::routing::patch(handler))
     }
 
-    /// Serve a single fixed embedded file at `path`: a recorded GET (it shows
-    /// in the manifest like any route) answering, through [`serve_static`], with
-    /// `bytes`, the given `content_type`, and the `cache` policy. Pick
-    /// [`CachePolicy::Immutable`] only for a content-hashed URL; a file whose
-    /// bytes change under this same URL across restarts takes
-    /// [`CachePolicy::NoCache`].
     pub fn static_file(
         self,
         path: &str,
@@ -142,11 +136,6 @@ where
         )
     }
 
-    /// Serve a set of named embedded files under `<prefix>/{name}`: a recorded
-    /// GET that refuses path traversal ([`safe_asset_path`]), looks the name up
-    /// in `files`, infers the Content-Type from the extension, and serves
-    /// through [`serve_static`] with the `cache` policy. A missing or unsafe
-    /// name is a plain `404`.
     pub fn static_dir(self, prefix: &str, files: &'static AssetSet, cache: CachePolicy) -> Self {
         let path = format!("{}/{{name}}", prefix.trim_end_matches('/'));
         let fqname = format!("<static_dir> GET {path}");
@@ -170,8 +159,6 @@ where
         self
     }
 
-    /// Nest a recorded router; its registrations join this manifest with
-    /// `prefix` applied (the nested `/` is the prefix itself).
     pub fn nest(mut self, prefix: &str, router: Router<S>) -> Self {
         let base = prefix.trim_end_matches('/');
         for mut reg in router.manifest {
@@ -187,14 +174,12 @@ where
         self
     }
 
-    /// Merge a recorded router; its registrations join this manifest as they are.
     pub fn merge(mut self, router: Router<S>) -> Self {
         self.manifest.extend(router.manifest);
         self.inner = self.inner.merge(router.inner);
         self
     }
 
-    /// Passthrough of `axum::Router::layer` (applies to routes added so far).
     pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<Route> + Clone + Send + Sync + 'static,
@@ -207,7 +192,6 @@ where
         self
     }
 
-    /// Passthrough of `axum::Router::route_layer`.
     pub fn route_layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<Route> + Clone + Send + Sync + 'static,
@@ -220,7 +204,6 @@ where
         self
     }
 
-    /// Passthrough of `axum::Router::with_state`; the manifest carries over.
     pub fn with_state<S2>(self, state: S) -> Router<S2> {
         Router {
             inner: self.inner.with_state(state),
@@ -228,17 +211,14 @@ where
         }
     }
 
-    /// Everything registered through the recording methods, in call order.
     pub fn manifest(&self) -> &[Registration] {
         &self.manifest
     }
 
-    /// The axum router, to serve.
     pub fn into_axum(self) -> axum::Router<S> {
         self.inner
     }
 
-    /// `routes.json`: the manifest, sorted and pretty-printed.
     pub fn write_manifest(&self, path: &Path) -> std::io::Result<()> {
         write_manifest(&self.manifest, path)
     }

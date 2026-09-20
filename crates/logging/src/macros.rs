@@ -1,15 +1,9 @@
-//! Emitting through a designator: the five level primitives
-//! (`info!(designator | …)`), the per-level modules with one macro per
-//! designator (`info::auth!(…)`, `info::custom!(tag | …)`), and the
-//! first-argument form kept as a deprecated alias for one release.
-//!
-//! The thirty static macros come out of one generating macro; each is
-//! `#[macro_export]`ed under a hidden root name and re-exported into its
-//! level module by single-segment `pub use` — the textual-scope form, which
-//! is the one rustc allows for a macro-expanded `macro_export`.
+//! Emitting through a designator: the five level primitives (`info!(d | …)`),
+//! the per-level modules with one macro per designator (`info::auth!(…)`,
+//! `info::custom!(tag | …)`), and the deprecated first-argument form. The static
+//! macros are `#[macro_export]`ed under hidden root names and re-exported by
+//! single-segment `pub use` — the one form rustc allows for a macro-expanded `macro_export`.
 
-/// The one place the field is written. `designator = %d` is a Display
-/// capture: zero-cost for the stand variants, one small format for `Custom`.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __designated {
@@ -19,7 +13,6 @@ macro_rules! __designated {
     }};
 }
 
-/// The first-argument form, `info!(AUTH, …)`: deprecated, gone next release.
 #[deprecated(
     since = "0.4.0",
     note = "write log::<level>::<designator>!(…) (log::info::auth!(…)), or the \
@@ -33,9 +26,6 @@ macro_rules! __first_argument_form {
     };
 }
 
-/// `custom!("name")` as a designator VALUE: deprecated, gone next release —
-/// the custom designator now travels inside the call,
-/// `log::info::custom!("name" | …)`.
 #[deprecated(
     since = "0.4.0",
     note = "write log::<level>::custom!(\"name\" | …); custom!(\"name\") as a \
@@ -55,7 +45,6 @@ macro_rules! custom {
 // as `$crate::info!`, and a macro-expanded `macro_export` cannot be reached
 // by absolute path from inside this crate.
 
-/// `error!(designator | fields…, "message")`. Prefer `error::auth!(…)`.
 #[macro_export]
 macro_rules! error {
     ($d:literal | $($arg:tt)+) => { $crate::__designated!(error, $d, $($arg)+) };
@@ -63,7 +52,6 @@ macro_rules! error {
     ($d:expr, $($arg:tt)+) => { $crate::__first_argument_form!(error, $d, $($arg)+) };
 }
 
-/// `warn!(designator | fields…, "message")`. Prefer `warn::auth!(…)`.
 #[macro_export]
 macro_rules! warn {
     ($d:literal | $($arg:tt)+) => { $crate::__designated!(warn, $d, $($arg)+) };
@@ -71,7 +59,6 @@ macro_rules! warn {
     ($d:expr, $($arg:tt)+) => { $crate::__first_argument_form!(warn, $d, $($arg)+) };
 }
 
-/// `info!(designator | fields…, "message")`. Prefer `info::auth!(…)`.
 #[macro_export]
 macro_rules! info {
     ($d:literal | $($arg:tt)+) => { $crate::__designated!(info, $d, $($arg)+) };
@@ -79,7 +66,6 @@ macro_rules! info {
     ($d:expr, $($arg:tt)+) => { $crate::__first_argument_form!(info, $d, $($arg)+) };
 }
 
-/// `debug!(designator | fields…, "message")`. Prefer `debug::auth!(…)`.
 #[macro_export]
 macro_rules! debug {
     ($d:literal | $($arg:tt)+) => { $crate::__designated!(debug, $d, $($arg)+) };
@@ -87,7 +73,6 @@ macro_rules! debug {
     ($d:expr, $($arg:tt)+) => { $crate::__first_argument_form!(debug, $d, $($arg)+) };
 }
 
-/// `trace!(designator | fields…, "message")`. Prefer `trace::auth!(…)`.
 #[macro_export]
 macro_rules! trace {
     ($d:literal | $($arg:tt)+) => { $crate::__designated!(trace, $d, $($arg)+) };
@@ -130,7 +115,6 @@ macro_rules! level_module {
     };
 }
 
-/// `error::auth!(…)`, `error::business!(…)`, …, `error::custom!(tag | …)`.
 pub mod error {
     level_module! {
         $ error, custom = __log_error_custom,
@@ -143,7 +127,6 @@ pub mod error {
     }
 }
 
-/// `warn::auth!(…)`, `warn::business!(…)`, …, `warn::custom!(tag | …)`.
 pub mod warn {
     level_module! {
         $ warn, custom = __log_warn_custom,
@@ -156,7 +139,6 @@ pub mod warn {
     }
 }
 
-/// `info::auth!(…)`, `info::business!(…)`, …, `info::custom!(tag | …)`.
 pub mod info {
     level_module! {
         $ info, custom = __log_info_custom,
@@ -169,7 +151,6 @@ pub mod info {
     }
 }
 
-/// `debug::auth!(…)`, `debug::business!(…)`, …, `debug::custom!(tag | …)`.
 pub mod debug {
     level_module! {
         $ debug, custom = __log_debug_custom,
@@ -182,7 +163,6 @@ pub mod debug {
     }
 }
 
-/// `trace::auth!(…)`, `trace::business!(…)`, …, `trace::custom!(tag | …)`.
 pub mod trace {
     level_module! {
         $ trace, custom = __log_trace_custom,

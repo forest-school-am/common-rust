@@ -1,12 +1,8 @@
-//! A cron-shaped consumer in miniature: four nesting levels, a secret, a
-//! boolean, the shared `Common` section. Run it with `--help`,
-//! `--print-config`, flags, `CRON_…` variables or `--config file.toml` to see
-//! the crate's outputs; the README captures them verbatim.
-//!
-//! A real binary calls `common_logging::boot::<Cron>()` instead of `load`: it
-//! refuses through `refuse!` (the JSON `startup` line) and brings logging up
-//! from `common`. This crate cannot depend on logging, so the example prints
-//! the refusal's `Display` form and exits 1.
+//! A cron-shaped consumer in miniature: nesting levels, a secret, a boolean,
+//! the shared `Common` section. Run it with `--help`, `--print-config`, flags,
+//! `CRON_…` variables or `--config file.toml` to see the crate's outputs. A real
+//! binary calls `common_logging::boot` instead of `load`; this crate cannot
+//! depend on logging, so the example prints the refusal's `Display` and exits 1.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

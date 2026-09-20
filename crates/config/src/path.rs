@@ -27,12 +27,10 @@ impl Path {
         self.0.is_empty()
     }
 
-    /// The field's own name; `""` at the root.
     pub fn leaf(&self) -> &'static str {
         self.0.last().copied().unwrap_or("")
     }
 
-    /// The enclosing toml table, dotted (`sandbox.limits`); `""` at top level.
     pub fn section(&self) -> String {
         match self.0.split_last() {
             Some((_, parents)) => parents.join("."),
@@ -40,12 +38,10 @@ impl Path {
         }
     }
 
-    /// Full toml key, dotted: `sandbox.limits.cpu_secs`.
     pub fn dotted(&self) -> String {
         self.0.join(".")
     }
 
-    /// `--sandbox--limits--cpu-secs`: `-` inside a name, `--` between levels.
     pub fn flag(&self) -> String {
         let joined = self
             .0
@@ -56,8 +52,6 @@ impl Path {
         format!("--{joined}")
     }
 
-    /// `CRON_SANDBOX__LIMITS__CPU_SECS`: `_` inside a name, `__` between
-    /// levels, the app prefix once with a single `_`.
     pub fn env(&self, app: &str) -> String {
         let joined = self
             .0

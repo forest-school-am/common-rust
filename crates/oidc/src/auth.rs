@@ -1,28 +1,7 @@
-//! Authorization ORCHESTRATION, shared by the stand's apps (R115). The two
-//! validated identities live elsewhere and are never re-implemented here: the
-//! browser OIDC session in [`OidcState`] (cookie → `resolve_session`) and the
-//! bearer service-account token in [`BearerValidator`]. What each app used to
-//! hand-roll — a rejecting middleware, an `Auth` extension enum, a `check`/
-//! `deny` pair and a handful of extractors — is what this module carries once:
-//!
-//! 1. [`set_auth_context`], a middleware that only POPULATES state and NEVER
-//!    rejects. It resolves bearer-then-session into an [`AuthContext`] in the
-//!    request extensions, sets the log actor, owns the request span, and
-//!    returns. An invalid token becomes [`AuthContext::Anonymous`], not a 401.
-//! 2. A family of extractors a handler names for the level it needs:
-//!    [`Authenticated`], [`ServiceAccount`], [`MaybeAuthenticated`], and the
-//!    generic [`GatedBy`] driven by a [`Predicate`] the app declares — usually
-//!    through the [`HasGroup`] marker and the [`Or`]/[`And`]/[`Not`]
-//!    combinators.
-//!
-//! THE SEAM (R115). The DECISION is shared; the RESPONSE BYTES are the app's.
-//! cron answers a refusal with its `ApiError` JSON and a denied HTML shell;
-//! registry with plain text; a future adopter with the crate defaults. So
-//! [`AuthProviders`] carries an optional pair of [`Refusals`] renderers the
-//! extractors call, falling back to a minimal wire JSON when an app supplies
-//! none. The HTML login redirect for an anonymous BROWSER is the one refusal
-//! the crate always renders itself (via [`OidcState::login_redirect`]), because
-//! only it holds the flow store.
+//! Authorization orchestration, shared by the stand's apps. The two validated
+//! identities are never re-implemented here: the browser OIDC session
+//! ([`OidcState`]) and the bearer service-account token ([`BearerValidator`])
+//! are resolved by their own modules and only consumed here.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -43,61 +22,34 @@ use crate::bearer::BearerValidator;
 use crate::principal::Principal;
 use crate::web::OidcState;
 
-// ---------------------------------------------------------------------------
-// The context the middleware resolves.
-// ---------------------------------------------------------------------------
-
-/// How a principal proved who they are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthVia {
-    /// A browser cookie resolved through [`OidcState`].
     Session,
-    /// A bearer token validated through [`BearerValidator`].
     Bearer,
-    /// The dev-only stub, standing in for a real identity under `--no-auth`.
     Stub,
 }
 
-/// What [`set_auth_context`] resolved for a request, stored in its extensions.
 /// The middleware NEVER rejects: an absent or invalid credential becomes
-/// [`AuthContext::Anonymous`], and the extractor a handler names decides the
-/// response.
+/// [`AuthContext::Anonymous`].
 #[derive(Debug, Clone)]
 pub enum AuthContext {
-    /// Authentication is switched off for this deployment (`--no-auth`), or a
-    /// dev-stub deployment saw no real credential. Gates are NOT consulted; the
-    /// actor is the configured [`AuthProviders::dev_stub`], else a synthesized
-    /// principal with username `-` and no groups.
     Disabled,
-    /// A validated caller.
     Authenticated {
         principal: Arc<Principal>,
         via: AuthVia,
     },
-    /// No valid credential. The reason is logged, never returned to the caller.
-    Anonymous { reason: String },
+    /// The reason is logged, never returned to the caller.
+    Anonymous {
+        reason: String,
+    },
 }
-
-// ---------------------------------------------------------------------------
-// Providers + the response seam.
-// ---------------------------------------------------------------------------
 
 type UnauthorizedFn = Arc<dyn Fn(&Parts) -> Response + Send + Sync>;
 type DeniedFn = Arc<dyn Fn(&Parts, &Denial) -> Response + Send + Sync>;
 
-/// The two refusal renderers an app supplies so a SHARED extractor keeps that
-/// app's exact response bytes. `None` uses the crate's wire-JSON default. This
-/// is the documented seam: cron installs both (its `ApiError` shapes and its
-/// denied shell); registry installs neither and takes the defaults; role-ui and
-/// les-forms will do the same.
 #[derive(Clone, Default)]
 pub struct Refusals {
-    /// The WIRE 401 for an anonymous caller (a machine, or a browser under an
-    /// app with no OIDC redirect). The HTML login redirect is handled by the
-    /// crate before this is consulted.
     pub unauthorized: Option<UnauthorizedFn>,
-    /// The 403 for a signed-in caller a gate refused; receives the [`Denial`]
-    /// so it can name the group.
     pub denied: Option<DeniedFn>,
 }
 
@@ -110,23 +62,15 @@ impl std::fmt::Debug for Refusals {
     }
 }
 
-/// Everything the middleware needs to resolve an identity, plus the app's
-/// refusal renderers. `#[derive(Clone)]` so it is both the `from_fn_with_state`
-/// state and a value stashed in the request extensions for the extractors.
 #[derive(Clone)]
 pub struct AuthProviders {
-    /// The browser-session validator, or `None` for a bearer-only / no-auth app.
     pub oidc: Option<OidcState>,
-    /// The bearer validator, or `None` for a session-only / no-auth app.
     pub bearer: Option<BearerValidator>,
-    /// The dev-only stub identity, `Some` only under `--no-auth`.
     pub dev_stub: Option<Arc<Principal>>,
-    /// App-supplied refusal renderers (the seam above).
     pub refusals: Refusals,
 }
 
 impl AuthProviders {
-    /// The common case: providers with the crate-default refusals.
     pub fn new(
         oidc: Option<OidcState>,
         bearer: Option<BearerValidator>,
@@ -140,8 +84,6 @@ impl AuthProviders {
         }
     }
 
-    /// Install the app's 401 renderer (wire callers; the HTML redirect stays
-    /// the crate's).
     pub fn on_unauthorized(
         mut self,
         f: impl Fn(&Parts) -> Response + Send + Sync + 'static,
@@ -150,7 +92,6 @@ impl AuthProviders {
         self
     }
 
-    /// Install the app's 403 renderer, which receives the [`Denial`].
     pub fn on_denied(
         mut self,
         f: impl Fn(&Parts, &Denial) -> Response + Send + Sync + 'static,
@@ -160,17 +101,6 @@ impl AuthProviders {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The middleware.
-// ---------------------------------------------------------------------------
-
-/// Populate [`AuthContext`] and return. Mounted with
-/// `axum::middleware::from_fn_with_state(providers, common_oidc::auth::set_auth_context)`.
-/// It owns the request span (reqid + `request_span!`) and sets the log actor,
-/// exactly as each app's own middleware did, then runs the rest of the stack
-/// inside that span. It resolves bearer FIRST (a token means a machine caller),
-/// then a browser session; a configured dev stub catches a browser that
-/// presented neither.
 pub async fn set_auth_context(
     State(providers): State<AuthProviders>,
     req: Request,
@@ -179,7 +109,6 @@ pub async fn set_auth_context(
     let reqid = common_logging::gen_reqid();
     let span = common_logging::request_span!(&reqid);
 
-    // Auth off entirely: no validator can run, so there is nothing to resolve.
     if providers.oidc.is_none() && providers.bearer.is_none() {
         let actor = stub_actor(&providers);
         common_logging::set_actor(&span, &actor);
@@ -215,7 +144,6 @@ fn stub_actor(providers: &AuthProviders) -> String {
 }
 
 async fn resolve_context(providers: &AuthProviders, parts: &Parts) -> AuthContext {
-    // Bearer first: a caller presenting a token is a machine, not a browser.
     if let Some(token) = bearer_token(&parts.headers) {
         return match &providers.bearer {
             Some(validator) => match validator.validate(token).await {
@@ -239,7 +167,6 @@ async fn resolve_context(providers: &AuthProviders, parts: &Parts) -> AuthContex
         };
     }
 
-    // Then a browser session.
     if let Some(oidc) = &providers.oidc {
         let jar = CookieJar::from_headers(&parts.headers);
         if let Some((principal, _session)) = oidc.resolve_session(&jar).await {
@@ -250,8 +177,6 @@ async fn resolve_context(providers: &AuthProviders, parts: &Parts) -> AuthContex
         }
     }
 
-    // No valid credential. A dev-stub deployment treats such a caller as the
-    // stub (a preview you can look at); everyone else is anonymous.
     if providers.dev_stub.is_some() {
         return AuthContext::Disabled;
     }
@@ -267,7 +192,6 @@ async fn resolve_context(providers: &AuthProviders, parts: &Parts) -> AuthContex
     }
 }
 
-/// The single bearer-header parser. `Bearer`/`bearer`, non-empty after trim.
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let token = raw
@@ -275,10 +199,6 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
         .or_else(|| raw.strip_prefix("bearer "))?;
     (!token.trim().is_empty()).then_some(token.trim())
 }
-
-// ---------------------------------------------------------------------------
-// Reading the context, and building refusals.
-// ---------------------------------------------------------------------------
 
 fn context(parts: &Parts) -> Result<&AuthContext, Response> {
     parts.extensions.get::<AuthContext>().ok_or_else(|| {
@@ -294,8 +214,6 @@ fn providers(parts: &Parts) -> Option<&AuthProviders> {
     parts.extensions.get::<AuthProviders>()
 }
 
-/// The actor under [`AuthContext::Disabled`]: the configured stub, else a
-/// synthesized `-` principal with no groups (documented fallback, R115).
 fn disabled_principal(parts: &Parts) -> Arc<Principal> {
     providers(parts)
         .and_then(|p| p.dev_stub.clone())
@@ -326,9 +244,6 @@ fn internal() -> Response {
         .into_response()
 }
 
-/// The refusal for an anonymous caller. A browser (HTML GET) under an app that
-/// has OIDC gets the crate's silent re-auth redirect; everyone else gets the
-/// wire 401 — the app's if it installed one, else a minimal JSON body.
 async fn anonymous_response(parts: &Parts) -> Response {
     if wants_html(parts) {
         if let Some(oidc) = providers(parts).and_then(|p| p.oidc.as_ref()) {
@@ -338,8 +253,6 @@ async fn anonymous_response(parts: &Parts) -> Response {
     unauthorized_wire(parts)
 }
 
-/// The wire 401, never a redirect — for machine callers ([`ServiceAccount`])
-/// and for the non-HTML branch of [`anonymous_response`].
 fn unauthorized_wire(parts: &Parts) -> Response {
     if let Some(f) = providers(parts).and_then(|p| p.refusals.unauthorized.as_ref()) {
         return f(parts);
@@ -351,8 +264,6 @@ fn unauthorized_wire(parts: &Parts) -> Response {
         .into_response()
 }
 
-/// The one FORBIDDEN, naming the gate. The app's renderer if installed, else a
-/// minimal JSON body carrying the gate description.
 fn denied_response(parts: &Parts, denial: &Denial) -> Response {
     if let Some(f) = providers(parts).and_then(|p| p.refusals.denied.as_ref()) {
         return f(parts, denial);
@@ -364,44 +275,24 @@ fn denied_response(parts: &Parts, denial: &Denial) -> Response {
         .into_response()
 }
 
-/// Emit the shared FORBIDDEN from an app's OWN extractor — so a bespoke,
-/// resource-scoped or async authorization check (role-ui's `GroupAccess`: is
-/// the caller a leader of THIS group, fetched per request) refuses with the
-/// same bytes and honours the same `on_denied` seam as [`GatedBy`], instead of
-/// hand-rolling a refusal. The predicate algebra covers pure principal+config
-/// rules; this is the door for everything it deliberately does not.
 pub fn deny(parts: &Parts, denial: Denial) -> Response {
     denied_response(parts, &denial)
 }
 
-/// The shared 401 for an app's own extractor — the machine-caller counterpart
-/// of [`deny`]. Most app extractors get this for free by building on
-/// [`Authenticated`]/[`ServiceAccount`]; this is for the ones that decide
-/// unauthenticated for a reason of their own.
 pub fn unauthorized(parts: &Parts) -> Response {
     unauthorized_wire(parts)
 }
 
-// ---------------------------------------------------------------------------
-// The predicate algebra.
-// ---------------------------------------------------------------------------
-
-/// A refused gate, carrying the human description of what membership was
-/// required so [`denied_response`] can name it to an operator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Denial {
     pub gate: String,
 }
 
 impl Denial {
-    /// An arbitrary gate description — for an app extractor that gates on
-    /// something other than a group UUID (a role in a resource, a superuser
-    /// bit) and wants to name it to an operator through [`deny`].
     pub fn new(gate: impl Into<String>) -> Self {
         Self { gate: gate.into() }
     }
 
-    /// Names a single group by UUID, or `-` when the group is unconfigured.
     pub fn group(group: Option<Uuid>) -> Self {
         Self {
             gate: match group {
@@ -412,23 +303,14 @@ impl Denial {
     }
 }
 
-/// A boolean rule over a principal, evaluated against app state `S`. Apps
-/// declare impls — usually via [`HasGroup`] and the combinators — and name them
-/// as the type parameter of [`GatedBy`].
 pub trait Predicate<S>: 'static {
     fn check(principal: &Principal, state: &S) -> Result<(), Denial>;
 }
 
-/// Resolves ONE configured group UUID from app state. Threaded through state
-/// (cron's `App.gate`, registry's launcher group), never a global: the
-/// gate-proof suites build several states with DIFFERENT groups in one test
-/// binary, which a singleton could not serve.
 pub trait Group<S>: 'static {
     fn group(state: &S) -> Option<Uuid>;
 }
 
-/// Membership in the group `G` resolves from state. An UNCONFIGURED group
-/// (`None`) does not pass — the same shape as the apps' previous `is_some_and`.
 pub struct HasGroup<G>(PhantomData<G>);
 
 impl<S, G: Group<S>> Predicate<S> for HasGroup<G> {
@@ -441,7 +323,6 @@ impl<S, G: Group<S>> Predicate<S> for HasGroup<G> {
     }
 }
 
-/// Passes if EITHER side passes; on refusal, names both required memberships.
 pub struct Or<A, B>(PhantomData<(A, B)>);
 
 impl<S, A: Predicate<S>, B: Predicate<S>> Predicate<S> for Or<A, B> {
@@ -458,7 +339,6 @@ impl<S, A: Predicate<S>, B: Predicate<S>> Predicate<S> for Or<A, B> {
     }
 }
 
-/// Passes only if BOTH sides pass; reports the first refusal.
 pub struct And<A, B>(PhantomData<(A, B)>);
 
 impl<S, A: Predicate<S>, B: Predicate<S>> Predicate<S> for And<A, B> {
@@ -468,7 +348,6 @@ impl<S, A: Predicate<S>, B: Predicate<S>> Predicate<S> for And<A, B> {
     }
 }
 
-/// Passes only if the inner rule REFUSES.
 pub struct Not<A>(PhantomData<A>);
 
 impl<S, A: Predicate<S>> Predicate<S> for Not<A> {
@@ -482,12 +361,6 @@ impl<S, A: Predicate<S>> Predicate<S> for Not<A> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// The extractor family.
-// ---------------------------------------------------------------------------
-
-/// Any signed-in caller. `Disabled` yields the dev stub (or the synthesized
-/// `-`); `Anonymous` refuses (login redirect for an HTML browser, else 401).
 #[derive(Debug)]
 pub struct Authenticated(pub Arc<Principal>);
 
@@ -503,8 +376,6 @@ impl<S: Send + Sync> FromRequestParts<S> for Authenticated {
     }
 }
 
-/// A bearer service account and nothing else — no session, no stub, no HTML
-/// redirect. Refuses with a plain 401, because the caller has no browser.
 #[derive(Debug)]
 pub struct ServiceAccount(pub Arc<Principal>);
 
@@ -522,7 +393,6 @@ impl<S: Send + Sync> FromRequestParts<S> for ServiceAccount {
     }
 }
 
-/// The caller if there is one, `None` otherwise. Never fails.
 pub struct MaybeAuthenticated(pub Option<Arc<Principal>>);
 
 impl<S: Send + Sync> FromRequestParts<S> for MaybeAuthenticated {
@@ -539,10 +409,6 @@ impl<S: Send + Sync> FromRequestParts<S> for MaybeAuthenticated {
     }
 }
 
-/// A caller who passes the predicate `P`. `Disabled` SKIPS the predicate and
-/// returns the stub (so `--no-auth` = every gate passes); `Authenticated` runs
-/// `P::check` and, on `Err(Denial)`, returns the shared denied response;
-/// `Anonymous` refuses like [`Authenticated`].
 pub struct GatedBy<P>(pub Arc<Principal>, pub PhantomData<P>);
 
 impl<S, P> FromRequestParts<S> for GatedBy<P>
@@ -582,7 +448,6 @@ mod tests {
         })
     }
 
-    /// Build request parts carrying a context (and, optionally, providers).
     fn parts_with(ctx: AuthContext, providers: Option<AuthProviders>) -> Parts {
         parts_full(ctx, providers, "GET", None)
     }
@@ -609,8 +474,6 @@ mod tests {
         AuthProviders::new(None, None, None)
     }
 
-    // ----- a tiny app state and two groups for the predicate tests -----
-
     const GATE: Uuid = Uuid::from_u128(0x1111_1111_1111_4111_8111_1111_1111_1111);
     const INDEX: Uuid = Uuid::from_u128(0x2222_2222_2222_4222_8222_2222_2222_2222);
 
@@ -632,11 +495,8 @@ mod tests {
         }
     }
 
-    // ----- context resolution reflected by the extractors -----
-
     #[tokio::test]
     async fn authenticated_reads_each_context() {
-        // Disabled with a stub -> the stub principal.
         let stub = principal("dev-stub", &[]);
         let providers = AuthProviders::new(None, None, Some(stub.clone()));
         let mut parts = parts_with(AuthContext::Disabled, Some(providers));
@@ -645,7 +505,6 @@ mod tests {
             .expect("disabled passes");
         assert_eq!(who.0.username, "dev-stub");
 
-        // Disabled with no stub -> synthesized "-".
         let mut parts = parts_with(AuthContext::Disabled, Some(empty_providers()));
         let who = Authenticated::from_request_parts(&mut parts, &())
             .await
@@ -653,7 +512,6 @@ mod tests {
         assert_eq!(who.0.username, "-");
         assert!(who.0.effective_groups.is_empty());
 
-        // Authenticated -> the principal.
         let ctx = AuthContext::Authenticated {
             principal: principal("alice", &[]),
             via: AuthVia::Session,
@@ -664,7 +522,6 @@ mod tests {
             .expect("authenticated passes");
         assert_eq!(who.0.username, "alice");
 
-        // Anonymous -> 401 (no oidc, so no redirect even for HTML).
         let mut parts = parts_full(
             AuthContext::Anonymous { reason: "x".into() },
             Some(empty_providers()),
@@ -700,7 +557,6 @@ mod tests {
             assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
         }
 
-        // Disabled is not a bearer either.
         let mut parts = parts_with(AuthContext::Disabled, Some(empty_providers()));
         let err = ServiceAccount::from_request_parts(&mut parts, &())
             .await
@@ -743,8 +599,6 @@ mod tests {
         assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
-    // ----- GatedBy: pass / deny / disabled-bypass -----
-
     async fn gate_status<P>(ctx: AuthContext, state: &TestState) -> StatusCode
     where
         P: Predicate<TestState>,
@@ -779,7 +633,6 @@ mod tests {
             gate_status::<HasGroup<GateGroup>>(outsider, &state).await,
             StatusCode::FORBIDDEN
         );
-        // Disabled bypasses the predicate entirely (--no-auth = all pass).
         assert_eq!(
             gate_status::<HasGroup<GateGroup>>(AuthContext::Disabled, &state).await,
             StatusCode::OK
@@ -801,8 +654,6 @@ mod tests {
             StatusCode::FORBIDDEN
         );
     }
-
-    // ----- the combinator truth table via HasGroup -----
 
     fn check<P: Predicate<TestState>>(groups: &[Uuid], state: &TestState) -> bool {
         P::check(
@@ -826,18 +677,15 @@ mod tests {
         type G = HasGroup<GateGroup>;
         type I = HasGroup<IndexGroup>;
 
-        // Or: passes if in EITHER.
         assert!(check::<Or<G, I>>(&[GATE], &state));
         assert!(check::<Or<G, I>>(&[INDEX], &state));
         assert!(check::<Or<G, I>>(&[GATE, INDEX], &state));
         assert!(!check::<Or<G, I>>(&[Uuid::new_v4()], &state));
 
-        // And: passes only if in BOTH.
         assert!(check::<And<G, I>>(&[GATE, INDEX], &state));
         assert!(!check::<And<G, I>>(&[GATE], &state));
         assert!(!check::<And<G, I>>(&[INDEX], &state));
 
-        // Not: passes only if NOT in the group.
         assert!(check::<Not<G>>(&[INDEX], &state));
         assert!(!check::<Not<G>>(&[GATE], &state));
     }
@@ -862,8 +710,6 @@ mod tests {
         assert!(denial.gate.contains(&INDEX.to_string()), "{}", denial.gate);
         assert!(denial.gate.contains(" or "), "{}", denial.gate);
     }
-
-    // ----- the middleware's auth-off short-circuit -----
 
     #[tokio::test]
     async fn middleware_off_inserts_disabled_and_the_stub_actor() {
@@ -895,22 +741,10 @@ mod tests {
         assert_eq!(&body[..], b"dev-stub");
     }
 
-    // ----- the door stays open for role-ui's kind of predicate -----
-    //
-    // role-ui's real check is "is the caller a Leader of THIS group", which is
-    // async, reads the request path, and fetches the role relation — none of
-    // which the pure `Predicate` algebra expresses, ON PURPOSE. This models it
-    // as an APP-LOCAL extractor and proves it can still (a) read the principal
-    // the shared middleware set, via `Authenticated`, and (b) refuse with the
-    // shared bytes, via `deny(Denial::new(..))`. If a future edit privatises
-    // either seam, this test stops compiling — which is the guarantee.
-
     struct Roles {
         leaders: std::collections::HashMap<String, &'static str>,
     }
 
-    /// A bespoke, async, resource-scoped authorization extractor — the shape
-    /// `Predicate` deliberately cannot take. It leans only on PUBLIC surface.
     #[derive(Debug)]
     struct LeaderOfResource(#[allow(dead_code)] Arc<Principal>);
 
@@ -919,7 +753,6 @@ mod tests {
 
         async fn from_request_parts(parts: &mut Parts, state: &Roles) -> Result<Self, Response> {
             let Authenticated(principal) = Authenticated::from_request_parts(parts, state).await?;
-            // Stand-in for an async fetch keyed on a path param.
             let resource = "group-42";
             match state.leaders.get(&principal.username) {
                 Some(g) if *g == resource => Ok(LeaderOfResource(principal)),
@@ -934,7 +767,6 @@ mod tests {
             leaders: [("boss".to_owned(), "group-42")].into_iter().collect(),
         };
 
-        // The leader of the resource passes.
         let mut parts = parts_with(
             AuthContext::Authenticated {
                 principal: principal("boss", &[]),
@@ -946,7 +778,6 @@ mod tests {
             .await
             .is_ok());
 
-        // A non-leader is refused with the SHARED forbidden, naming the gate.
         let mut parts = parts_with(
             AuthContext::Authenticated {
                 principal: principal("nobody", &[]),

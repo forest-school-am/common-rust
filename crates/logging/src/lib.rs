@@ -40,14 +40,8 @@ use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
-/// The one call at the top of a binary's `main`: loads `T` through
-/// common-config (defaults < file < env < args; `--help` and
-/// `--print-config` print and exit 0), refuses any config fault as the
-/// `startup` JSON line and exit 1, brings the subscriber up from `T`'s
-/// `common` section (`RUST_LOG` read from the environment, as tracing's own
-/// variable), and returns the config. Refusals raised here carry this
-/// crate's target; the binary's own post-load checks go through `refuse!`
-/// at their site and carry the binary's.
+/// Refusals raised here carry this crate's target; the binary's own post-load
+/// checks go through `refuse!` at their site and carry the binary's.
 pub fn boot<T: common_config::Root>() -> T {
     let config = match common_config::load::<T>() {
         Ok(config) => config,
@@ -61,9 +55,6 @@ pub fn boot<T: common_config::Root>() -> T {
     config
 }
 
-/// Environment-only initialisation for a binary that has not moved to
-/// common-config yet: reads `LOG_FORMAT`, `DEPLOYMENT_TYPE`, `RUST_LOG` and
-/// `LOG_DESIGNATORS` itself.
 pub fn init() {
     match LogConfig::from_env() {
         Ok(cfg) => init_with(cfg),
@@ -367,8 +358,6 @@ mod tests {
         assert_eq!(v[designator::FIELD], "c-poller");
     }
 
-    /// The comma form and `custom!("name")` as a value: one release of
-    /// grace, so they must still emit exactly what they used to.
     #[test]
     #[allow(deprecated)]
     fn the_deprecated_first_argument_form_still_emits() {

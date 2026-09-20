@@ -83,7 +83,7 @@ pub struct OidcClient {
     core: OidcCore,
     http: reqwest::Client,
     config: OidcConfig,
-    /// R79: where a logout sends the browser. OPTIONAL in the spec, so its
+    /// Where a logout sends the browser. OPTIONAL in the spec, so its
     /// absence is a missing feature to report, not a discovery failure —
     /// everything else the crate does still works without it.
     end_session_url: Option<Url>,

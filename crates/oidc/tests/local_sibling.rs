@@ -1,5 +1,5 @@
 //! That common-logging resolved to THIS workspace and not to something else,
-//! asserted from a sibling crate (R22a). Anything about OIDC's own behaviour
+//! asserted from a sibling crate. Anything about OIDC's own behaviour
 //! belongs in mock_flow.rs.
 
 #[test]

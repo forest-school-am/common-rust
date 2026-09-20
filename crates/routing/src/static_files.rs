@@ -1,20 +1,8 @@
-//! Serving embedded static files, ONCE (review followup #9). Every service in
-//! the fleet embeds its compiled client (`app.js`/`app.css`, a served shim, a
-//! launcher bundle) and hand-rolled the same three things to serve it: a
-//! `name -> Content-Type` map, a path-traversal guard, and a bytes+type
-//! response. They live here now, in one place, and each caller keeps only the
+//! Serving embedded static files in one place: the `name -> Content-Type` map,
+//! the traversal guard, and the bytes+type+cache response every service's
+//! embedded client (`app.js`/`app.css`, a served shim, a launcher bundle) needs.
+//! [`serve_static`] is the one response constructor; each caller keeps only the
 //! part that genuinely differs — its auth guard.
-//!
-//! [`serve_static`] is THE response constructor: bytes, a Content-Type, and a
-//! [`CachePolicy`]. Every SPA bundle, served shim and launcher file in the
-//! fleet goes through it — the raw-axum callers ([the oidc shim][shim],
-//! cron's `/assets`, role-ui's `{*path}`) call it directly because they keep an
-//! auth extractor, a wildcard path or a bespoke 404; the plain callers reach it
-//! through [`crate::Router::static_file`] / [`crate::Router::static_dir`], which
-//! also record the route in the manifest. The cache decision is never implicit:
-//! it is a [`CachePolicy`] argument at every call site.
-//!
-//! [shim]: https://docs.rs/common-oidc
 
 use axum::body::Body;
 use axum::http::{header, HeaderValue};
@@ -26,13 +14,7 @@ use axum::response::Response;
 /// served `no-cache` throws away the one cache win it was named for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CachePolicy {
-    /// `public, max-age=31536000, immutable`: the URL is content-addressed (a
-    /// hash in the name), so the bytes at it never change and a cache may keep
-    /// them forever.
     Immutable,
-    /// `no-cache`: the URL is stable but its bytes change across restarts or
-    /// deploys (`/assets/app.js`, `launcher.js`), so a cache must revalidate
-    /// before reusing a stored copy.
     NoCache,
 }
 
@@ -47,10 +29,6 @@ impl CachePolicy {
     }
 }
 
-/// THE static response: `bytes`, a `Content-Type`, and the `cache` policy as an
-/// explicit `Cache-Control`. The one construction every static handler in the
-/// fleet shares. A caller still layers on whatever else it needs (`Vary`, an
-/// auth extractor around the handler).
 pub fn serve_static(bytes: &[u8], content_type: &str, cache: CachePolicy) -> Response {
     let mut resp = Response::new(Body::from(bytes.to_vec()));
     let headers = resp.headers_mut();
@@ -61,9 +39,6 @@ pub fn serve_static(bytes: &[u8], content_type: &str, cache: CachePolicy) -> Res
     resp
 }
 
-/// `name -> Content-Type`, by file extension. The union of what the fleet
-/// served (lifted from authentik-role-UI's `render::content_type_for`); an
-/// unknown extension is `application/octet-stream`, never a guess.
 pub fn content_type_for(name: &str) -> &'static str {
     match name.rsplit('.').next().unwrap_or("") {
         "js" | "mjs" => "text/javascript; charset=utf-8",
@@ -100,15 +75,11 @@ pub fn safe_asset_path(path: &str) -> Option<&str> {
     ok.then_some(path)
 }
 
-/// A fixed set of embedded files, keyed by name, for [`crate::Router::static_dir`].
-/// Ordered (a slice), so iteration and the manifest are stable. The
-/// Content-Type is inferred from the name by [`content_type_for`].
 pub struct AssetSet {
     files: &'static [(&'static str, &'static [u8])],
 }
 
 impl AssetSet {
-    /// `AssetSet::new(&[("app.js", APP_JS), ("app.css", APP_CSS)])`.
     pub const fn new(files: &'static [(&'static str, &'static [u8])]) -> Self {
         Self { files }
     }
@@ -173,11 +144,6 @@ mod tests {
 
     #[test]
     fn safe_asset_path_refuses_every_climb() {
-        // The dot-segment climbs the task calls out, the absolute and doubled
-        // slashes, dotfiles, and the empty name. (Still-encoded `..%2F…` is a
-        // single opaque segment here — it decodes to a `/` only once axum hands
-        // the handler the path, which is where the decoded `../x` below is
-        // refused; the raw string cannot itself climb.)
         for bad in [
             "../x",
             "/x",
@@ -283,10 +249,6 @@ mod tests {
         assert_eq!(m[0].path, "/a.css");
     }
 
-    // Regression: two static_file mounts share one closure TYPE, so recording
-    // their fqname from `type_name` collided them into one and the client
-    // generator refused the pair (HandlerMountedTwice) — which broke registry's
-    // codegen once it served two files this way. The fqname is now path-unique.
     #[test]
     fn two_static_files_get_distinct_fqnames() {
         let r = Router::<()>::new()

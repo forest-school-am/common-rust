@@ -90,10 +90,6 @@ impl OidcState {
         self.unauthorized_with_jar(CookieJar::new())
     }
 
-    /// The response for a browser with no valid session: a silent re-auth
-    /// redirect back to the path it was reaching. The `auth` module's
-    /// extractors call this for an anonymous HTML request, since only the
-    /// [`OidcState`] holds the flow store the redirect needs.
     pub async fn login_redirect(&self, parts: &Parts) -> Response {
         unauthenticated(self, parts, CookieJar::from_headers(&parts.headers))
             .await
@@ -110,8 +106,6 @@ impl OidcState {
             .into_response()
     }
 
-    /// The config the router was mounted with; `PageConfig::new` reads the
-    /// login and logout paths off it per request.
     pub fn config(&self) -> &OidcConfig {
         self.client.config()
     }
@@ -247,8 +241,8 @@ pub fn router(state: OidcState) -> Router {
 }
 
 /// A POST, never a GET: a GET would let any page anywhere log a user out with
-/// an `<img src>`. There is no CSRF token in the form (R65.4 leaves that
-/// open), so the request has to prove it came from this site some other way.
+/// an `<img src>`. There is no CSRF token in the form, so the request has to
+/// prove it came from this site some other way.
 ///
 /// UNENFORCED PRECONDITION: this relies on the browser's `Sec-Fetch-Site` or
 /// `Origin`. A proxy that strips both makes every logout a 403 — visibly, not
@@ -270,11 +264,10 @@ async fn logout(State(oidc): State<OidcState>, jar: CookieJar, headers: HeaderMa
 
     let jar = jar.remove(expiring_removal(oidc.config().cookie_name.as_str()));
 
-    /* R79, the user's words: "Logout should just send to authentik logout." So
-    the browser goes to `end_session_endpoint` PLAIN — no id_token_hint, no
+    /* The browser goes to `end_session_endpoint` PLAIN — no id_token_hint, no
     post_logout_redirect_uri, nothing registered on the provider. Authentik's
     own page is the end of the trip, and without a hint that page asks the
-    user to confirm, which is the intended shape rather than a shortcoming.
+    user to confirm.
 
     The app session is already destroyed above, so a user who abandons the
     trip is still logged out HERE. 303 either way: the browser must turn the
@@ -332,10 +325,6 @@ async fn login(
 }
 
 async fn client_js() -> Response {
-    // common-routing's shared static-file mechanism (review followup #9),
-    // cache policy and all: the shim is a content-stable client file served
-    // ungated under one URL that changes only with the binary, so it is
-    // `Immutable` like every other content-addressed bundle.
     common_routing::serve_static(
         crate::SHIM_JS.as_bytes(),
         "text/javascript; charset=utf-8",

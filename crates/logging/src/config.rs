@@ -25,8 +25,6 @@ pub struct LogConfig {
 }
 
 impl LogConfig {
-    /// From the four raw environment texts: the pre-common-config path, and
-    /// what `init()` still reads.
     pub fn resolve(
         log_format: Option<&str>,
         deployment_type: Option<&str>,

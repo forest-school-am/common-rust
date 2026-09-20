@@ -1,9 +1,8 @@
 //! `#[client]` end to end: annotate handlers, mount them, export both tables
-//! into a scratch directory, generate the client, read it back.
-//!
-//! This runs the generated `export_client_*` tests of THIS file in-process
-//! by calling the export helpers the way they do, because a test binary
-//! cannot re-run its own tests with an environment variable set.
+//! into a scratch directory, generate the client, read it back. The generated
+//! `export_client_*` tests are run in-process by calling the export helpers
+//! directly, because a test binary cannot re-run its own tests with an
+//! environment variable set.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -68,8 +67,6 @@ fn routes() -> Router<()> {
         .get("/api/things/{id}/download", download)
 }
 
-/// The handlers' export tests exist (the macro emitted them) and do nothing
-/// without the variable — so `cargo test` never writes anywhere.
 #[test]
 fn export_tests_are_generated_and_inert_without_the_variable() {
     assert!(
@@ -89,8 +86,6 @@ fn the_whole_pipeline_produces_a_typed_client() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
 
-    // What the export tests write when the variable is set — the same
-    // descriptors, built with the same helpers the macro expands to.
     let fq = |n: &str| format!("{}::{n}", module_path!());
     for h in [
         Handler {
@@ -128,8 +123,6 @@ fn the_whole_pipeline_produces_a_typed_client() {
     }
     routes().write_manifest(&dir.join("routes.json")).unwrap();
 
-    // The manifest's fqnames are the descriptors' fqnames: type_name of the
-    // fn item equals module_path!()::name.
     let manifest = routes();
     for r in manifest.manifest() {
         assert!(r.fqname.starts_with(module_path!()), "{}", r.fqname);

@@ -11,7 +11,7 @@ fn main() {
     strip_shim();
 }
 
-/// The shim ships INSIDE the binary (R64/R65), so it cannot drift from the
+/// The shim ships INSIDE the binary, so it cannot drift from the
 /// crate that serves it and needs no runtime integrity pin. `erasableSyntaxOnly`
 /// TypeScript means this is a type strip, never a compile: the output is the
 /// input minus annotations.

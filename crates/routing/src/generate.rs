@@ -1,17 +1,7 @@
-//! `client.ts` from `routes.json` + `handlers.json`, joined by fqname.
-//!
-//! One plain function per handler:
-//!
-//! ```ts
-//! export function run(id: string, number: number): Promise<RunDetail> {
-//!   return call<RunDetail>("GET", `/api/tasks/${enc(id)}/runs/${enc(number)}`);
-//! }
-//! ```
-//!
-//! Path params come first, in TEMPLATE order (a tuple payload by position, a
-//! struct payload by field name, a primitive as the one param), then `query`,
-//! then `body`. Nothing is joined at run time: the browser gets this file plus
-//! the transport it imports. A `Link` handler gets `<name>Url(...)` only.
+//! `client.ts` from `routes.json` + `handlers.json`, joined by fqname: one plain
+//! function per handler. Path params come first in TEMPLATE order, then `query`,
+//! then `body`; a `Link` handler gets `<name>Url(...)` only. Nothing is joined at
+//! run time — the browser gets this file plus the transport it imports.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -43,11 +33,8 @@ pub enum Error {
     NameClash(String, String, String),
 }
 
-/// What the generator can be told.
 pub struct Options {
-    /// The module specifier `client.ts` imports `call` from.
     pub transport: String,
-    /// The module specifier the DTO types are imported from.
     pub types: String,
     /// Which routes must have a client function. A route this rejects is
     /// left out silently; a route it accepts without a descriptor is an error.
@@ -80,8 +67,6 @@ impl Options {
         self
     }
 
-    /// Reads the two tables, writes `out_ts`, returns the number of
-    /// functions written.
     pub fn generate(
         &self,
         routes_json: &Path,
@@ -97,7 +82,6 @@ impl Options {
     }
 }
 
-/// [`Options::generate`] with the defaults.
 pub fn generate_client(
     routes_json: &Path,
     handlers_json: &Path,
@@ -106,7 +90,6 @@ pub fn generate_client(
     Options::default().generate(routes_json, handlers_json, out_ts)
 }
 
-/// `task_delete_packed` → `taskDeletePacked`.
 pub fn camel(snake: &str) -> String {
     let mut out = String::new();
     let mut upper = false;
@@ -217,7 +200,6 @@ fn plan(reg: &Registration, h: &Handler) -> Result<Fn_, Error> {
     if path_args.len() > 1 {
         return Err(shape("more than one Path extractor".into()));
     }
-    // Template params, in template order, each with its TS type.
     let mut params: Vec<(String, String)> = Vec::new();
     match path_args.first() {
         None => {
@@ -288,7 +270,6 @@ fn plan(reg: &Registration, h: &Handler) -> Result<Fn_, Error> {
     if let Some(b) = body.first() {
         params.push(("body".into(), b.ts_type.clone()));
     }
-    // The URL: the template with each `{p}` replaced by `${enc(p)}`.
     let mut is_template = false;
     let url = reg
         .path

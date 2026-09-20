@@ -598,8 +598,6 @@ async fn full_login_loop_and_interactive_escalation() {
         "loop breaker: no second escalation"
     );
 
-    // The escalation above superseded the first flow, so the remaining checks
-    // need one that is still live.
     let resp = app.clone().oneshot(get_req("/me", "", true)).await.unwrap();
     let flow_cookie = cookie_from(&resp, "oidc_flow").expect("flow cookie set");
     let state = state_from_location(&resp);
@@ -803,9 +801,6 @@ async fn unauthorized_response_matches_the_extractor_401() {
     );
 }
 
-/// The les-forms sso_login.sh shape, in-process: hold a live session, POST the
-/// logout, then ask for a page again. R73's route exists so the bar's button
-/// is not dead the moment a consumer bumps.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_posted_logout_ends_the_session_and_the_next_page_asks_for_login() {
     let (base, mock) = spawn_mock().await;
@@ -832,7 +827,6 @@ async fn a_posted_logout_ends_the_session_and_the_next_page_asks_for_login() {
                 .method("POST")
                 .uri("/common-oidc/logout")
                 .header(header::COOKIE, &cookie)
-                // What a real same-origin form POST sends.
                 .header("sec-fetch-site", "same-origin")
                 .body(Body::empty())
                 .unwrap(),
@@ -844,10 +838,6 @@ async fn a_posted_logout_ends_the_session_and_the_next_page_asks_for_login() {
         StatusCode::SEE_OTHER,
         "303, so the browser GETs the root rather than re-POSTing to it"
     );
-    /* R79 — straight to the IdP's end_session_endpoint, PLAIN: the user's
-    ruling is "logout should just send to authentik logout", so no
-    id_token_hint and no post_logout_redirect_uri. Authentik's page is the
-    end of the trip. */
     let sent = logout
         .headers()
         .get(header::LOCATION)
@@ -895,13 +885,9 @@ async fn a_posted_logout_ends_the_session_and_the_next_page_asks_for_login() {
         after.status()
     );
     /* Sent to the IdP to re-authenticate, not to the local login path: the
-    extractor starts a SILENT login itself. Which is the thing to understand
-    about this commit — the app session is genuinely gone, but with
-    authentik's own SSO session still alive that `prompt=none` round trip
-    SUCCEEDS and the user is logged straight back in. Ending the IdP session
-    is R73's follow-up (the client does not read `end_session_endpoint` from
-    discovery yet), and until it lands this route is correct plumbing whose
-    user-visible effect is nil. */
+    extractor starts a SILENT login itself. The app session is gone, but while
+    authentik's own SSO session is still alive that `prompt=none` round trip
+    SUCCEEDS and the user is logged straight back in. */
     let sent_to = after
         .headers()
         .get(header::LOCATION)
@@ -971,7 +957,6 @@ async fn a_cross_site_logout_is_refused_and_leaves_the_session_alive() {
         "still alive after a bare POST"
     );
 
-    // And a GET is not a route at all — a GET logout is an <img src> away.
     let as_get = app(oidc)
         .oneshot(get_req("/common-oidc/logout", &cookie, true))
         .await

@@ -4,17 +4,13 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// One `.get(path, handler)`-style registration, after nesting prefixes.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Registration {
     /// `std::any::type_name` of the handler: for a plain `async fn` its full
     /// path (`cron::web::run`), which is also what `#[client]` records.
     pub fqname: String,
-    /// Upper-case, as on the wire (`GET`).
     pub method: String,
-    /// The axum template as registered (`/api/tasks/{id}/runs/{number}`).
     pub path: String,
-    /// The `{name}` segments of `path`, in order (`{*rest}` is `rest`).
     pub path_params: Vec<String>,
 }
 
@@ -32,8 +28,6 @@ pub fn parse_path_params(path: &str) -> Vec<String> {
         .collect()
 }
 
-/// Sorted by path then method, pretty-printed, so the file diffs like the
-/// ts-rs bindings do.
 pub fn write_manifest(regs: &[Registration], path: &Path) -> std::io::Result<()> {
     let mut sorted: Vec<&Registration> = regs.iter().collect();
     sorted.sort_by(|a, b| (&a.path, &a.method).cmp(&(&b.path, &b.method)));

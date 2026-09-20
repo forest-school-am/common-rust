@@ -1,10 +1,8 @@
-//! What a page is told about its world: the block a service serialises into
-//! its shell, read by page code on its first line and by the shim (`SHIM_JS`)
-//! for `loginPath`. The paths come off the [`OidcConfig`] the router was
-//! mounted with, so a page cannot carry a literal that drifts from a route.
-//!
-//! The serialised KEY NAMES are a contract with the readers in common-ui; the
-//! test below spells them out so a rename here is loud.
+//! What a page is told about its world: the block a service serialises into its
+//! shell, read by page code and by the shim (`SHIM_JS`) for `loginPath`. The
+//! paths come off the [`OidcConfig`] the router was mounted with, so a page
+//! cannot carry a literal that drifts from a route. The serialised KEY NAMES are
+//! a contract with the readers in common-ui — the test below spells them out.
 
 use serde::Serialize;
 
@@ -94,9 +92,6 @@ mod tests {
         )
     }
 
-    /// The names page code and the shim read, spelled out rather than derived
-    /// from the struct: a rename here is silent on this side and breaks the
-    /// reader on the other.
     #[test]
     fn the_serialised_keys_are_the_ones_page_code_reads() {
         let json = serde_json::to_value(PageConfig::new(

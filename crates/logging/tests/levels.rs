@@ -47,7 +47,6 @@ impl<'a> MakeWriter<'a> for Buf {
     }
 }
 
-/// Runs `emit` under a trace-level JSON subscriber and returns the lines.
 fn capture(emit: impl FnOnce()) -> Vec<serde_json::Value> {
     let buf = Buf::new();
     let subscriber = tracing_subscriber::registry()
@@ -62,9 +61,6 @@ fn capture(emit: impl FnOnce()) -> Vec<serde_json::Value> {
     buf.lines()
 }
 
-/// A repo's own tag vocabulary, the way a consumer would declare it: a strum
-/// enum plus the three-line `String` conversion that puts it on the custom
-/// path.
 #[derive(Debug, Clone, Copy, strum::Display)]
 enum Tag {
     #[strum(serialize = "scheduler")]
@@ -255,8 +251,6 @@ fn the_target_is_the_callers_module_not_the_level_module() {
     );
 }
 
-/// One release of grace for the comma form; it must still emit, and from a
-/// consumer it must warn (the `#[allow]` here is that warning, silenced).
 #[test]
 #[allow(deprecated)]
 fn the_deprecated_aliases_still_emit_from_a_consumer() {

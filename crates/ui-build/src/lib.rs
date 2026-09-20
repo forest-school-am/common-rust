@@ -1,38 +1,12 @@
-//! Build-script helper for common-ui consumers (R117, crate-carried delivery).
-//!
-//! Since R117 there is no Garage fetch, no manifest and no prefix pin: the core
-//! assets are carried in [`common_ui_core`] and the palettes + loader in
-//! [`common_theme`], both as committed consts. This crate is the thin
-//! build-time glue a consumer's `build.rs` calls:
-//!
-//! - [`stamp`] fills the shell's `[[build markers]]` (via `upon`), leaving the
-//!   `{{runtime markers}}` for `common_templating`'s per-request render.
-//! - [`shared_markers`] returns the build markers that are a pure function of
-//!   the shipped assets and identical in every consumer: the version-derived
-//!   `prefix` and the four SRI strings each page links. The SRIs come straight
-//!   from the crates, so a hash is never hand-copied.
-//! - [`write_dts`] writes [`common_ui_core::COMMON_UI_DTS`] to `OUT_DIR` for
-//!   the consumer's typecheck; the consumer keeps no vendored copy.
-//! - [`csp`] returns the policy the pages require ([`common_ui_core::CSP`]).
-//!
-//! A consumer serves the assets themselves — `common_ui_core::{BASE_CSS,
-//! ELEMENTS_CSS, COMMON_UI_JS}`, `common_theme::{PALETTES, LOADER_JS}` — at
-//! `/assets/...` through `common_routing`'s static-file mechanism.
-//!
-//! # The marker styles
-//!
-//! The shell carries TWO marker styles. BUILD markers are `[[name]]`, filled
-//! here by [`stamp`] through `upon`, which ERRORS on any `[[marker]]` left
-//! unfilled — a forgotten or misspelled build marker is a build-time failure,
-//! not a raw marker on the page. RUNTIME markers are `{{name}}`
-//! (`assets_origin`, `config`); [`stamp`] leaves them for the app's boot,
-//! which renders the stamped shell through `common_templating::Shell` and
-//! refuses any `{{marker}}` left unfilled, naming it.
+//! Build-time glue a common-ui consumer's `build.rs` calls: [`stamp`] fills the
+//! shell's `[[build markers]]`, [`shared_markers`] returns the marker values that
+//! come straight from the crates, [`write_dts`] emits the d.ts, [`csp`] returns the
+//! policy. The assets themselves the consumer serves from [`common_ui_core`] /
+//! [`common_theme`] — no Garage fetch, no manifest, no prefix pin.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The name the d.ts is written under in `OUT_DIR`.
 pub const TYPES: &str = "common-ui.d.ts";
 
 /// The Content-Security-Policy the shell's pages require, `{{assets_origin}}`
@@ -41,17 +15,10 @@ pub fn csp() -> &'static str {
     common_ui_core::CSP
 }
 
-/// The build markers that are a pure function of the shipped assets and
-/// identical in EVERY consumer: the `prefix` (the common-ui-core version, so a
-/// page's footer names which common-ui it runs) and the SRI of the four
-/// sheets/script each page links. A `build.rs` extends its app-specific marker
-/// list with this. Every SRI is read from the crate the bytes ship in, so a
-/// hash is never hand-copied and cannot drift from the served file.
 pub fn shared_markers() -> Vec<(&'static str, String)> {
     vec![
         ("prefix", format!("common-ui {}", common_ui_core::VERSION)),
         ("sri_base_css", common_ui_core::SRI_BASE_CSS.to_owned()),
-        // The default palette lives in common-theme, so its SRI does too.
         (
             "sri_palette_css",
             common_theme::SRI_DEFAULT_PALETTE.to_owned(),
@@ -67,18 +34,12 @@ pub fn shared_markers() -> Vec<(&'static str, String)> {
     ]
 }
 
-/// Writes [`common_ui_core::COMMON_UI_DTS`] into `out_dir` as [`TYPES`] for the
-/// consumer's typecheck to point its tsconfig `paths` at. Returns the path.
 pub fn write_dts(out_dir: &Path) -> std::io::Result<PathBuf> {
     let path = out_dir.join(TYPES);
     std::fs::write(&path, common_ui_core::COMMON_UI_DTS)?;
     Ok(path)
 }
 
-/// Fills the shell's `[[marker]]` BUILD markers from `values`, leaving every
-/// `{{marker}}` RUNTIME marker (`assets_origin`, `config`) for
-/// common-templating's per-request render.
-///
 /// The engine is `upon` with `[[ ]]` expression delimiters and no escaping:
 /// the values are the consumer's own constants and the SRIs the crates carry,
 /// so they reach the page verbatim. `{{ }}` is not this engine's delimiter, so
@@ -128,7 +89,6 @@ mod tests {
                 "sri_common_ui_js",
             ]
         );
-        // The SRIs are the crates' own, not hand-copied.
         let by = |k: &str| {
             markers
                 .iter()
@@ -152,8 +112,6 @@ mod tests {
 
     #[test]
     fn stamp_stamps_the_real_shell_leaving_only_runtime_markers() {
-        // Every [[build marker]] the real shell carries must be fillable, and
-        // the {{runtime markers}} must survive — the two-engine contract.
         let mut values: Vec<(&str, String)> = shared_markers();
         for (k, v) in [
             ("title", "T"),

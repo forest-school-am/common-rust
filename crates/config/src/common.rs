@@ -135,8 +135,6 @@ mod tests {
         }
     }
 
-    /// The derived field and the legacy `parse` must refuse in the same words,
-    /// because consumers' tests pin the text and do not care which path ran.
     #[test]
     fn the_derived_accepted_texts_are_the_shared_constants() {
         let r = refused("DEPLOYMENT_TYPE", "staging");

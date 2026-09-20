@@ -30,8 +30,7 @@ mod web;
 /// carried in the binary: it cannot drift from the crate that serves it.
 pub const SHIM_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/common-oidc.js"));
 
-/// The shim's TYPE surface (R117), carried in the binary beside [`SHIM_JS`]:
-/// `call<T>`, `CallFailure` and `installReauthGuard`, declared for tsc. This is
+/// The shim's TYPE surface, carried in the binary beside [`SHIM_JS`]. This is
 /// the SINGLE source — consumers write it to their OUT_DIR for the typecheck
 /// and keep no vendored copy, so the types cannot drift from the shim.
 pub const SHIM_DTS: &str = include_str!("common-oidc.public.d.ts");

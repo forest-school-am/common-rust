@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common_config::{Common, Config, Deployment, Format, Outcome, Path, Refusal, Root};
 
-/// A consumer's own strum enum, to show any `FromStr` type is a leaf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
 enum Class {
     #[strum(serialize = "prod")]
@@ -134,8 +133,6 @@ fn config_arg(path: &std::path::Path) -> String {
     format!("--config={}", path.display())
 }
 
-// ---- precedence, one field through all four layers ----
-
 #[test]
 fn precedence_default_when_nothing_sets_it() {
     assert_eq!(ok(&["--name=x"], &[]).count, 1);
@@ -179,8 +176,6 @@ fn later_arg_wins_over_earlier_arg() {
     assert_eq!(ok(&["--name=x", "--count=5", "--count=6"], &[]).count, 6);
 }
 
-// ---- nesting, three deep ----
-
 #[test]
 fn nested_three_deep_from_file_tables() {
     let f = file("[mid.deep]\nlevel = 3\n");
@@ -209,8 +204,6 @@ fn nested_defaults_apply_without_any_source() {
     let top = ok(&["--name=x"], &[]);
     assert_eq!((top.mid.size, top.mid.deep.level), (10, 7));
 }
-
-// ---- every generated spelling ----
 
 #[test]
 fn schema_spells_every_field_three_ways() {
@@ -263,8 +256,6 @@ fn schema_help_comes_from_doc_comments() {
     assert_eq!(level.help, "Level.");
 }
 
-// ---- legacy overrides ----
-
 #[test]
 fn legacy_env_override_reads_the_bare_name() {
     let top = ok(&["--name=x"], &[("LEGACY_MODE", "fast")]);
@@ -286,8 +277,6 @@ fn legacy_flag_override_replaces_the_generated_flag() {
     let refusal = err(&["--name=x", "--mode-x=slow"], &[]);
     assert!(refusal.detail.unwrap().contains("--mode-x"));
 }
-
-// ---- unknown keys and flags ----
 
 #[test]
 fn unknown_toml_key_refuses_naming_it() {
@@ -340,8 +329,6 @@ fn flag_value_may_not_look_like_a_flag() {
     assert_eq!(refusal.variable, "--name");
 }
 
-// ---- secrets ----
-
 #[test]
 fn secret_is_masked_in_print_config() {
     let out = text(&["--name=x", "--token=hunter2", "--print-config"], &[]);
@@ -362,8 +349,6 @@ fn secret_is_masked_in_a_wrong_type_refusal() {
     assert_eq!(refusal.variable, "--pin");
     assert_eq!(refusal.value, "****");
 }
-
-// ---- bool forms ----
 
 #[test]
 fn bool_accepts_true_forms() {
@@ -415,8 +400,6 @@ fn option_bool_is_none_until_set() {
     assert_eq!(ok(&["--name=x", "--maybe=0"], &[]).maybe, Some(false));
 }
 
-// ---- wrong-typed values name their source ----
-
 #[test]
 fn wrong_type_from_arg_names_flag_text_and_error() {
     let refusal = err(&["--name=x", "--count=abc"], &[]);
@@ -455,8 +438,6 @@ fn strum_enum_parses_and_refuses_with_declared_accepted() {
     assert_eq!(refusal.accepted, "prod or dev");
     assert_eq!(refusal.value, "staging");
 }
-
-// ---- the shared section ----
 
 #[test]
 fn common_loads_under_its_legacy_env_names_and_the_root_exposes_it() {
@@ -504,8 +485,6 @@ fn a_bad_deployment_type_refuses_in_the_legacy_words() {
     );
 }
 
-// ---- missing required ----
-
 #[test]
 fn missing_required_names_all_three_spellings() {
     let refusal = err(&[], &[]);
@@ -547,8 +526,6 @@ fn optional_field_is_none_until_set() {
         Some("hi")
     );
 }
-
-// ---- help and print-config ----
 
 #[test]
 fn help_lists_every_field_grouped_by_table() {
@@ -601,8 +578,6 @@ fn print_config_does_not_require_the_required_fields() {
     assert!(out.contains("<unset>"));
     assert!(out.contains("required"));
 }
-
-// ---- the config file itself ----
 
 #[test]
 fn config_path_comes_from_app_config_env() {
