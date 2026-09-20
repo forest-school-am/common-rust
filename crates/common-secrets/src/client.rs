@@ -1,7 +1,11 @@
 //! The login->jwt-login->read chain and the vault-token cache. This owns the
 //! HTTP contract with authentik and OpenBao; the redacting value types live in
 //! `secret`, config resolution in `config`, the error taxonomy in `error`.
+//! `fetch` reads a single field; the `*_doc` methods read, replace, and delete a
+//! whole kv-v2 document at a logical path, all through the one re-auth path.
 
+use std::collections::BTreeMap;
+use std::future::Future;
 use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
@@ -87,11 +91,53 @@ impl SecretClient {
     }
 
     pub async fn fetch(&self, service: &str, key: &str) -> Result<Secret, Error> {
+        let path = format!("services/{service}/{key}");
+        self.with_reauth(move |token| {
+            let path = path.clone();
+            async move { extract(&self.get(&token, &path).await?, key) }
+        })
+        .await
+    }
+
+    /// Read every field of the kv-v2 document at `path` (a logical path under the
+    /// kv mount, e.g. `tasks/<slug>`; a leading `/` is trimmed). A missing
+    /// document is `Error::NotFound`, not an empty map — the caller distinguishes
+    /// "no secrets set" from "set but empty" by catching NotFound.
+    pub async fn read_doc(&self, path: &str) -> Result<BTreeMap<String, Secret>, Error> {
+        self.with_reauth(move |token| async move {
+            collect(&self.get(&token, path).await?)
+        })
+        .await
+    }
+
+    /// Replace the kv-v2 document at `path` with exactly `data` (kv-v2 write
+    /// semantics: fields absent from `data` are gone after this). Values are the
+    /// plaintext to store; they are never logged or Displayed.
+    pub async fn write_doc(&self, path: &str, data: &BTreeMap<String, String>) -> Result<(), Error> {
+        self.with_reauth(move |token| async move { self.put(&token, path, data).await })
+            .await
+    }
+
+    /// Delete every version of the document at `path`. A 404 is success, so a
+    /// delete of an already-absent document is a no-op.
+    pub async fn delete_doc(&self, path: &str) -> Result<(), Error> {
+        self.with_reauth(move |token| async move { self.remove(&token, path).await })
+            .await
+    }
+
+    // The shared token->attempt->re-auth-on-401->retry-once wrapper every kv
+    // data-plane op runs through: `op` is handed a vault token and re-run once
+    // with a fresh one if the first attempt is rejected at the read stage.
+    async fn with_reauth<F, Fut, T>(&self, op: F) -> Result<T, Error>
+    where
+        F: Fn(String) -> Fut,
+        Fut: Future<Output = Result<T, Error>>,
+    {
         let token = self.cached_token().await?;
-        match self.read(&token, service, key).await {
+        match op(token).await {
             Err(Error::AuthRejected(Stage::VaultRead)) => {
                 let token = self.reauthenticate().await?;
-                self.read(&token, service, key).await
+                op(token).await
             }
             result => result,
         }
@@ -193,8 +239,12 @@ impl SecretClient {
         }
     }
 
-    async fn read(&self, token: &str, service: &str, key: &str) -> Result<Secret, Error> {
-        let url = read_url(&self.config.bao_addr, service, key);
+    async fn get(
+        &self,
+        token: &str,
+        path: &str,
+    ) -> Result<serde_json::Map<String, serde_json::Value>, Error> {
+        let url = data_url(&self.config.bao_addr, path);
         let resp = self
             .http
             .get(&url)
@@ -211,7 +261,7 @@ impl SecretClient {
                 stage: Stage::VaultRead,
                 detail: format!("invalid kv payload: {e}"),
             })?;
-            extract(body, key)
+            Ok(body.data.data)
         } else if status == StatusCode::NOT_FOUND {
             Err(Error::NotFound)
         } else if AUTH_REJECT.contains(&status) {
@@ -220,6 +270,63 @@ impl SecretClient {
             Err(Error::Upstream {
                 stage: Stage::VaultRead,
                 detail: format!("kv read returned {status}"),
+            })
+        }
+    }
+
+    async fn put(
+        &self,
+        token: &str,
+        path: &str,
+        data: &BTreeMap<String, String>,
+    ) -> Result<(), Error> {
+        let url = data_url(&self.config.bao_addr, path);
+        let body = serde_json::json!({ "data": data });
+        let resp = self
+            .http
+            .post(&url)
+            .header("X-Vault-Token", token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| Error::Network {
+                stage: Stage::VaultRead,
+                detail: e.to_string(),
+            })?;
+        let status = resp.status();
+        if status.is_success() {
+            Ok(())
+        } else if AUTH_REJECT.contains(&status) {
+            Err(Error::AuthRejected(Stage::VaultRead))
+        } else {
+            Err(Error::Upstream {
+                stage: Stage::VaultRead,
+                detail: format!("kv write returned {status}"),
+            })
+        }
+    }
+
+    async fn remove(&self, token: &str, path: &str) -> Result<(), Error> {
+        let url = metadata_url(&self.config.bao_addr, path);
+        let resp = self
+            .http
+            .delete(&url)
+            .header("X-Vault-Token", token)
+            .send()
+            .await
+            .map_err(|e| Error::Network {
+                stage: Stage::VaultRead,
+                detail: e.to_string(),
+            })?;
+        let status = resp.status();
+        if status.is_success() || status == StatusCode::NOT_FOUND {
+            Ok(())
+        } else if AUTH_REJECT.contains(&status) {
+            Err(Error::AuthRejected(Stage::VaultRead))
+        } else {
+            Err(Error::Upstream {
+                stage: Stage::VaultRead,
+                detail: format!("kv delete returned {status}"),
             })
         }
     }
@@ -244,15 +351,30 @@ pub(crate) fn login_url(bao_addr: &str) -> String {
     format!("{}/v1/auth/jwt/login", bao_addr.trim_end_matches('/'))
 }
 
-pub(crate) fn read_url(bao_addr: &str, service: &str, key: &str) -> String {
+// A logical kv path (`tasks/<slug>`, `services/<service>/<key>`) maps to the
+// kv-v2 data plane for reads and writes and the metadata plane for deletes. A
+// leading slash is caller noise and is trimmed so the path joins cleanly.
+pub(crate) fn data_url(bao_addr: &str, path: &str) -> String {
     format!(
-        "{}/v1/kv/data/services/{service}/{key}",
-        bao_addr.trim_end_matches('/')
+        "{}/v1/kv/data/{}",
+        bao_addr.trim_end_matches('/'),
+        path.trim_start_matches('/')
     )
 }
 
-fn extract(body: KvRead, key: &str) -> Result<Secret, Error> {
-    match body.data.data.get(key) {
+pub(crate) fn metadata_url(bao_addr: &str, path: &str) -> String {
+    format!(
+        "{}/v1/kv/metadata/{}",
+        bao_addr.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
+
+fn extract(
+    fields: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Secret, Error> {
+    match fields.get(key) {
         Some(serde_json::Value::String(s)) => Ok(Secret::new(s.clone())),
         Some(_) => Err(Error::Upstream {
             stage: Stage::VaultRead,
@@ -262,12 +384,32 @@ fn extract(body: KvRead, key: &str) -> Result<Secret, Error> {
     }
 }
 
+fn collect(
+    fields: &serde_json::Map<String, serde_json::Value>,
+) -> Result<BTreeMap<String, Secret>, Error> {
+    let mut out = BTreeMap::new();
+    for (name, value) in fields {
+        match value {
+            serde_json::Value::String(s) => {
+                out.insert(name.clone(), Secret::new(s.clone()));
+            }
+            _ => {
+                return Err(Error::Upstream {
+                    stage: Stage::VaultRead,
+                    detail: format!("value at {name} is not a string"),
+                })
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn login_url_and_read_url_trim_a_trailing_slash() {
+    fn login_url_trims_a_trailing_slash() {
         assert_eq!(
             login_url("http://127.0.0.1:8018"),
             "http://127.0.0.1:8018/v1/auth/jwt/login"
@@ -276,9 +418,21 @@ mod tests {
             login_url("http://127.0.0.1:8018/"),
             "http://127.0.0.1:8018/v1/auth/jwt/login"
         );
+    }
+
+    #[test]
+    fn data_and_metadata_urls_trim_addr_slash_and_path_slash() {
         assert_eq!(
-            read_url("http://127.0.0.1:8018/", "roleui", "authentik_token"),
+            data_url("http://127.0.0.1:8018/", "services/roleui/authentik_token"),
             "http://127.0.0.1:8018/v1/kv/data/services/roleui/authentik_token"
+        );
+        assert_eq!(
+            data_url("http://127.0.0.1:8018", "/tasks/connector-principals"),
+            "http://127.0.0.1:8018/v1/kv/data/tasks/connector-principals"
+        );
+        assert_eq!(
+            metadata_url("http://127.0.0.1:8018/", "/tasks/connector-principals"),
+            "http://127.0.0.1:8018/v1/kv/metadata/tasks/connector-principals"
         );
     }
 
@@ -317,7 +471,7 @@ mod tests {
             r#"{"data":{"data":{"authentik_token":"s3cr3t"},"metadata":{"version":1}}}"#,
         )
         .unwrap();
-        let secret = extract(body, "authentik_token").unwrap();
+        let secret = extract(&body.data.data, "authentik_token").unwrap();
         assert_eq!(secret.expose(), "s3cr3t");
     }
 
@@ -325,7 +479,7 @@ mod tests {
     fn extract_missing_field_is_not_found_not_empty() {
         let body: KvRead = serde_json::from_str(r#"{"data":{"data":{"other":"x"}}}"#).unwrap();
         assert!(matches!(
-            extract(body, "authentik_token"),
+            extract(&body.data.data, "authentik_token"),
             Err(Error::NotFound)
         ));
     }
@@ -335,7 +489,34 @@ mod tests {
         let body: KvRead =
             serde_json::from_str(r#"{"data":{"data":{"authentik_token":42}}}"#).unwrap();
         assert!(matches!(
-            extract(body, "authentik_token"),
+            extract(&body.data.data, "authentik_token"),
+            Err(Error::Upstream { .. })
+        ));
+    }
+
+    #[test]
+    fn collect_maps_every_field_to_a_redacting_secret() {
+        let body: KvRead = serde_json::from_str(
+            r#"{"data":{"data":{"alpha":"a","beta":"b"},"metadata":{"version":3}}}"#,
+        )
+        .unwrap();
+        let map = collect(&body.data.data).unwrap();
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get("alpha").unwrap().expose(), "a");
+        assert_eq!(map.get("beta").unwrap().expose(), "b");
+    }
+
+    #[test]
+    fn collect_of_an_empty_document_is_an_empty_map() {
+        let body: KvRead = serde_json::from_str(r#"{"data":{"data":{}}}"#).unwrap();
+        assert!(collect(&body.data.data).unwrap().is_empty());
+    }
+
+    #[test]
+    fn collect_non_string_field_is_upstream() {
+        let body: KvRead = serde_json::from_str(r#"{"data":{"data":{"alpha":7}}}"#).unwrap();
+        assert!(matches!(
+            collect(&body.data.data),
             Err(Error::Upstream { .. })
         ));
     }
