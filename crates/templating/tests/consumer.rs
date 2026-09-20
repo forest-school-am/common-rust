@@ -26,15 +26,7 @@ const PAGE: &str = "<!doctype html>\n\
 <script type=\"module\" src=\"{{ assets_origin }}/common-ui@abc123/common-ui.js\"\n\
         integrity=\"sha384-xyz\" crossorigin=\"anonymous\"></script>\n\
 <link rel=\"stylesheet\" href=\"{{ assets_origin }}/common-ui@abc123/palette.css\">\n\
-{{theme_override}}\n\
 <script type=\"application/json\" id=\"config\">{{config}}</script>\n";
-
-/// The per-request theme link a consumer builds from its cookies; the
-/// origin is already resolved by the time it reaches `render`, and it is
-/// passed RAW as the third runtime value.
-const THEME_LINK: &str = "<link rel=\"stylesheet\" \
-href=\"https://assets.dev.local/common-ui@abc123/theme-dusk/palette.css\" \
-crossorigin=\"anonymous\">";
 
 const LOGIC: &[u8] = b"export const answer = 42;\n";
 
@@ -90,7 +82,7 @@ fn app() -> Router {
         .route(
             "/",
             get(|State(app): State<Arc<App>>| async move {
-                match app.shell.render(&app.origin, &app.config, THEME_LINK) {
+                match app.shell.render(&app.origin, &app.config) {
                     Ok(html) => {
                         ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
                     }
@@ -159,10 +151,6 @@ async fn a_served_page_carries_the_csp_and_the_substituted_origin() {
     assert!(
         html.contains(r#"id="config">{"assetsOrigin":"https://assets.dev.local""#),
         "the config block must carry the same origin: {html}"
-    );
-    assert!(
-        html.contains(THEME_LINK),
-        "the raw theme link must reach the page verbatim: {html}"
     );
     assert!(
         !html.contains("{{"),

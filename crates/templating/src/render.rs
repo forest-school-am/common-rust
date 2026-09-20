@@ -1,8 +1,8 @@
-//! Stamps a compiled shell with the three values only the request knows: the
-//! asset origin, the config block and the theme-override link. Build-time
-//! values (title, page css, module, prefix, hashes) belong in a service's
-//! build.rs, not here; WHAT the config block says is the service's business,
-//! not this crate's — it takes any `Serialize` and only escapes it for its block.
+//! Stamps a compiled shell with the two values only the request knows: the
+//! asset origin and the config block. Build-time values (title, page css,
+//! module, prefix, hashes) belong in a service's build.rs, not here; WHAT the
+//! config block says is the service's business, not this crate's — it takes any
+//! `Serialize` and only escapes it for its block.
 
 use serde::Serialize;
 
@@ -10,7 +10,6 @@ use crate::{AssetsOrigin, RenderError};
 
 pub const ORIGIN_MARKER: &str = "{{assets_origin}}";
 pub const CONFIG_MARKER: &str = "{{config}}";
-pub const THEME_MARKER: &str = "{{theme_override}}";
 
 const NAME: &str = "shell";
 
@@ -35,7 +34,6 @@ fn json_for_script_block(config: &impl Serialize) -> Result<String, RenderError>
 struct Values<'a> {
     assets_origin: &'a str,
     config: &'a str,
-    theme_override: &'a str,
 }
 
 pub struct Shell {
@@ -52,21 +50,17 @@ impl Shell {
         Ok(Self { engine, template })
     }
 
-    /// `config` is JSON-escaped for its `<script>` block; `assets_origin` and
-    /// `theme_override` are emitted VERBATIM — HTML-escaping the theme `<link>`
-    /// would break the tag, so the caller must pass an already-safe value (the
-    /// service builds it from pattern-validated cookie input).
+    /// `config` is JSON-escaped for its `<script>` block; `assets_origin` is
+    /// emitted VERBATIM into the shell's markers.
     pub fn render(
         &self,
         origin: &AssetsOrigin,
         config: &impl Serialize,
-        theme_override: &str,
     ) -> Result<String, RenderError> {
         let block = json_for_script_block(config)?;
         let values = Values {
             assets_origin: origin.as_str(),
             config: &block,
-            theme_override,
         };
         self.template
             .render(&self.engine, values)
@@ -79,17 +73,12 @@ impl Shell {
 /// build that stamped it.
 ///
 /// Total by design. It panics only if the shell fails to compile or still
-/// holds a `{{name}}` other than the three runtime markers — both are defects
+/// holds a `{{name}}` other than the two runtime markers — both are defects
 /// in the build-time stamping, not conditions a request can produce. A
 /// service that wants to refuse at boot instead compiles a [`Shell`] there.
-pub fn render(
-    shell: &str,
-    origin: &AssetsOrigin,
-    config: &impl Serialize,
-    theme_override: &str,
-) -> String {
+pub fn render(shell: &str, origin: &AssetsOrigin, config: &impl Serialize) -> String {
     Shell::compile(shell)
-        .and_then(|shell| shell.render(origin, config, theme_override))
+        .and_then(|shell| shell.render(origin, config))
         .unwrap_or_else(|e| panic!("{e}"))
 }
 
@@ -127,14 +116,13 @@ mod tests {
 
     const SHELL: &str = concat!(
         "<link rel=stylesheet href=\"{{assets_origin}}/common-ui@abc/base.css\">\n",
-        "{{theme_override}}\n",
         "<script type=\"module\" src=\"{{assets_origin}}/common-ui@abc/common-ui.js\"></script>\n",
         "<script type=\"application/json\" id=\"config\">{{config}}</script>\n",
     );
 
     #[test]
     fn every_runtime_marker_is_filled_everywhere_it_appears() {
-        let html = render(SHELL, &origin(), &config("/oidc/login"), "");
+        let html = render(SHELL, &origin(), &config("/oidc/login"));
         assert_eq!(
             html.matches("https://assets.dev.local/common-ui@abc/")
                 .count(),
@@ -149,32 +137,9 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_theme_override_fills_the_slot_rather_than_leaving_it() {
-        let html = render(SHELL, &origin(), &config("/oidc/login"), "");
-        assert!(
-            !html.contains("{{theme_override}}"),
-            "the theme marker must be filled even when empty: {html}"
-        );
-    }
-
-    #[test]
-    fn a_raw_theme_link_passes_through_unescaped() {
-        let link = r#"<link rel="stylesheet" href="https://assets.dev.local/common-ui@abc/theme-dusk/palette.css" crossorigin="anonymous">"#;
-        let html = render(SHELL, &origin(), &config("/oidc/login"), link);
-        assert!(
-            html.contains(link),
-            "the theme link must reach the page verbatim, not entity-escaped: {html}"
-        );
-        assert!(
-            !html.contains("&lt;link") && !html.contains("&quot;"),
-            "no character of the link may be HTML-escaped: {html}"
-        );
-    }
-
-    #[test]
     fn a_config_value_cannot_close_the_block_it_sits_in() {
         let hostile = "</script><script>alert(1)</script>";
-        let html = render(SHELL, &origin(), &config(hostile), "");
+        let html = render(SHELL, &origin(), &config(hostile));
 
         assert!(
             !html.contains("</script><script>"),
@@ -193,7 +158,7 @@ mod tests {
 
     #[test]
     fn an_ampersand_is_escaped_so_an_entity_cannot_form() {
-        let html = render(SHELL, &origin(), &config("/login?a=1&amp;lt;b"), "");
+        let html = render(SHELL, &origin(), &config("/login?a=1&amp;lt;b"));
         assert!(
             !html.contains('&'),
             "no raw ampersand may reach the page: {html}"
@@ -204,7 +169,7 @@ mod tests {
     #[test]
     fn the_escaped_block_is_still_the_json_the_page_parses() {
         let hostile = "</script>&<>";
-        let html = render(SHELL, &origin(), &config(hostile), "");
+        let html = render(SHELL, &origin(), &config(hostile));
         let start = html.find(r#"id="config">"#).unwrap() + r#"id="config">"#.len();
         let end = html[start..].find("</script>").unwrap() + start;
 
@@ -222,7 +187,7 @@ mod tests {
         config.user = Some(Who {
             name: "</script><script>alert(1)</script>".to_owned(),
         });
-        let html = render(SHELL, &origin(), &config, "");
+        let html = render(SHELL, &origin(), &config);
 
         assert!(
             !html.contains("</script><script>"),
@@ -249,7 +214,7 @@ mod tests {
         let shell =
             Shell::compile("<title>{{title}}</title>{{config}}").expect("the grammar is fine");
         let err = shell
-            .render(&origin(), &config("/oidc/login"), "")
+            .render(&origin(), &config("/oidc/login"))
             .expect_err("a marker the build did not stamp must not reach a browser");
         assert!(
             matches!(err, RenderError::Render(..)),
@@ -276,7 +241,7 @@ mod tests {
         let unserialisable: std::collections::BTreeMap<(u8, u8), u8> =
             [((1, 2), 3)].into_iter().collect();
         let err = shell
-            .render(&origin(), &unserialisable, "")
+            .render(&origin(), &unserialisable)
             .expect_err("serde_json refuses a non-string map key");
         assert!(matches!(err, RenderError::Render(..)), "{err}");
     }

@@ -21,11 +21,10 @@
      build a Garage URL for a hashed (experimental) theme without the loader
      file itself being per-request stamped. -->
 <link rel="stylesheet" href="/assets/theme-default/palette.css" integrity="[[sri_palette_css]]" crossorigin="anonymous" data-theme-default data-assets-origin="{{assets_origin}}">
-<!-- The theme loader replaces the old server-side {{theme_override}} link. A
-     CLASSIC (non-module) script in <head> runs SYNCHRONOUSLY before first
-     paint, so it swaps the default <link> for a non-default cookie with no
-     flash for default users. Not hash-pinned: it is app-served page-adjacent
-     code, like [[page_css]] and [[page_module]]. -->
+<!-- The theme loader. A CLASSIC (non-module) script in <head> runs
+     SYNCHRONOUSLY before first paint, so it swaps the default <link> for a
+     non-default cookie with no flash for default users. Not hash-pinned: it is
+     app-served page-adjacent code, like [[page_css]] and [[page_module]]. -->
 <script src="/assets/theme-loader.js"></script>
 <link rel="stylesheet" href="/assets/elements.css" integrity="[[sri_elements_css]]" crossorigin="anonymous">
 <link rel="stylesheet" href="[[page_css]]">
