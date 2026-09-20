@@ -1,0 +1,16 @@
+[package]
+name = "common-secrets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Runtime service-secret client: authentik client-credentials JWT -> OpenBao jwt-login -> kv-v2 read, with vault-token caching and lease-aware re-auth"
+
+[dependencies]
+reqwest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util"] }
