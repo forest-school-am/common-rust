@@ -8,8 +8,9 @@ use openidconnect::core::{
     CoreRevocableToken, CoreRevocationErrorResponse, CoreTokenIntrospectionResponse, CoreTokenType,
 };
 use openidconnect::{
-    AccessToken, AdditionalClaims, AuthUrl, AuthorizationCode, Client, ClientId, CsrfToken,
-    EmptyExtraTokenFields, EndpointNotSet, EndpointSet, IdTokenFields, IssuerUrl, JsonWebKeySet,
+    AccessToken, AdditionalClaims, AuthUrl, AuthorizationCode, Client, ClientId, ClientSecret,
+    CsrfToken, EmptyExtraTokenFields, EndpointNotSet, EndpointSet, IdTokenFields, IssuerUrl,
+    JsonWebKeySet,
     Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
     RequestTokenError, Scope, StandardErrorResponse, StandardTokenResponse, TokenUrl,
     UserInfoClaims, UserInfoError, UserInfoUrl,
@@ -149,7 +150,7 @@ impl OidcClient {
         // No ID token is ever verified — identity comes from userinfo on every
         // request, so a revoked session stops working immediately rather than
         // at token expiry. The issuer and the empty jwks are structural only.
-        let core: OidcCore = Client::new(
+        let mut core: OidcCore = Client::new(
             ClientId::new(config.client_id.clone()),
             IssuerUrl::from_url(config.issuer.clone()),
             JsonWebKeySet::new(vec![]),
@@ -158,6 +159,13 @@ impl OidcClient {
         .set_token_uri(TokenUrl::from_url(token_url))
         .set_user_info_url(UserInfoUrl::from_url(userinfo_url))
         .set_redirect_uri(RedirectUrl::from_url(config.redirect_url.clone()));
+
+        // Confidential clients authenticate to the token endpoint with a secret;
+        // public clients (the default, secret None) rely on PKCE alone. Code
+        // exchange and refresh below pick this up automatically once it is set.
+        if let Some(secret) = &config.client_secret {
+            core = core.set_client_secret(ClientSecret::new(secret.clone()));
+        }
 
         Ok(Self {
             core,

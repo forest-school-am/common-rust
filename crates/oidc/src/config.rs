@@ -14,6 +14,12 @@ pub struct OidcConfig {
     pub issuer: Url,
     pub backchannel: Option<Url>,
     pub client_id: String,
+    /// A confidential client's secret, sent as client authentication on the
+    /// token endpoint. `None` (the default) is a PUBLIC client — PKCE alone,
+    /// exactly as before this field existed — so every existing consumer is
+    /// unchanged. Set it only for a provider registered `confidential`, whose
+    /// token endpoint refuses a request that carries no client authentication.
+    pub client_secret: Option<String>,
     pub redirect_url: Url,
     pub scopes: Vec<String>,
     pub login_path: String,
@@ -38,6 +44,7 @@ impl OidcConfig {
             issuer,
             backchannel: None,
             client_id: client_id.into(),
+            client_secret: None,
             redirect_url,
             scopes: ["openid", "profile", "email", "effective_groups"]
                 .map(String::from)
@@ -49,6 +56,16 @@ impl OidcConfig {
             danger_accept_invalid_certs: false,
             deployment: Deployment::Dev,
         }
+    }
+
+    /// Register this as a CONFIDENTIAL client: the secret is sent as client
+    /// authentication on the token endpoint. Leave it unset for a public
+    /// (PKCE-only) client — the stand default. A provider registered
+    /// `confidential` in authentik refuses a token request with no client
+    /// authentication, so a confidential consumer MUST set this.
+    pub fn with_client_secret(mut self, secret: impl Into<String>) -> Self {
+        self.client_secret = Some(secret.into());
+        self
     }
 
     /// UNENFORCED PRECONDITION: call this only where the deployment's
