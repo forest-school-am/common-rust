@@ -1,0 +1,25 @@
+[package]
+name = "common-names"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rename-staleness sweep for Les stand apps: a name-feed client, a #[derive(NameColumns)] target table, a sqlx column-rename applier, and a background sync runner with a cursor store"
+
+[dependencies]
+common-names-derive.workspace = true
+# Logging goes through the shared crate (§8.5): a background loop's cycle
+# failures are logged and never kill the loop.
+common-logging.workspace = true
+# The feed is one authenticated GET; rustls-tls + json only, no default openssl.
+reqwest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+# Same features the stand's sqlite services declare, so cargo unifies to one sqlx.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+tokio = { workspace = true, features = ["time", "rt"] }
+# The feed/apply surface returns anyhow::Result (task contract); the loop only
+# logs the error and retries.
+anyhow = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

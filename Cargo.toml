@@ -12,6 +12,8 @@ members = [
     "crates/routing",
     "crates/routing-macros",
     "crates/common-secrets",
+    "crates/names",
+    "crates/names-derive",
 ]
 
 [workspace.package]
@@ -30,6 +32,8 @@ common-config-derive = { path = "crates/config-derive", version = "0.3.0" }
 common-routing = { path = "crates/routing", version = "0.3.0" }
 common-routing-macros = { path = "crates/routing-macros", version = "0.3.0" }
 common-secrets = { path = "crates/common-secrets", version = "0.3.0" }
+common-names = { path = "crates/names", version = "0.3.0" }
+common-names-derive = { path = "crates/names-derive", version = "0.3.0" }
 
 # Shared by two or more members.
 serde = "1"
