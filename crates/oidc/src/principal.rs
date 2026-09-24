@@ -3,14 +3,12 @@
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct Principal {
-    pub uuid: Uuid,
     pub username: String,
     pub email: Option<String>,
-    pub effective_groups: Vec<Uuid>,
+    pub effective_groups: Vec<String>,
 }
 
 impl Principal {
@@ -20,26 +18,18 @@ impl Principal {
         email: Option<String>,
         effective_groups: &[String],
     ) -> Result<Self, String> {
-        let uuid = Uuid::parse_str(sub)
-            .map_err(|e| format!("sub is not a UUID (need sub_mode=user_uuid): {e}"))?;
-        let effective_groups = effective_groups
-            .iter()
-            .map(|g| Uuid::parse_str(g))
-            .collect::<Result<_, _>>()
-            .map_err(|e| format!("effective_groups contains a non-UUID entry: {e}"))?;
         Ok(Self {
-            uuid,
-            username: username.unwrap_or_else(|| uuid.to_string()),
+            username: username.unwrap_or_else(|| sub.to_owned()),
             email,
-            effective_groups,
+            effective_groups: effective_groups.to_vec(),
         })
     }
 
-    pub fn in_group(&self, group: &Uuid) -> bool {
-        self.effective_groups.contains(group)
+    pub fn in_group(&self, group: &str) -> bool {
+        self.effective_groups.iter().any(|g| g == group)
     }
 
-    pub fn require_group(&self, group: &Uuid) -> Result<(), GateDenied> {
+    pub fn require_group(&self, group: &str) -> Result<(), GateDenied> {
         if self.in_group(group) {
             Ok(())
         } else {
@@ -61,21 +51,20 @@ impl IntoResponse for GateDenied {
 mod tests {
     use super::*;
 
-    fn p(groups: &[Uuid]) -> Principal {
+    fn p(groups: &[&str]) -> Principal {
         Principal {
-            uuid: Uuid::new_v4(),
             username: "alice".into(),
             email: None,
-            effective_groups: groups.to_vec(),
+            effective_groups: groups.iter().map(|g| (*g).to_owned()).collect(),
         }
     }
 
     #[test]
     fn gate_passes_on_membership_and_denies_otherwise() {
-        let gate = Uuid::new_v4();
-        assert!(p(&[Uuid::new_v4(), gate]).in_group(&gate));
-        assert!(p(&[gate]).require_group(&gate).is_ok());
-        assert!(p(&[Uuid::new_v4()]).require_group(&gate).is_err());
-        assert!(p(&[]).require_group(&gate).is_err());
+        let gate = "editors";
+        assert!(p(&["viewers", gate]).in_group(gate));
+        assert!(p(&[gate]).require_group(gate).is_ok());
+        assert!(p(&["viewers"]).require_group(gate).is_err());
+        assert!(p(&[]).require_group(gate).is_err());
     }
 }

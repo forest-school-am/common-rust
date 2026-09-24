@@ -193,20 +193,23 @@ impl SecretClient {
                 detail: e.to_string(),
             })?;
         let status = resp.status();
-        if status.is_success() {
-            let body: TokenResponse = resp.json().await.map_err(|e| Error::Upstream {
-                stage: Stage::AuthentikToken,
-                detail: format!("invalid token payload: {e}"),
-            })?;
-            Ok(body.access_token)
-        } else if AUTH_REJECT.contains(&status) {
-            Err(Error::AuthRejected(Stage::AuthentikToken))
-        } else {
-            Err(Error::Upstream {
-                stage: Stage::AuthentikToken,
-                detail: format!("token endpoint returned {status}"),
-            })
+
+        if !status.is_success() {
+            return if AUTH_REJECT.contains(&status) {
+                Err(Error::AuthRejected(Stage::AuthentikToken))
+            } else {
+                Err(Error::Upstream {
+                    stage: Stage::AuthentikToken,
+                    detail: format!("token endpoint returned {status}"),
+                })
+            }
         }
+        
+        let body: TokenResponse = resp.json().await.map_err(|e| Error::Upstream {
+            stage: Stage::AuthentikToken,
+            detail: format!("invalid token payload: {e}"),
+        })?;
+        Ok(body.access_token)
     }
 
     async fn vault_login(&self, jwt: &str) -> Result<(String, u64), Error> {
@@ -223,20 +226,21 @@ impl SecretClient {
                 detail: e.to_string(),
             })?;
         let status = resp.status();
-        if status.is_success() {
-            let body: VaultLoginResponse = resp.json().await.map_err(|e| Error::Upstream {
-                stage: Stage::VaultLogin,
-                detail: format!("invalid login payload: {e}"),
-            })?;
-            Ok((body.auth.client_token, body.auth.lease_duration))
-        } else if AUTH_REJECT.contains(&status) {
-            Err(Error::AuthRejected(Stage::VaultLogin))
-        } else {
-            Err(Error::Upstream {
-                stage: Stage::VaultLogin,
-                detail: format!("jwt login returned {status}"),
-            })
+        if !status.is_success() {
+            return if AUTH_REJECT.contains(&status) {
+                Err(Error::AuthRejected(Stage::VaultLogin))
+            } else {
+                Err(Error::Upstream {
+                    stage: Stage::VaultLogin,
+                    detail: format!("jwt login returned {status}"),
+                })
+            }
         }
+        let body: VaultLoginResponse = resp.json().await.map_err(|e| Error::Upstream {
+            stage: Stage::VaultLogin,
+            detail: format!("invalid login payload: {e}"),
+        })?;
+        Ok((body.auth.client_token, body.auth.lease_duration))
     }
 
     async fn get(
@@ -256,22 +260,23 @@ impl SecretClient {
                 detail: e.to_string(),
             })?;
         let status = resp.status();
-        if status.is_success() {
-            let body: KvRead = resp.json().await.map_err(|e| Error::Upstream {
-                stage: Stage::VaultRead,
-                detail: format!("invalid kv payload: {e}"),
-            })?;
-            Ok(body.data.data)
-        } else if status == StatusCode::NOT_FOUND {
-            Err(Error::NotFound)
-        } else if AUTH_REJECT.contains(&status) {
-            Err(Error::AuthRejected(Stage::VaultRead))
-        } else {
-            Err(Error::Upstream {
-                stage: Stage::VaultRead,
-                detail: format!("kv read returned {status}"),
-            })
+        if !status.is_success() {
+            return if status == StatusCode::NOT_FOUND {
+                Err(Error::NotFound)
+            } else if AUTH_REJECT.contains(&status) {
+                Err(Error::AuthRejected(Stage::VaultRead))
+            } else {
+                Err(Error::Upstream {
+                    stage: Stage::VaultRead,
+                    detail: format!("kv read returned {status}"),
+                })
+            }
         }
+        let body: KvRead = resp.json().await.map_err(|e| Error::Upstream {
+            stage: Stage::VaultRead,
+            detail: format!("invalid kv payload: {e}"),
+        })?;
+        Ok(body.data.data)
     }
 
     async fn put(
@@ -294,16 +299,17 @@ impl SecretClient {
                 detail: e.to_string(),
             })?;
         let status = resp.status();
-        if status.is_success() {
-            Ok(())
-        } else if AUTH_REJECT.contains(&status) {
-            Err(Error::AuthRejected(Stage::VaultRead))
-        } else {
-            Err(Error::Upstream {
-                stage: Stage::VaultRead,
-                detail: format!("kv write returned {status}"),
-            })
+        if !status.is_success() {
+            return if AUTH_REJECT.contains(&status) {
+                Err(Error::AuthRejected(Stage::VaultRead))
+            } else {
+                Err(Error::Upstream {
+                    stage: Stage::VaultRead,
+                    detail: format!("kv write returned {status}"),
+                })
+            }
         }
+        Ok(())
     }
 
     async fn remove(&self, token: &str, path: &str) -> Result<(), Error> {
@@ -320,15 +326,16 @@ impl SecretClient {
             })?;
         let status = resp.status();
         if status.is_success() || status == StatusCode::NOT_FOUND {
-            Ok(())
-        } else if AUTH_REJECT.contains(&status) {
-            Err(Error::AuthRejected(Stage::VaultRead))
-        } else {
-            Err(Error::Upstream {
-                stage: Stage::VaultRead,
-                detail: format!("kv delete returned {status}"),
-            })
+            return if AUTH_REJECT.contains(&status) {
+                Err(Error::AuthRejected(Stage::VaultRead))
+            } else {
+                Err(Error::Upstream {
+                    stage: Stage::VaultRead,
+                    detail: format!("kv delete returned {status}"),
+                })
+            }
         }
+        Ok(())
     }
 }
 

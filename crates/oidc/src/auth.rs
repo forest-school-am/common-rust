@@ -14,7 +14,6 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use axum_extra::extract::cookie::CookieJar;
 use tracing::Instrument;
-use uuid::Uuid;
 
 use common_logging as log;
 
@@ -219,7 +218,6 @@ fn disabled_principal(parts: &Parts) -> Arc<Principal> {
         .and_then(|p| p.dev_stub.clone())
         .unwrap_or_else(|| {
             Arc::new(Principal {
-                uuid: Uuid::nil(),
                 username: "-".to_owned(),
                 email: None,
                 effective_groups: Vec::new(),
@@ -293,7 +291,7 @@ impl Denial {
         Self { gate: gate.into() }
     }
 
-    pub fn group(group: Option<Uuid>) -> Self {
+    pub fn group(group: Option<String>) -> Self {
         Self {
             gate: match group {
                 Some(g) => format!("{g} (effective membership)"),
@@ -308,7 +306,7 @@ pub trait Predicate<S>: 'static {
 }
 
 pub trait Group<S>: 'static {
-    fn group(state: &S) -> Option<Uuid>;
+    fn group(state: &S) -> Option<String>;
 }
 
 pub struct HasGroup<G>(PhantomData<G>);
@@ -316,8 +314,8 @@ pub struct HasGroup<G>(PhantomData<G>);
 impl<S, G: Group<S>> Predicate<S> for HasGroup<G> {
     fn check(principal: &Principal, state: &S) -> Result<(), Denial> {
         let group = G::group(state);
-        match group {
-            Some(g) if principal.in_group(&g) => Ok(()),
+        match &group {
+            Some(g) if principal.in_group(g) => Ok(()),
             _ => Err(Denial::group(group)),
         }
     }
@@ -439,12 +437,11 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
 
-    fn principal(name: &str, groups: &[Uuid]) -> Arc<Principal> {
+    fn principal(name: &str, groups: &[&str]) -> Arc<Principal> {
         Arc::new(Principal {
-            uuid: Uuid::new_v4(),
             username: name.to_owned(),
             email: None,
-            effective_groups: groups.to_vec(),
+            effective_groups: groups.iter().map(|g| (*g).to_owned()).collect(),
         })
     }
 
@@ -474,24 +471,24 @@ mod tests {
         AuthProviders::new(None, None, None)
     }
 
-    const GATE: Uuid = Uuid::from_u128(0x1111_1111_1111_4111_8111_1111_1111_1111);
-    const INDEX: Uuid = Uuid::from_u128(0x2222_2222_2222_4222_8222_2222_2222_2222);
+    const GATE: &str = "gate-group";
+    const INDEX: &str = "index-group";
 
     struct TestState {
-        gate: Option<Uuid>,
-        index: Option<Uuid>,
+        gate: Option<String>,
+        index: Option<String>,
     }
 
     struct GateGroup;
     struct IndexGroup;
     impl Group<TestState> for GateGroup {
-        fn group(s: &TestState) -> Option<Uuid> {
-            s.gate
+        fn group(s: &TestState) -> Option<String> {
+            s.gate.clone()
         }
     }
     impl Group<TestState> for IndexGroup {
-        fn group(s: &TestState) -> Option<Uuid> {
-            s.index
+        fn group(s: &TestState) -> Option<String> {
+            s.index.clone()
         }
     }
 
@@ -613,15 +610,15 @@ mod tests {
     #[tokio::test]
     async fn gated_by_passes_denies_and_bypasses_when_disabled() {
         let state = TestState {
-            gate: Some(GATE),
-            index: Some(INDEX),
+            gate: Some(GATE.into()),
+            index: Some(INDEX.into()),
         };
         let member = AuthContext::Authenticated {
             principal: principal("alice", &[GATE]),
             via: AuthVia::Session,
         };
         let outsider = AuthContext::Authenticated {
-            principal: principal("mallory", &[Uuid::new_v4()]),
+            principal: principal("mallory", &["outsider-group"]),
             via: AuthVia::Bearer,
         };
 
@@ -655,13 +652,12 @@ mod tests {
         );
     }
 
-    fn check<P: Predicate<TestState>>(groups: &[Uuid], state: &TestState) -> bool {
+    fn check<P: Predicate<TestState>>(groups: &[&str], state: &TestState) -> bool {
         P::check(
             &Principal {
-                uuid: Uuid::new_v4(),
                 username: "t".into(),
                 email: None,
-                effective_groups: groups.to_vec(),
+                effective_groups: groups.iter().map(|g| (*g).to_owned()).collect(),
             },
             state,
         )
@@ -671,8 +667,8 @@ mod tests {
     #[test]
     fn combinator_truth_table() {
         let state = TestState {
-            gate: Some(GATE),
-            index: Some(INDEX),
+            gate: Some(GATE.into()),
+            index: Some(INDEX.into()),
         };
         type G = HasGroup<GateGroup>;
         type I = HasGroup<IndexGroup>;
@@ -680,7 +676,7 @@ mod tests {
         assert!(check::<Or<G, I>>(&[GATE], &state));
         assert!(check::<Or<G, I>>(&[INDEX], &state));
         assert!(check::<Or<G, I>>(&[GATE, INDEX], &state));
-        assert!(!check::<Or<G, I>>(&[Uuid::new_v4()], &state));
+        assert!(!check::<Or<G, I>>(&["random-group"], &state));
 
         assert!(check::<And<G, I>>(&[GATE, INDEX], &state));
         assert!(!check::<And<G, I>>(&[GATE], &state));
@@ -693,12 +689,11 @@ mod tests {
     #[test]
     fn or_denial_names_both_required_groups() {
         let state = TestState {
-            gate: Some(GATE),
-            index: Some(INDEX),
+            gate: Some(GATE.into()),
+            index: Some(INDEX.into()),
         };
         let denial = <Or<HasGroup<GateGroup>, HasGroup<IndexGroup>>>::check(
             &Principal {
-                uuid: Uuid::new_v4(),
                 username: "t".into(),
                 email: None,
                 effective_groups: vec![],
@@ -706,8 +701,8 @@ mod tests {
             &state,
         )
         .expect_err("no group -> denied");
-        assert!(denial.gate.contains(&GATE.to_string()), "{}", denial.gate);
-        assert!(denial.gate.contains(&INDEX.to_string()), "{}", denial.gate);
+        assert!(denial.gate.contains(GATE), "{}", denial.gate);
+        assert!(denial.gate.contains(INDEX), "{}", denial.gate);
         assert!(denial.gate.contains(" or "), "{}", denial.gate);
     }
 

@@ -172,7 +172,7 @@ async fn oidc_state(base: &str, store: MemoryStore) -> OidcState {
 }
 
 async fn me(p: Principal) -> String {
-    format!("{}|{}|{:?}", p.username, p.uuid, p.effective_groups)
+    format!("{}|{:?}", p.username, p.effective_groups)
 }
 
 fn app(oidc: OidcState) -> Router {
@@ -271,8 +271,7 @@ async fn bearer_validator_shares_the_identity_contract() {
 
     let p = validator.validate("at-api").await.expect("valid token");
     assert_eq!(p.username, "alice");
-    assert_eq!(p.uuid.to_string(), ALICE_SUB);
-    assert!(p.in_group(&GROUP_A.parse().unwrap()));
+    assert!(p.in_group(GROUP_A));
 
     match validator.validate("nope").await {
         Err(ValidationError::Rejected) => {}
