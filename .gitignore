@@ -2,3 +2,4 @@
 .emacs
 /REVIEW.*.md
 /REBUTAL.*.md
+/crates/routing/bindings/
