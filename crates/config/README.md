@@ -9,10 +9,10 @@ apart. R114 item 9.
 - Members of the `common-rust` workspace: `crates/config` (this crate) and
   `crates/config-derive` (the proc macro, re-exported as
   `common_config::Config`).
-- Depends on NOTHING else in the workspace. `Refusal`, `Deployment`, the log
-  `Format` and the shared `Common` section live here; `common-logging` depends
-  on this crate, re-exports the first three under their old paths, and owns
-  the one call a binary makes: `common_logging::boot::<T>()`.
+- Depends on NOTHING else in the workspace. `Refusal` and `Deployment` live
+  here; `common-logging` depends on this crate, re-exports both under their
+  old paths, owns the `Log` section, and owns the one call a binary makes:
+  `common_logging::boot::<T>()`.
 
 ## Design
 
@@ -22,18 +22,20 @@ other source); `#[config(required)]`; `Option<T>` fields are optional; a `bool`
 defaults to `false`; `#[config(secret)]` masks the value in `--print-config`
 and in a wrong-type refusal; `#[config(nested)]` for a field whose type also
 derives `Config`; `#[config(env = "NAME")]` / `#[config(flag = "name")]`
-replace ONE generated spelling with a legacy bare name; `#[config(accepted =
-"…")]` names the accepted values in a refusal (for strum enums and anything
-whose `FromStr` error is not self-explanatory). The root carries
-`#[config(app = "CRON", bin = "cron")]` — env prefix and help title — and a
-`#[config(nested)] common: Common` field, required by name: it is the section
-`common_logging::boot` initialises logging from.
+replace ONE generated spelling with a bare name shared across the fleet
+(`DEPLOYMENT_TYPE`, `ASSETS_ORIGIN`); `#[config(accepted = "…")]` names the
+accepted values in a refusal (for strum enums and anything whose `FromStr`
+error is not self-explanatory). The root carries `#[config(app = "CRON", bin =
+"cron")]` — env prefix and help title — plus two fields the derive reads by
+NAME:
 
-**The shared section.** `common_config::Common { deployment: Deployment,
-log_format: Format, log_designators: Option<String> }` is nested as `[common]`
-in every binary; its env spellings are the legacy bare names `DEPLOYMENT_TYPE`,
-`LOG_FORMAT`, `LOG_DESIGNATORS`, so nothing an operator sets today changes.
-`RUST_LOG` is not a field: it is tracing's own variable and logging reads it.
+- `deployment: Deployment` — spelled `DEPLOYMENT_TYPE` / `--deployment` /
+  `deployment`, REQUIRED (there is no default class), help text and accepted
+  values supplied by this crate;
+- `#[config(nested)] log: common_logging::Log` — the section
+  `common_logging::boot` initialises logging from (`[log]`, `LOG_FORMAT`,
+  `LOG_DESIGNATORS`). `RUST_LOG` is not a field: it is tracing's own variable
+  and logging reads it.
 
 **Composition is at runtime, not in the macro.** The derive emits
 `schema(prefix) -> Vec<Field>` and `from_values(values, prefix) -> Result<Self,
@@ -51,10 +53,10 @@ root-level env name is therefore unchanged, and every spelling is unambiguous
 without the schema.
 
 **Sources, later wins per field:** defaults < TOML file (`--config PATH` or
-`<APP>_CONFIG`; optional — a missing file is fine, an unreadable or malformed
-one refuses) < environment < arguments. Each layer yields `(path, text,
-origin)`; leaves are parsed ONCE after the merge with `FromStr` (`bool` also
-takes `1/0/yes/no/on/off`; strum `EnumString` types work as-is), so every
+`<APP>_CONFIG`; a named file that cannot be read — not found included — or
+does not parse refuses) < environment < arguments. Each layer yields `(path,
+text, origin)`; leaves are parsed ONCE after the merge with `FromStr` (`bool`
+also takes `1/0/yes/no/on/off`; strum `EnumString` types work as-is), so every
 value knows its `Origin` (`Default` / `File(path)` / `Env(NAME)` /
 `Arg(--flag)`) and there is no nested-deserialize problem. Unknown TOML keys
 and unknown flags refuse, naming them. An EMPTY value is a set value
@@ -82,8 +84,9 @@ pipeline tests drive.
 
 ## The example struct
 
-`examples/cronlike.rs` (an example cannot depend on logging, so it prints the
-refusal's `Display` form; a binary uses `boot` and gets the JSON line):
+`examples/cronlike.rs` (an example cannot depend on logging, so it declares a
+stand-in `Log` and prints the refusal's `Display` form; a binary uses `boot`
+and gets the JSON line):
 
 ```rust
 #[derive(Debug, Config)]
@@ -99,8 +102,9 @@ struct Cron {
     auth: Auth,
     #[config(nested)]
     sandbox: Sandbox,
+    deployment: Deployment,
     #[config(nested)]
-    common: common_config::Common,
+    log: common_logging::Log,
 }
 
 #[derive(Debug, Config)]
@@ -143,7 +147,7 @@ fn main() {
 ## Captured outputs
 
 Captured verbatim from `cargo run --example cronlike -- …` (the binary
-invoked directly, `env -i` so only the variables shown are set), 2026-09-16.
+invoked directly, `env -i` so only the variables shown are set), 2026-09-25.
 
 ### `--help`
 
@@ -152,41 +156,41 @@ $ cronlike --help
 cron: every value has a flag, an environment variable and a TOML key.
 Later wins: defaults < config file < environment < arguments.
 
-  --config <path>                       CRON_CONFIG                                       TOML file to read; a missing file is fine, an unreadable or malformed one refuses
-  --help                                                                                  print this text and exit
-  --print-config                                                                          print every value with its origin (secrets masked) and exit
+  --config <path>                       CRON_CONFIG                                    TOML file to read; a missing, unreadable or malformed one refuses
+  --help                                                                               print this text and exit
+  --print-config                                                                       print every value with its origin (secrets masked) and exit
 
 top level
-  --data-dir <value>                    CRON_DATA_DIR                    data_dir         required
+  --data-dir <value>                    CRON_DATA_DIR                    data_dir      required
       Directory holding the SQLite database and per-run logs.
-  --bind <value>                        CRON_BIND                        bind             default 0.0.0.0:8080
+  --bind <value>                        CRON_BIND                        bind          default 0.0.0.0:8080
       Socket address the HTTP server listens on.
+  --deployment <value>                  DEPLOYMENT_TYPE                  deployment    required
+      Deployment class: prod or dev. Sets the default log verbosity; which options are prod-required or dev-only is the binary's own rule.
 
 [auth]
-  --auth--group-uuid <value>            CRON_AUTH__GROUP_UUID            group_uuid       required, secret
+  --auth--group-uuid <value>            CRON_AUTH__GROUP_UUID            group_uuid    required, secret
       UUID of the authentik group whose members may edit tasks.
-  --auth--no-auth                       CRON_AUTH__NO_AUTH               no_auth          default false
+  --auth--no-auth                       CRON_AUTH__NO_AUTH               no_auth       default false
       Serve without authentication (dev only).
 
 [sandbox]
-  --sandbox--timeout-secs <value>       CRON_SANDBOX__TIMEOUT_SECS       timeout_secs     default 3600
+  --sandbox--timeout-secs <value>       CRON_SANDBOX__TIMEOUT_SECS       timeout_secs  default 3600
       Wall-clock limit for one task run, in seconds.
-  --sandbox--budget-mb <value>          CRON_SANDBOX__BUDGET_MB          budget_mb        default 100
+  --sandbox--budget-mb <value>          CRON_SANDBOX__BUDGET_MB          budget_mb     default 100
       Disk budget for one task's working directory, in MiB.
 
 [sandbox.limits]
-  --sandbox--limits--cpu-secs <value>   CRON_SANDBOX__LIMITS__CPU_SECS   cpu_secs         default 600
+  --sandbox--limits--cpu-secs <value>   CRON_SANDBOX__LIMITS__CPU_SECS   cpu_secs      default 600
       CPU seconds one run may consume.
-  --sandbox--limits--memory-mb <value>  CRON_SANDBOX__LIMITS__MEMORY_MB  memory_mb        default 512
+  --sandbox--limits--memory-mb <value>  CRON_SANDBOX__LIMITS__MEMORY_MB  memory_mb     default 512
       Resident memory one run may hold, in MiB.
 
-[common]
-  --common--deployment <value>          DEPLOYMENT_TYPE                  deployment       default dev
-      Deployment class: prod or dev. Sets the default log verbosity; which options are prod-required or dev-only is the binary's own rule.
-  --common--log-format <value>          LOG_FORMAT                       log_format       default json
+[log]
+  --log--format <value>                 LOG_FORMAT                       format        default json
       Log line format: json (one object per line) or human.
-  --common--log-designators <value>     LOG_DESIGNATORS                  log_designators  optional
-      Per-designator level filter such as "auth=debug,c-scheduler=info"; unset passes every designator. ANDed with RUST_LOG.
+  --log--designators <value>            LOG_DESIGNATORS                  designators   optional
+      Per-designator level filter such as "auth=debug"; unset passes every designator.
 [exit 0]
 ```
 
@@ -203,7 +207,7 @@ memory_mb = 1024
 ```
 
 ```
-$ CRON_AUTH__GROUP_UUID=3f2b0c1e-9d1a-4f5e-8f41-2c1a9b0e7d55 cronlike --config cron.toml --data-dir=/srv/cron --print-config
+$ DEPLOYMENT_TYPE=dev CRON_AUTH__GROUP_UUID=3f2b0c1e-9d1a-4f5e-8f41-2c1a9b0e7d55 cronlike --config cron.toml --data-dir=/srv/cron --print-config
 config file: cron.toml
 data_dir                 = /srv/cron     arg --data-dir
 bind                     = 0.0.0.0:8080  default
@@ -213,25 +217,33 @@ sandbox.timeout_secs     = 60            file cron.toml
 sandbox.budget_mb        = 100           default
 sandbox.limits.cpu_secs  = 600           default
 sandbox.limits.memory_mb = 1024          file cron.toml
-common.deployment        = dev           default
-common.log_format        = json          default
-common.log_designators   = <unset>       optional
+deployment               = dev           env DEPLOYMENT_TYPE
+log.format               = json          default
+log.designators          = <unset>       optional
 [exit 0]
 ```
 
 ### Refusals (the example's `Display` form)
 
 ```
-$ cronlike --data-dir=/srv/cron
+$ DEPLOYMENT_TYPE=dev cronlike --data-dir=/srv/cron
 CRON_AUTH__GROUP_UUID="unset" is not valid — expected a value: CRON_AUTH__GROUP_UUID in the environment, --auth--group-uuid on the command line, or `group_uuid = …` under [auth] in the config file (required and unset)
 [exit 1]
 
-$ CRON_AUTH__GROUP_UUID=… cronlike --data-dir=/srv/cron --sandbox--timeout-secs=abc
+$ DEPLOYMENT_TYPE=dev CRON_AUTH__GROUP_UUID=… cronlike --data-dir=/srv/cron --sandbox--timeout-secs=abc
 --sandbox--timeout-secs="abc" is not valid — expected a u64 (set by arg --sandbox--timeout-secs: invalid digit found in string)
 [exit 1]
 
-$ CRON_AUTH__GROUP_UUID=… DEPLOYMENT_TYPE=staging cronlike --data-dir=/srv/cron
-DEPLOYMENT_TYPE="staging" is not valid — expected one of ["prod", "dev"] (unset means dev) (set by env DEPLOYMENT_TYPE: Matching variant not found)
+$ DEPLOYMENT_TYPE=staging CRON_AUTH__GROUP_UUID=… cronlike --data-dir=/srv/cron
+DEPLOYMENT_TYPE="staging" is not valid — expected one of ["prod", "dev"] (set by env DEPLOYMENT_TYPE: Matching variant not found)
+[exit 1]
+
+$ CRON_AUTH__GROUP_UUID=… cronlike --data-dir=/srv/cron
+DEPLOYMENT_TYPE="unset" is not valid — expected a value: DEPLOYMENT_TYPE in the environment, --deployment on the command line, or `deployment = …` at the top level of the config file (required and unset)
+[exit 1]
+
+$ DEPLOYMENT_TYPE=dev CRON_AUTH__GROUP_UUID=… cronlike --data-dir=/srv/cron --config=/nonexistent.toml
+--config="/nonexistent.toml" is not valid — expected the path of a readable TOML file (cannot read: No such file or directory (os error 2))
 [exit 1]
 ```
 

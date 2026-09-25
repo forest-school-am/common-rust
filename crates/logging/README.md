@@ -37,8 +37,9 @@ to the published crate and rewrites your lockfile to say so. Run
 One call at the top of `main`. `boot` loads the binary's `#[derive(Config)]`
 tree through common-config (defaults < file < env < args), refuses any config
 fault as the `startup` line below, brings the subscriber up from the tree's
-`common` section (`DEPLOYMENT_TYPE`, `LOG_FORMAT`, `LOG_DESIGNATORS`, plus
-`RUST_LOG` from the environment) and returns the config:
+`deployment: Deployment` field and its `#[config(nested)] log: Log` section
+(`DEPLOYMENT_TYPE`, `LOG_FORMAT`, `LOG_DESIGNATORS`, plus `RUST_LOG` from
+the environment) and returns the config:
 
 ```rust
 fn main() {
@@ -48,8 +49,9 @@ fn main() {
 ```
 
 `init()` is the environment-only form for a binary that has not moved to
-common-config yet (reads the four variables itself). `Refusal`, `Deployment`
-and `Format` are `common_config`'s, re-exported here under their old paths.
+common-config yet (reads the four variables itself; `DEPLOYMENT_TYPE` is
+required there too). `Refusal` and `Deployment` are `common_config`'s,
+re-exported here under their old paths; `Log` and `Format` are this crate's.
 
 Emit through `log::<level>::<designator>!` — the level is the module, the
 **designator** (§8.3) is the macro, and it becomes the event's `designator`
@@ -203,7 +205,7 @@ refusal with no special case:
 | `target` | the module that raised it |
 
 A service that wants to handle the refusal itself rather than exit calls
-`LogConfig::from_common(&common, rust_log)` / `LogConfig::from_env()` (or
+`LogConfig::from_log(&log, deployment, rust_log)` / `LogConfig::from_env()` (or
 `Format`/`Deployment::parse`, or `Designators::parse`) and gets a [`Refusal`]
 as the `Err`: the same parts as fields, and `Display` renders them as one
 sentence.

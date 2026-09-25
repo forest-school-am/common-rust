@@ -1,11 +1,10 @@
 //! Reading the optional TOML file into `(path, text)` pairs: tables are
 //! nesting levels, every leaf is a scalar, every key must be in the schema.
 //! Deciding WHICH file (`--config` / `<APP>_CONFIG`) is layers.rs; what a text
-//! means is values.rs. A not-found file is not an error here — its caller
-//! records that as `FileStatus::Missing`.
+//! means is values.rs. A named file that cannot be read, not-found included,
+//! refuses: a typo in the path must not silently mean "no file".
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
 
 use crate::args::HELP_FLAG;
 use crate::path::Path;
@@ -16,18 +15,12 @@ pub(crate) fn read(
     fields: &[Field],
     source: &str,
     file: &std::path::Path,
-) -> Result<Option<Vec<(Path, String)>>, Refusal> {
+) -> Result<Vec<(Path, String)>, Refusal> {
     let shown = file.display().to_string();
-    let text = match std::fs::read_to_string(file) {
-        Ok(text) => text,
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(e) => {
-            return Err(
-                Refusal::new(source, shown, "the path of a readable TOML file")
-                    .with_detail(format!("cannot read: {e}")),
-            )
-        }
-    };
+    let text = std::fs::read_to_string(file).map_err(|e| {
+        Refusal::new(source, shown.clone(), "the path of a readable TOML file")
+            .with_detail(format!("cannot read: {e}"))
+    })?;
     let table: toml::Table = toml::from_str(&text).map_err(|e| {
         let line = e
             .span()
@@ -56,7 +49,7 @@ pub(crate) fn read(
         )
         .with_detail(format!("unknown keys: {}", found.unknown.join(", "))));
     }
-    Ok(Some(found.values))
+    Ok(found.values)
 }
 
 #[derive(Default)]

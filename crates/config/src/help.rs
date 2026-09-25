@@ -22,9 +22,7 @@ pub(crate) fn help(app: &str, bin: &str, fields: &[Field]) -> String {
             flag: format!("{CONFIG_FLAG} <path>"),
             env: config_env(app),
             key: String::new(),
-            tail:
-                "TOML file to read; a missing file is fine, an unreadable or malformed one refuses"
-                    .into(),
+            tail: "TOML file to read; a missing, unreadable or malformed one refuses".into(),
             help: "",
         },
         Row {
@@ -76,14 +74,14 @@ pub(crate) fn help(app: &str, bin: &str, fields: &[Field]) -> String {
     let key_w = all.map(|r| r.key.len()).max().unwrap_or(0);
     let line = |r: &Row| {
         let mut s = format!(
-            "  {:<flag_w$}  {:<env_w$}  {:<key_w$}  {}",
+            "  {:<flag_w$}  {:<env_w$}  {:<key_w$}  {}\n",
             r.flag, r.env, r.key, r.tail
         );
         if !r.help.is_empty() {
-            s.push_str("\n      ");
+            s.push_str("      ");
             s.push_str(r.help);
+            s.push('\n');
         }
-        s.push('\n');
         s
     };
 
@@ -94,18 +92,22 @@ pub(crate) fn help(app: &str, bin: &str, fields: &[Field]) -> String {
     for row in &builtins {
         out.push_str(&line(row));
     }
-    let mut section: Option<&str> = None;
-    for (sec, row) in &rows {
-        if section != Some(sec.as_str()) {
-            section = Some(sec);
-            out.push('\n');
-            if sec.is_empty() {
-                out.push_str("top level\n");
-            } else {
-                out.push_str(&format!("[{sec}]\n"));
-            }
+    let mut sections: Vec<&str> = Vec::new();
+    for (sec, _) in &rows {
+        if !sections.contains(&sec.as_str()) {
+            sections.push(sec);
         }
-        out.push_str(&line(row));
+    }
+    for sec in sections {
+        out.push('\n');
+        if sec.is_empty() {
+            out.push_str("top level\n");
+        } else {
+            out.push_str(&format!("[{sec}]\n"));
+        }
+        for (_, row) in rows.iter().filter(|(s, _)| s == sec) {
+            out.push_str(&line(row));
+        }
     }
     out
 }
@@ -142,7 +144,6 @@ pub(crate) fn print_config(values: &Values) -> String {
             "config file: none ({CONFIG_FLAG} or {} to set one)\n",
             config_env(values.app())
         ),
-        FileStatus::Missing(path) => format!("config file: {} (not found)\n", path.display()),
         FileStatus::Read(path) => format!("config file: {}\n", path.display()),
     };
     for (key, value, origin) in rows {

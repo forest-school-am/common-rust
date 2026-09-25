@@ -39,6 +39,7 @@ fn run(env: &[(&str, &str)]) -> (Vec<serde_json::Value>, Option<i32>) {
     ] {
         cmd.env_remove(key);
     }
+    cmd.env("DEPLOYMENT_TYPE", "dev");
     for (key, value) in env {
         cmd.env(key, value);
     }

@@ -2,14 +2,14 @@
 //! impl. How values are merged, spelled or rendered belongs in common-config —
 //! this macro never sees another struct's fields and must stay that way: a
 //! `nested` field is a CALL into the inner type's impl, not an expansion. A root
-//! (`#[config(app = …)]`) also gets `Root`, reading only this struct's `common` field.
+//! (`#[config(app = …)]`) also gets `Root`, reading only its own `deployment` and `log` fields.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;
 use quote::quote;
 use syn::{
-    parse_macro_input, Data, DeriveInput, Error, Expr, ExprLit, Fields, GenericArgument, Lit,
-    LitStr, Meta, PathArguments, Type,
+    parse_macro_input, parse_quote, Data, DeriveInput, Error, Expr, ExprLit, Fields,
+    GenericArgument, Lit, LitStr, Meta, PathArguments, Type,
 };
 
 #[proc_macro_derive(Config, attributes(config))]
@@ -65,13 +65,16 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
 
     let mut schema = Vec::new();
     let mut build = Vec::new();
-    let mut has_common = false;
+    let mut log_type: Option<Type> = None;
+    let mut has_deployment = false;
     for field in fields {
         let ident = field.ident.as_ref().expect("named field");
         let name = LitStr::new(&ident.to_string(), ident.span());
-        let attrs = field_attrs(field)?;
+        let mut attrs = field_attrs(field)?;
         if attrs.nested {
-            has_common |= ident == "common";
+            if root.app.is_some() && ident == "log" {
+                log_type = Some(field.ty.clone());
+            }
             if attrs.default.is_some()
                 || attrs.required
                 || attrs.secret
@@ -94,9 +97,29 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             continue;
         }
 
+        let is_deployment = root.app.is_some() && ident == "deployment";
+        if is_deployment {
+            has_deployment = true;
+            if attrs.default.is_some()
+                || attrs.env.is_some()
+                || attrs.flag.is_some()
+                || attrs.accepted.is_some()
+            {
+                return Err(Error::new_spanned(
+                    field,
+                    "a root's `deployment` field is spelled by common-config (DEPLOYMENT_TYPE, \
+                     required): it takes no default, env, flag or accepted",
+                ));
+            }
+            attrs.required = true;
+            attrs.env = Some(LitStr::new("DEPLOYMENT_TYPE", ident.span()));
+        }
         let shape = shape(&field.ty);
         let presence = presence(field, &shape, &attrs)?;
-        let help = doc(&field.attrs);
+        let help = match doc(&field.attrs) {
+            text if text.is_empty() && is_deployment => quote!(::common_config::DEPLOYMENT_HELP),
+            text => quote!(#text),
+        };
         let secret = attrs.secret;
         let kind = match shape {
             Shape::Bool | Shape::OptBool => quote!(::common_config::Kind::Bool),
@@ -104,7 +127,13 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
         };
         let env = option_lit(&attrs.env);
         let flag = option_lit(&attrs.flag);
-        let accepted = option_lit(&attrs.accepted);
+        let accepted = if is_deployment {
+            quote!(::core::option::Option::Some(
+                ::common_config::DEPLOYMENT_ACCEPTED
+            ))
+        } else {
+            option_lit(&attrs.accepted)
+        };
         schema.push(quote! {
             out.push(::common_config::Field {
                 path: prefix.child(#name),
@@ -127,15 +156,19 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
 
     let ident = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-    // A root's `common` field is the shared section logging boots from; its
-    // type is not inspected here (the accessor's return type checks it).
-    if root.app.is_some() && !has_common {
+    if root.app.is_some() && !has_deployment {
         return Err(Error::new_spanned(
             &input.ident,
-            "#[config(app = …)] needs a `#[config(nested)] common: common_config::Common` field: \
-             the shared section every binary initialises logging from",
+            "#[config(app = …)] needs a `deployment: common_config::Deployment` field",
         ));
     }
+    let Some(log_type) = log_type.or_else(|| root.app.is_none().then(|| parse_quote!(()))) else {
+        return Err(Error::new_spanned(
+            &input.ident,
+            "#[config(app = …)] needs a `#[config(nested)] log: …` field: the section \
+             common_logging::boot initialises logging from",
+        ));
+    };
     let root_impl = root.app.as_ref().map(|app| {
         let bin = root
             .bin
@@ -145,8 +178,12 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             impl #impl_generics ::common_config::Root for #ident #ty_generics #where_clause {
                 const APP: &'static str = #app;
                 const BIN: &'static str = #bin;
-                fn common(&self) -> &::common_config::Common {
-                    &self.common
+                type Log = #log_type;
+                fn deployment(&self) -> ::common_config::Deployment {
+                    self.deployment
+                }
+                fn log(&self) -> &#log_type {
+                    &self.log
                 }
             }
         }

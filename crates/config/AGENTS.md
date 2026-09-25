@@ -4,26 +4,24 @@
 The stand's shared configuration loader (CODESTYLE.md §4.3/§4.4, R114 item 9):
 one derived schema, three generated spellings per value (TOML key, env var,
 flag), defaults < file < env < args merged per field, one typed parse after
-the merge, refusal on anything set-but-invalid. Also the home of `Refusal`,
-`Deployment`, the log `Format` and the shared `Common` section, so that this
-crate depends on NOTHING else in the workspace and common-logging depends on
-it. Every Les binary is to boot through `common_logging::boot::<T>()`
-(cron does; registry, les-forms, role-ui are the follow-up).
+the merge, refusal on anything set-but-invalid. Also the home of `Refusal`
+and `Deployment`, so that this crate depends on NOTHING else in the workspace
+and common-logging depends on it (its `Log` section is a `#[derive(Config)]`
+struct like any consumer's). Every Les binary boots through
+`common_logging::boot::<T>()`.
 
 ## Layout
 - `crates/config-derive/src/lib.rs` — `#[derive(Config)]`: attribute grammar,
   per-field validation (compile errors), emits `schema`/`from_values` and the
-  `Root` impl (APP, BIN, `common()` off the field NAMED `common`). Sees ONE
-  struct only.
+  `Root` impl (APP, BIN, `deployment()` off the field NAMED `deployment`,
+  `log()` off the field NAMED `log`). Sees ONE struct only.
 - `src/lib.rs` — `Config`/`Root` traits, `Outcome`, `load_from` (pure) and
   `load` (argv + env; prints help / print-config and exits 0, RETURNS a
   refusal). `extern crate self as common_config` so the derive works in-crate.
 - `src/refusal.rs` — `Refusal { variable: String, value, accepted, detail }`,
   `Display`. Printing one is logging's `refuse!`.
-- `src/deployment.rs` — `Deployment` (strum), `parse`/`from_env`,
-  `DEPLOYMENT_ACCEPTED`.
-- `src/common.rs` — `Format` (strum) and `Common` (derived here: deployment /
-  log_format / log_designators under the legacy bare env names).
+- `src/deployment.rs` — `Deployment` (strum), `parse`/`from_env` (unset
+  refuses), `DEPLOYMENT_VARIABLE` / `DEPLOYMENT_ACCEPTED` / `DEPLOYMENT_HELP`.
 - `src/path.rs` — `Path` and the spelling rules (`flag`, `env`, `dotted`).
 - `src/schema.rs` — `Field`, `Presence`, `Kind`, `Origin`, `Entry`,
   `FileStatus`: data the derive registers and the merge stamps.
@@ -42,21 +40,19 @@ it. Every Les binary is to boot through `common_logging::boot::<T>()`
   map. `tests/load.rs::schema_spells_every_field_three_ways` locks it.
 - NESTING COMPOSES AT RUNTIME: a `nested` field calls the inner type's
   `schema(prefix + name)` / `from_values(values, prefix + name)`. The derive
-  must never read another struct's definition — which is why a root's shared
-  section is found by field NAME (`common`), not by type.
+  must never read another struct's definition — which is why a root's
+  `deployment` and `log` fields are found by NAME, and `Root::Log` is an
+  associated type the derive copies from the field, not a type it knows.
+- THE ROOT'S `deployment` IS SPELLED HERE: `DEPLOYMENT_TYPE`, required, the
+  shared help and `accepted` text, no attribute allowed on the field. There is
+  no default class; unset refuses like set-but-invalid.
 - ONE PARSE, AFTER THE MERGE. Every layer contributes text; `FromStr` runs
   once per leaf in `from_values`, so a value has exactly one `Origin` and a
   wrong type names the source that set it. A default is parsed like any other
   text — a bad default is a refusal at boot, not a compile-time value.
 - SET-BUT-INVALID REFUSES (§4.3): unknown TOML key, unknown flag, unparsable
-  text, malformed or unreadable file, an EMPTY value that does not parse. A
-  NOT-FOUND file is allowed (optional file); `--print-config` reports it as
-  `(not found)`.
-- THE LEGACY WORDS ARE SHARED CONSTANTS: `Deployment::parse` and the derived
-  `Common.deployment` refuse with the same `accepted` text
-  (`DEPLOYMENT_ACCEPTED`; likewise `LOG_FORMAT_ACCEPTED`), because consumers'
-  tests pin the text and must not care which path parsed it. A test in
-  common.rs holds the two together.
+  text, a named file that cannot be read (not found included) or parsed, an
+  EMPTY value that does not parse.
 - SECRETS NEVER PRINT: `--print-config` and wrong-type refusals mask a
   `secret` field's value. `help` shows the default text, so a secret must not
   carry a real default.
@@ -77,9 +73,6 @@ fixtures under `std::env::temp_dir()`; no network.
 
 ## Stand context
 Implements the REVISED answer under "lets use a cli argument parsing library"
-in the R114 review file. Done: Refusal + Deployment here, `logging::boot`,
-cron (the 3600 s timeout is `sandbox.timeout_secs`). Next: registry,
-les-forms, role-ui. Consumers declare this crate by PATH
+in the R114 review file. Consumers declare this crate by PATH
 (`../common-rust/crates/config`), like common-ui-build, until push day: a
-patched git source needs its original remote and none exists. Builds are
-serialized under R4's disk regime.
+patched git source needs its original remote and none exists.

@@ -83,6 +83,5 @@ pub struct Entry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileStatus {
     NotConfigured,
-    Missing(PathBuf),
     Read(PathBuf),
 }

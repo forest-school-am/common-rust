@@ -10,9 +10,13 @@ use crate::Refusal;
 
 pub const DEPLOYMENT_VARIABLE: &str = "DEPLOYMENT_TYPE";
 
-/// The `accepted` text of a refused `DEPLOYMENT_TYPE`, shared by the legacy
-/// `parse` and the derived `Common` field so the two spell it alike.
-pub const DEPLOYMENT_ACCEPTED: &str = r#"one of ["prod", "dev"] (unset means dev)"#;
+/// The `accepted` text of a refused `DEPLOYMENT_TYPE`, shared by `parse` and
+/// the derived root field so the two spell it alike.
+pub const DEPLOYMENT_ACCEPTED: &str = r#"one of ["prod", "dev"]"#;
+
+pub const DEPLOYMENT_HELP: &str =
+    "Deployment class: prod or dev. Sets the default log verbosity; which options are \
+     prod-required or dev-only is the binary's own rule.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, AsRefStr, Display, EnumString, VariantNames)]
 pub enum Deployment {
@@ -23,10 +27,13 @@ pub enum Deployment {
 }
 
 impl Deployment {
-    /// `None` is dev; a set-but-unknown value refuses rather than degrading.
+    /// Unset is refused like any other invalid value: there is no default class.
     pub fn parse(value: Option<&str>) -> Result<Self, Refusal> {
         let Some(text) = value else {
-            return Ok(Deployment::Dev);
+            return Err(
+                Refusal::new(DEPLOYMENT_VARIABLE, "unset", DEPLOYMENT_ACCEPTED)
+                    .with_detail("required and unset"),
+            );
         };
         Deployment::from_str(text)
             .map_err(|_| Refusal::new(DEPLOYMENT_VARIABLE, text, DEPLOYMENT_ACCEPTED))
@@ -42,10 +49,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unset_is_dev_and_the_two_valid_values_parse() {
-        assert_eq!(Deployment::parse(None).unwrap(), Deployment::Dev);
+    fn the_two_valid_values_parse() {
         assert_eq!(Deployment::parse(Some("dev")).unwrap(), Deployment::Dev);
         assert_eq!(Deployment::parse(Some("prod")).unwrap(), Deployment::Prod);
+    }
+
+    #[test]
+    fn unset_refuses_rather_than_defaulting() {
+        let r = Deployment::parse(None).expect_err("unset DEPLOYMENT_TYPE must refuse");
+        assert_eq!(r.variable, DEPLOYMENT_VARIABLE);
+        assert_eq!(r.value, "unset");
+        assert_eq!(r.accepted, DEPLOYMENT_ACCEPTED);
     }
 
     #[test]
@@ -69,7 +83,7 @@ mod tests {
         }
         assert_eq!(
             r.to_string(),
-            r#"DEPLOYMENT_TYPE="prd" is not valid — expected one of ["prod", "dev"] (unset means dev)"#
+            r#"DEPLOYMENT_TYPE="prd" is not valid — expected one of ["prod", "dev"]"#
         );
     }
 
@@ -93,7 +107,7 @@ mod tests {
     fn the_accepted_constant_is_built_from_the_variants() {
         assert_eq!(
             DEPLOYMENT_ACCEPTED,
-            format!("one of {:?} (unset means dev)", Deployment::VARIANTS)
+            format!("one of {:?}", Deployment::VARIANTS)
         );
     }
 }

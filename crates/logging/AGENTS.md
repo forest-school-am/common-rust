@@ -8,16 +8,17 @@ included. Change here ripples fleet-wide — treat the output contract as public
 
 ## Layout
 - `src/lib.rs` — public API + `boot` (common-config load → `refuse!` →
-  `init_with` from the `Common` section → returns the config), `init`
+  `init_with` from the root's `deployment` + `log` → returns the config), `init`
   (env-only, pre-migration binaries), `init_with` (builds the subscriber);
   inline format/designator tests. Re-exports `common_config::{Refusal,
-  Deployment, Format}` under their old paths — those types moved out with
-  R114 item 9 so that common-config depends on nothing in the workspace.
+  Deployment}` under their old paths — common-config depends on nothing in
+  the workspace, so the shared value types live there.
 - `src/refuse.rs` — `refuse!`, `__refusal_line!` and the exit: the refusal
   path only.
-- `src/config.rs` — `LogConfig::resolve` (pure `LOG_FORMAT`/`DEPLOYMENT_TYPE`/
-  `RUST_LOG`/`LOG_DESIGNATORS` texts → `Result<LogConfig, Refusal>`),
-  `LogConfig::from_common(&Common, rust_log)` (the typed path `boot` takes),
+- `src/config.rs` — `Log` (the `#[derive(Config)]` section every root nests:
+  `LOG_FORMAT`, `LOG_DESIGNATORS`), `Format`, `LogConfig::resolve` (pure
+  texts → `Result<LogConfig, Refusal>`),
+  `LogConfig::from_log(&Log, deployment, rust_log)` (the typed path `boot` takes),
   one refuse/default test per variable. `env_filter()` is the `RUST_LOG`
   check; `RUST_LOG` is deliberately NOT a config field.
 - `src/filter.rs` — `Designators`, the `LOG_DESIGNATORS` axis: parsing,

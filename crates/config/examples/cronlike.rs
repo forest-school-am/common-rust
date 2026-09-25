@@ -1,13 +1,13 @@
 //! A cron-shaped consumer in miniature: nesting levels, a secret, a boolean,
-//! the shared `Common` section. Run it with `--help`, `--print-config`, flags,
-//! `CRON_…` variables or `--config file.toml` to see the crate's outputs. A real
-//! binary calls `common_logging::boot` instead of `load`; this crate cannot
-//! depend on logging, so the example prints the refusal's `Display` and exits 1.
+//! the root's `deployment` and `log` fields. Run it with `--help`,
+//! `--print-config`, flags, `CRON_…` variables or `--config file.toml` to see
+//! the crate's outputs. A real binary calls `common_logging::boot` instead of
+//! `load`; this crate cannot depend on logging, so it prints the refusal.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use common_config::{Common, Config};
+use common_config::{Config, Deployment};
 
 #[derive(Debug, Config)]
 #[config(app = "CRON", bin = "cron")]
@@ -22,8 +22,9 @@ struct Cron {
     auth: Auth,
     #[config(nested)]
     sandbox: Sandbox,
+    deployment: Deployment,
     #[config(nested)]
-    common: Common,
+    log: Log,
 }
 
 #[derive(Debug, Config)]
@@ -57,6 +58,17 @@ struct Limits {
     memory_mb: u64,
 }
 
+/// Stands in for `common_logging::Log`, which this crate cannot depend on.
+#[derive(Debug, Config)]
+struct Log {
+    /// Log line format: json (one object per line) or human.
+    #[config(default = "json", env = "LOG_FORMAT")]
+    format: String,
+    /// Per-designator level filter such as "auth=debug"; unset passes every designator.
+    #[config(env = "LOG_DESIGNATORS")]
+    designators: Option<String>,
+}
+
 fn main() {
     let cron = match common_config::load::<Cron>() {
         Ok(cron) => cron,
@@ -80,9 +92,9 @@ fn main() {
         cron.sandbox.limits.memory_mb
     );
     println!(
-        "common: deployment={} log_format={} log_designators={}",
-        cron.common.deployment,
-        cron.common.log_format,
-        cron.common.log_designators.as_deref().unwrap_or("-")
+        "deployment={} log.format={} log.designators={}",
+        cron.deployment,
+        cron.log.format,
+        cron.log.designators.as_deref().unwrap_or("-")
     );
 }

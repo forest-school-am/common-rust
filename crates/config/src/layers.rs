@@ -50,21 +50,18 @@ pub(crate) fn merge(
     };
     let status = match file {
         None => FileStatus::NotConfigured,
-        Some((path, source)) => match crate::file::read(&fields, &source, &path)? {
-            None => FileStatus::Missing(path),
-            Some(values) => {
-                for (field_path, text) in values {
-                    entries.insert(
-                        field_path,
-                        Entry {
-                            text,
-                            origin: Origin::File(path.clone()),
-                        },
-                    );
-                }
-                FileStatus::Read(path)
+        Some((path, source)) => {
+            for (field_path, text) in crate::file::read(&fields, &source, &path)? {
+                entries.insert(
+                    field_path,
+                    Entry {
+                        text,
+                        origin: Origin::File(path.clone()),
+                    },
+                );
             }
-        },
+            FileStatus::Read(path)
+        }
     };
 
     for field in &fields {

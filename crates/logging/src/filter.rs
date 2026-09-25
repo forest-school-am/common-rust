@@ -11,7 +11,9 @@ use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::layer::{Context, Filter};
 
-use common_config::{Refusal, LOG_DESIGNATORS_VARIABLE};
+use common_config::Refusal;
+
+use crate::config::LOG_DESIGNATORS_VARIABLE;
 
 use crate::designator::{Designator, CUSTOM_PREFIX, FIELD, STAND};
 

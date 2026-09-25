@@ -12,6 +12,7 @@ use crate::Refusal;
 
 pub(crate) const CONFIG_FLAG: &str = "--config";
 pub(crate) const HELP_FLAG: &str = "--help";
+pub(crate) const HELP_FLAG_SHORT: &str = "-h";
 pub(crate) const PRINT_CONFIG_FLAG: &str = "--print-config";
 
 #[derive(Debug, Default)]
@@ -36,7 +37,7 @@ pub(crate) fn parse(fields: &[Field], args: &[String]) -> Result<Parsed, Refusal
             _ => (token.as_str(), None),
         };
         match name {
-            HELP_FLAG | "-h" => parsed.help = true,
+            HELP_FLAG | HELP_FLAG_SHORT => parsed.help = true,
             PRINT_CONFIG_FLAG => parsed.print_config = true,
             CONFIG_FLAG => {
                 let value = take_value(name, inline, args, &mut i)?;

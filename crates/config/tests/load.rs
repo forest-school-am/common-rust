@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use common_config::{Common, Config, Deployment, Format, Outcome, Path, Refusal, Root};
+use common_config::{Config, Deployment, Outcome, Path, Refusal, Root};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumString, strum::VariantNames)]
 enum Class {
@@ -46,8 +46,9 @@ struct Top {
     class: Class,
     #[config(nested)]
     mid: Mid,
+    deployment: Deployment,
     #[config(nested)]
-    common: Common,
+    log: Log,
 }
 
 #[derive(Debug, Config)]
@@ -66,13 +67,25 @@ struct Deep {
     level: u8,
 }
 
+/// Stands in for the logging crate's section, which this crate cannot see.
+#[derive(Debug, Config)]
+struct Log {
+    /// Format.
+    #[config(default = "json", env = "LOG_FORMAT")]
+    format: String,
+    /// Filter.
+    #[config(env = "LOG_DESIGNATORS")]
+    designators: Option<String>,
+}
+
 #[derive(Debug, Config)]
 #[config(app = "STRICT")]
 struct Strict {
     #[config(nested)]
     inner: StrictInner,
+    deployment: Deployment,
     #[config(nested)]
-    common: Common,
+    log: Log,
 }
 
 #[derive(Debug, Config)]
@@ -86,9 +99,10 @@ fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
 
+/// A dev deployment unless the test sets one itself (a later entry wins).
 fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
-    items
-        .iter()
+    std::iter::once(("DEPLOYMENT_TYPE", "dev"))
+        .chain(items.iter().copied())
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
 }
@@ -228,17 +242,9 @@ fn schema_spells_every_field_three_ways() {
             "APP_MID__DEEP__LEVEL",
             "mid.deep.level",
         ),
-        (
-            "--common--deployment",
-            "DEPLOYMENT_TYPE",
-            "common.deployment",
-        ),
-        ("--common--log-format", "LOG_FORMAT", "common.log_format"),
-        (
-            "--common--log-designators",
-            "LOG_DESIGNATORS",
-            "common.log_designators",
-        ),
+        ("--deployment", "DEPLOYMENT_TYPE", "deployment"),
+        ("--log--format", "LOG_FORMAT", "log.format"),
+        ("--log--designators", "LOG_DESIGNATORS", "log.designators"),
     ]
     .iter()
     .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
@@ -440,7 +446,7 @@ fn strum_enum_parses_and_refuses_with_declared_accepted() {
 }
 
 #[test]
-fn common_loads_under_its_legacy_env_names_and_the_root_exposes_it() {
+fn deployment_and_log_load_under_their_bare_env_names_and_the_root_exposes_them() {
     let top = ok(
         &["--name=x"],
         &[
@@ -449,40 +455,55 @@ fn common_loads_under_its_legacy_env_names_and_the_root_exposes_it() {
             ("LOG_DESIGNATORS", "auth=debug"),
         ],
     );
-    assert_eq!(top.common.deployment, Deployment::Prod);
-    assert_eq!(top.common.log_format, Format::Human);
-    assert_eq!(top.common.log_designators.as_deref(), Some("auth=debug"));
-    assert_eq!(top.common().deployment, Deployment::Prod);
+    assert_eq!(top.deployment, Deployment::Prod);
+    assert_eq!(top.log.format, "human");
+    assert_eq!(top.log.designators.as_deref(), Some("auth=debug"));
+    assert_eq!(top.deployment(), Deployment::Prod);
+    assert_eq!(top.log().format, "human");
 }
 
 #[test]
-fn common_defaults_to_dev_json_and_no_designator_filter() {
-    let top = ok(&["--name=x"], &[]);
-    assert_eq!(top.common.deployment, Deployment::Dev);
-    assert_eq!(top.common.log_format, Format::Json);
-    assert_eq!(top.common.log_designators, None);
+fn deployment_unset_refuses_naming_every_spelling() {
+    let refusal = common_config::load_from::<Top>(&strings(&["--name=x"]), &[]).unwrap_err();
+    assert_eq!(refusal.variable, "DEPLOYMENT_TYPE");
+    assert_eq!(refusal.value, "unset");
+    assert!(refusal
+        .accepted
+        .contains("--deployment on the command line"));
+    assert!(refusal
+        .accepted
+        .contains("`deployment = …` at the top level of the config file"));
 }
 
 #[test]
-fn common_is_also_reachable_by_flag_and_file() {
-    let f = file("[common]\nlog_format = \"human\"\n");
-    let top = ok(
-        &["--name=x", &config_arg(&f), "--common--deployment=prod"],
-        &[],
-    );
-    assert_eq!(top.common.deployment, Deployment::Prod);
-    assert_eq!(top.common.log_format, Format::Human);
+fn deployment_and_log_are_also_reachable_by_flag_and_file() {
+    let f = file("[log]\nformat = \"human\"\n");
+    let top = ok(&["--name=x", &config_arg(&f), "--deployment=prod"], &[]);
+    assert_eq!(top.deployment, Deployment::Prod);
+    assert_eq!(top.log.format, "human");
 }
 
 #[test]
-fn a_bad_deployment_type_refuses_in_the_legacy_words() {
+fn a_bad_deployment_type_refuses_in_the_shared_words() {
     let refusal = err(&["--name=x"], &[("DEPLOYMENT_TYPE", "staging")]);
     assert_eq!(refusal.variable, "DEPLOYMENT_TYPE");
     assert_eq!(refusal.value, "staging");
+    assert_eq!(refusal.accepted, common_config::DEPLOYMENT_ACCEPTED);
+    let refusal = err(&["--name=x"], &[("DEPLOYMENT_TYPE", "")]);
     assert_eq!(
-        refusal.accepted,
-        r#"one of ["prod", "dev"] (unset means dev)"#
+        refusal.value, "",
+        "an empty value is set, and set-but-invalid refuses"
     );
+}
+
+#[test]
+fn the_deployment_help_is_the_shared_text_unless_the_root_documents_it() {
+    let field = Top::schema(&Path::root())
+        .into_iter()
+        .find(|f| f.toml() == "deployment")
+        .unwrap();
+    assert_eq!(field.help, common_config::DEPLOYMENT_HELP);
+    assert_eq!(field.presence, common_config::Presence::Required);
 }
 
 #[test]
@@ -508,7 +529,7 @@ fn required_nested_loads_when_set() {
 
 #[test]
 fn missing_required_nested_names_its_table() {
-    let refusal = common_config::load_from::<Strict>(&[], &[]).unwrap_err();
+    let refusal = common_config::load_from::<Strict>(&[], &pairs(&[])).unwrap_err();
     assert_eq!(refusal.variable, "STRICT_INNER__KEY");
     assert!(refusal
         .accepted
@@ -538,7 +559,8 @@ fn help_lists_every_field_grouped_by_table() {
     let top = out.find("top level").unwrap();
     let mid = out.find("[mid]").unwrap();
     let deep = out.find("[mid.deep]").unwrap();
-    assert!(top < mid && mid < deep);
+    let log = out.find("[log]").unwrap();
+    assert!(top < mid && mid < deep && deep < log);
     assert!(out.contains("APP_CONFIG"));
     assert!(out.contains("default s3cret, secret"));
     assert!(out.contains("  required"));
@@ -569,6 +591,7 @@ fn print_config_shows_value_and_origin_per_field() {
     assert!(line("mid.size").ends_with("env APP_MID__SIZE"));
     assert!(line("mid.deep.level").ends_with("default"));
     assert!(line("note").contains("<unset>"));
+    assert!(line("deployment").ends_with("env DEPLOYMENT_TYPE"));
 }
 
 #[test]
@@ -598,12 +621,17 @@ fn config_flag_beats_app_config_env() {
 }
 
 #[test]
-fn missing_config_file_is_fine_and_reported() {
+fn missing_config_file_refuses_naming_the_path() {
     let path = std::env::temp_dir().join("common-config-does-not-exist.toml");
-    let arg = config_arg(&path);
-    assert_eq!(ok(&["--name=x", &arg], &[]).count, 1);
-    let out = text(&["--name=x", &arg, "--print-config"], &[]);
-    assert!(out.starts_with(&format!("config file: {} (not found)", path.display())));
+    let refusal = err(&["--name=x", &config_arg(&path)], &[]);
+    assert_eq!(refusal.variable, "--config");
+    assert_eq!(refusal.value, path.display().to_string());
+    assert!(refusal.detail.unwrap().starts_with("cannot read: "));
+    let refusal = err(
+        &["--name=x"],
+        &[("APP_CONFIG", &path.display().to_string())],
+    );
+    assert_eq!(refusal.variable, "APP_CONFIG");
 }
 
 #[test]

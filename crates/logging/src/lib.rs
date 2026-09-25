@@ -1,7 +1,7 @@
 //! Subscriber setup and the crate's public surface. Assembly only — the
 //! pieces live in config.rs, filter.rs, format.rs, designator.rs, macros.rs
-//! and span.rs. `Refusal`, `Deployment` and `Format` are common-config's,
-//! re-exported here under their old paths.
+//! and span.rs. `Refusal` and `Deployment` are common-config's, re-exported
+//! here under their old paths.
 //!
 //! ```
 //! use common_logging as log;
@@ -25,8 +25,10 @@ mod span;
 
 pub use tracing;
 
-pub use common_config::{Deployment, Format, Refusal};
-pub use config::{LogConfig, RUST_LOG_VARIABLE};
+pub use common_config::{Deployment, Refusal};
+pub use config::{
+    Format, Log, LogConfig, LOG_DESIGNATORS_VARIABLE, LOG_FORMAT_VARIABLE, RUST_LOG_VARIABLE,
+};
 pub use designator::{Designator, AUTH, BUSINESS, HTTP, STAND, STARTUP, STORAGE, UPSTREAM};
 pub use filter::Designators;
 pub use macros::{debug, error, info, trace, warn};
@@ -42,13 +44,13 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 /// Refusals raised here carry this crate's target; the binary's own post-load
 /// checks go through `refuse!` at their site and carry the binary's.
-pub fn boot<T: common_config::Root>() -> T {
+pub fn boot<T: common_config::Root<Log = Log>>() -> T {
     let config = match common_config::load::<T>() {
         Ok(config) => config,
         Err(refusal) => crate::refuse!(refusal),
     };
     let rust_log = std::env::var(RUST_LOG_VARIABLE).ok();
-    match LogConfig::from_common(config.common(), rust_log.as_deref()) {
+    match LogConfig::from_log(config.log(), config.deployment(), rust_log.as_deref()) {
         Ok(cfg) => init_with(cfg),
         Err(refusal) => crate::refuse!(refusal),
     }

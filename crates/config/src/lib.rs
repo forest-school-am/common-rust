@@ -1,11 +1,18 @@
 //! The public surface and the load pipeline: schema → args → merge → typed parse.
 //! Assembly only — spellings are path.rs, sources are layers.rs/args.rs/file.rs,
-//! parsing is values.rs, rendering is help.rs. `Common`, `Deployment` and
-//! `Refusal` live here (not a submodule elsewhere) so this crate depends on
-//! nothing else in the workspace; a consumer's own config struct never does.
+//! parsing is values.rs, rendering is help.rs. `Deployment` and `Refusal` live
+//! here (not a submodule elsewhere) so this crate depends on nothing else in
+//! the workspace; what a value DOES (logging, auth) belongs to the crate that does it.
 //!
 //! ```
-//! use common_config::{Common, Config, Outcome};
+//! use common_config::{Config, Deployment, Outcome};
+//!
+//! #[derive(Config)]
+//! struct Log {
+//!     /// Log line format.
+//!     #[config(default = "json")]
+//!     format: String,
+//! }
 //!
 //! #[derive(Config)]
 //! #[config(app = "DEMO")]
@@ -13,23 +20,24 @@
 //!     /// Socket address to listen on.
 //!     #[config(default = "0.0.0.0:8080")]
 //!     bind: std::net::SocketAddr,
+//!     deployment: Deployment,
 //!     #[config(nested)]
-//!     common: Common,
+//!     log: Log,
 //! }
 //!
 //! let args = ["--bind=127.0.0.1:9000".to_string()];
-//! match common_config::load_from::<Demo>(&args, &[]).unwrap() {
+//! let env = [("DEPLOYMENT_TYPE".to_string(), "dev".to_string())];
+//! match common_config::load_from::<Demo>(&args, &env).unwrap() {
 //!     Outcome::Config(demo) => assert_eq!(demo.bind.port(), 9000),
 //!     _ => unreachable!(),
 //! }
 //! ```
 
 // The derive spells every path as `::common_config::…`, so this crate's own
-// `Common` can use it too.
+// tests can use it too.
 extern crate self as common_config;
 
 mod args;
-mod common;
 mod deployment;
 mod file;
 mod help;
@@ -39,9 +47,8 @@ mod refusal;
 mod schema;
 mod values;
 
-pub use common::{Common, Format, LOG_DESIGNATORS_VARIABLE, LOG_FORMAT_VARIABLE};
 pub use common_config_derive::Config;
-pub use deployment::{Deployment, DEPLOYMENT_VARIABLE};
+pub use deployment::{Deployment, DEPLOYMENT_ACCEPTED, DEPLOYMENT_HELP, DEPLOYMENT_VARIABLE};
 pub use path::Path;
 pub use refusal::Refusal;
 pub use schema::{Entry, Field, FileStatus, Kind, Origin, Presence};
@@ -57,13 +64,16 @@ pub trait Config: Sized {
 }
 
 /// The struct carrying `#[config(app = "…")]`: the env prefix and the binary
-/// name shown by `--help`. Only a `Root` can be loaded, and every root carries
-/// the shared section as a `#[config(nested)] common: Common` field — that is
-/// what `common_logging::boot` initialises logging from.
+/// name shown by `--help`. Only a `Root` can be loaded. The derive reads the
+/// root's `deployment: Deployment` field (spelled `DEPLOYMENT_TYPE`, required)
+/// and its `#[config(nested)] log` field, whose type is whatever the logging
+/// crate asks for.
 pub trait Root: Config {
     const APP: &'static str;
     const BIN: &'static str;
-    fn common(&self) -> &Common;
+    type Log;
+    fn deployment(&self) -> Deployment;
+    fn log(&self) -> &Self::Log;
 }
 
 #[derive(Debug)]
