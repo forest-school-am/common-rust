@@ -1,6 +1,6 @@
-//! The background runner and its cursor store. The loop is deliberately dumb:
-//! load cursor, fetch, apply, store, wait — and any cycle's error is logged and
-//! swallowed so the next interval still runs.
+//! The background sync loop and the cursor stores it persists progress in.
+//!
+//! The feed client and wire types -> feed.rs; applying deltas -> apply.rs.
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -12,19 +12,15 @@ use sqlx::SqlitePool;
 
 use crate::feed::{NameDeltas, NameFeed};
 
-/// An owned, boxed future — the return of an async closure or trait method that
-/// cannot name its concrete future type. Mirrors common-oidc's alias.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Where the cursor is kept between cycles. `load` returns `None` before the
-/// first successful cycle (fetch from the beginning).
+/// `load` returns `None` when no cursor has been stored yet.
 pub trait CursorStore: Send + Sync + 'static {
     fn load(&self) -> BoxFuture<'_, anyhow::Result<Option<String>>>;
     fn store(&self, cursor: &str) -> BoxFuture<'_, anyhow::Result<()>>;
 }
 
-/// A cursor kept in a `name_sync_cursor(id TEXT PRIMARY KEY, cursor TEXT)` row
-/// of a sqlite database. `id` lets several feeds share one database.
+/// `id` distinguishes several feeds sharing one database.
 #[derive(Clone)]
 pub struct SqliteCursorStore {
     pool: SqlitePool,
@@ -32,7 +28,6 @@ pub struct SqliteCursorStore {
 }
 
 impl SqliteCursorStore {
-    /// Open the store, creating the `name_sync_cursor` table if it is absent.
     pub async fn open(pool: SqlitePool, id: impl Into<String>) -> anyhow::Result<Self> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS name_sync_cursor (id TEXT PRIMARY KEY, cursor TEXT)",
@@ -74,8 +69,6 @@ impl CursorStore for SqliteCursorStore {
     }
 }
 
-/// A cursor kept as the sole contents of a file. Absent or empty file = no
-/// cursor yet.
 #[derive(Clone)]
 pub struct FileCursorStore {
     path: PathBuf,
@@ -119,20 +112,13 @@ impl CursorStore for FileCursorStore {
     }
 }
 
-/// What [`spawn`] needs: the feed, how often to poll, and where the cursor
-/// lives.
 pub struct SyncConfig<C: CursorStore> {
     pub feed: NameFeed,
     pub interval: Duration,
     pub cursor: C,
 }
 
-/// Start the background sync. On start and every `interval` after: load the
-/// cursor, fetch deltas since it, call `apply` if there are any, then store the
-/// fresh cursor. A cycle's error is logged and the loop continues.
-///
-/// `apply` receives the deltas and returns an owned future, so it clones out
-/// what it needs before the borrow ends.
+/// A cycle's error is logged and swallowed; the loop never exits on error.
 pub fn spawn<C, F>(cfg: SyncConfig<C>, apply: F) -> tokio::task::JoinHandle<()>
 where
     C: CursorStore,
@@ -140,9 +126,8 @@ where
 {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(cfg.interval);
-        // The first `tick()` returns immediately: sync runs at start, then every
-        // interval. A cycle that overruns the interval delays the next tick
-        // rather than stacking, which is what we want for a slow feed.
+        // tokio's first tick() returns immediately (first sync at start); Delay
+        // makes an overrunning cycle push the next tick back rather than burst.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         log::info::startup!(
             interval_secs = cfg.interval.as_secs(),
@@ -175,8 +160,7 @@ where
             "name-sync applied renames"
         );
     }
-    // Advance the cursor even with no deltas, so the next fetch does not rescan
-    // from the same point.
+    // Advance the cursor even with no deltas, or the next fetch rescans from here.
     cursor.store(&deltas.now).await?;
     Ok(())
 }

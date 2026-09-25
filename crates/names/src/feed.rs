@@ -1,18 +1,17 @@
-//! The rename-feed client. One authenticated GET; the response carries the
-//! deltas since a cursor and a fresh cursor to pass next time.
+//! The rename-feed HTTP client and the wire types of its one response.
+//!
+//! Applying deltas to storage -> apply.rs; the polling loop -> sync.rs.
 
 use reqwest::header;
 use serde::Deserialize;
 
-/// A single rename: the value as it used to be stored, and what it is now.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Rename {
     pub old: String,
     pub current: String,
 }
 
-/// Everything that changed since a cursor. `now` is the server cursor to store
-/// and pass as the next `since`.
+/// `now` is the server cursor to store and send back as the next `since`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct NameDeltas {
     pub now: String,
@@ -23,15 +22,11 @@ pub struct NameDeltas {
 }
 
 impl NameDeltas {
-    /// No user and no group renames — the feed advanced its cursor but nothing
-    /// stored needs rewriting.
     pub fn is_empty(&self) -> bool {
         self.users.is_empty() && self.groups.is_empty()
     }
 }
 
-/// The feed client: a base URL (`http://127.0.0.1:8000`) and a bearer token
-/// (any valid authentik token).
 #[derive(Clone)]
 pub struct NameFeed {
     http: reqwest::Client,
@@ -40,13 +35,10 @@ pub struct NameFeed {
 }
 
 impl NameFeed {
-    /// Build a feed with a fresh default `reqwest::Client`.
     pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Self {
         Self::with_client(reqwest::Client::new(), base_url, token)
     }
 
-    /// Build a feed over a caller-provided client (to share a connection pool or
-    /// TLS settings).
     pub fn with_client(
         http: reqwest::Client,
         base_url: impl Into<String>,
@@ -59,8 +51,7 @@ impl NameFeed {
         }
     }
 
-    /// Fetch the deltas since `since` (a `now` from a previous call, or `None`
-    /// for from the beginning).
+    /// `None` for `since` fetches the whole feed from the beginning.
     pub async fn changes_since(&self, since: Option<&str>) -> anyhow::Result<NameDeltas> {
         let url = format!("{}/api/v3/forest_school/name_changes/", self.base_url);
         let mut req = self

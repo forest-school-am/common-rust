@@ -1,8 +1,7 @@
-//! `#[derive(NameColumns)]`: ONE row struct's `#[name(user)]` / `#[name(group)]`
-//! fields become its static `NameTarget` table. The struct names the SQL table
-//! once (`#[names(table = "…")]`); each marked field contributes a column and a
-//! kind. What a target MEANS and how a rename is applied belongs in common-names
-//! — this macro only turns a struct's shape into `&'static [NameTarget]`.
+//! `#[derive(NameColumns)]`: turn a row struct's `#[name(user)]`/`#[name(group)]`
+//! fields into its static `NameTarget` table, keyed by `#[names(table = "…")]`.
+//! What a target MEANS and how a rename is applied belongs in common-names, not
+//! here — this macro only turns a struct's shape into `&'static [NameTarget]`.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;

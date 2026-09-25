@@ -6,12 +6,9 @@ use sqlx::SqlitePool;
 
 use crate::{NameDeltas, NameKind, NameTarget, Rename};
 
-/// Rewrite each target column old -> current, users against `deltas.users` and
-/// groups against `deltas.groups`. Returns the total number of rows changed.
-///
-/// Table and column names come from the compile-time [`NameTarget`] table (the
-/// `#[derive(NameColumns)]` output), never from input, so they are formatted
-/// into the statement directly; the values are always bound.
+/// `target.table`/`target.column` are formatted into the SQL unescaped; this is
+/// safe only because [`NameTarget`]'s strings are compile-time literals from the
+/// derive, never input. Values are always bound. Returns the rows changed.
 pub async fn apply_column_renames(
     pool: &SqlitePool,
     targets: &[NameTarget],
@@ -59,7 +56,6 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use sqlx::Row;
 
-    // A row struct exercising both kinds and an ignored column.
     #[derive(NameColumns)]
     #[names(table = "forms")]
     #[allow(dead_code)]
@@ -150,7 +146,6 @@ mod tests {
         }
 
         let d = deltas(&[("bob", "bob2")], &[("dev", "devs")]);
-        // bob appears twice (member), dev appears twice (team) = 4 rows changed.
         let changed = apply_column_renames(&pool, AclRow::name_targets(), &d)
             .await
             .unwrap();
