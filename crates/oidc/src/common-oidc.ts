@@ -71,6 +71,9 @@ installReauthGuard();
 // `call` issues its request through the GLOBAL `fetch`, which `installReauthGuard`
 // (run above at module load) has already wrapped, so an expired session's 401
 // bounces to login through the same guard every other request goes through.
+// >>> transport — byte-identical with common-oidc.test-stub.ts, asserted by a
+// test. The stub exists because this module installs its guard at load; the
+// transport itself is the same code in both, so it must not drift.
 export class CallFailure extends Error {
   declare status: number;
   declare body: unknown;
@@ -107,3 +110,4 @@ export async function call<T>(
   if (!resp.ok) throw new CallFailure(resp.status, await resp.json().catch(() => undefined));
   return resp.status === 204 ? (undefined as T) : resp.json();
 }
+// <<< transport

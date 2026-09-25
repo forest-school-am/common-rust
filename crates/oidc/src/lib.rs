@@ -37,6 +37,23 @@ pub const SHIM_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/common-oidc.js
 /// and keep no vendored copy, so the types cannot drift from the shim.
 pub const SHIM_DTS: &str = include_str!("common-oidc.public.d.ts");
 
+/// The shim a SPA's TEST RUNNER uses in place of [`SHIM_JS`], carried beside it
+/// for the same reason: one source, no vendored copy per repo.
+///
+/// The served shim installs its re-auth guard at module load — it wraps
+/// `window.fetch`, reads a `#config` element and can call `location.assign`,
+/// which jsdom refuses — and a test runner resolves neither the build's
+/// `external` nor the tsconfig `paths` mapping for `/common-oidc.js`. This
+/// carries the SAME transport (a test asserts the two do not drift) with the
+/// guard as a no-op that is not run at load, so `fetch` stays whatever the test
+/// installed. A consumer writes it out and aliases the served specifier to it:
+///
+/// ```text
+/// // vitest.config.ts
+/// resolve: { alias: { "/common-oidc.js": resolve(__dirname, "src/test/common-oidc-stub.ts") } }
+/// ```
+pub const SHIM_TEST_STUB: &str = include_str!("common-oidc.test-stub.ts");
+
 pub use auth::{
     deny, set_auth_context, unauthorized, AuthContext, AuthProviders, AuthVia, Authenticated,
     GatedBy, MaybeAuthenticated, Refusals, ServiceAccount,

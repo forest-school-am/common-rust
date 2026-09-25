@@ -190,6 +190,40 @@ mounts no router at all.
 wherever you build — add `pkgs.esbuild` to your dev shell's `packages` and to
 `nativeBuildInputs` if you package the binary with nix.
 
+### Testing a SPA against the shim (`SHIM_TEST_STUB`)
+
+A test runner cannot import the served shim. Two reasons, both structural:
+the module **installs its guard at load** — it wraps `window.fetch` for every
+later caller, reads a `#config` element a test page does not have, and on a
+flagged 401 calls `location.assign`, which jsdom refuses outright — and the
+runner resolves neither the bundler's `external` nor the tsconfig `paths`
+mapping that make the served specifier `/common-oidc.js` point anywhere.
+
+So the crate ships the stub too, the same way it ships the types: one source,
+written out by the consumer, no vendored copy to drift.
+
+```rust
+// build.rs, beside the SHIM_DTS you already write
+std::fs::write(out_dir.join("common-oidc-stub.ts"), common_oidc::SHIM_TEST_STUB)?;
+```
+
+```ts
+// vitest.config.ts — the alias key is the exact specifier the generated
+// client imports.
+resolve: {
+  alias: { "/common-oidc.js": resolve(__dirname, "src/test/common-oidc-stub.ts") },
+}
+```
+
+The stub carries the shim's transport **byte for byte** — a test in this crate
+fails if the two drift — so a test still exercises the real query building, the
+`FormData` passthrough, the 204 case and the `CallFailure` shape. Only the
+guard differs: it is a no-op, and it is not run at load, so `fetch` stays
+whatever the test installed.
+
+If you find yourself asserting on re-auth behaviour, do it against the served
+shim in a browser test, not here: the stub deliberately has none.
+
 ### Emitting the 401 from your own error chokepoint (§3.1)
 
 Canon §3.1 gives a service ONE `AppError` owning every status mapping, so an
