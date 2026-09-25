@@ -62,6 +62,29 @@ pub fn boot<T: common_config::Root<Log = Log>>() -> T {
     config
 }
 
+/// `boot` for a root that does NOT nest `[log]`: the two log variables are the
+/// library's own (config.6) and are read from the environment here. Everything
+/// else — the load, the refusals, the deprecation lines — is `boot`.
+pub fn boot_sealed<T: common_config::Root>() -> T {
+    let (config, notices) = match common_config::load_with_notices::<T>() {
+        Ok(pair) => pair,
+        Err(refusal) => crate::refuse!(refusal),
+    };
+    let rust_log = std::env::var(RUST_LOG_VARIABLE).ok();
+    let log = match Log::from_env() {
+        Ok(log) => log,
+        Err(refusal) => crate::refuse!(refusal),
+    };
+    match LogConfig::from_log(&log, config.deployment(), rust_log.as_deref()) {
+        Ok(cfg) => init_with(cfg),
+        Err(refusal) => crate::refuse!(refusal),
+    }
+    for notice in notices {
+        tracing::warn!(target: "common_config", "{notice}");
+    }
+    config
+}
+
 pub fn init() {
     match LogConfig::from_env() {
         Ok(cfg) => init_with(cfg),

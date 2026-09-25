@@ -807,3 +807,30 @@ fn a_bare_flag_already_spelled_like_the_generated_one_says_nothing() {
     .expect("load");
     assert!(notices.is_empty(), "{notices:?}");
 }
+
+/// config.6: a root MAY omit the `[log]` section. common-logging reads
+/// LOG_FORMAT and LOG_DESIGNATORS itself there (`boot_sealed`), so the root's
+/// `Log` type is `()` and there is nothing for an app to declare.
+#[derive(Debug, Config)]
+#[config(app = "SEALED", bin = "sealed")]
+struct Sealed {
+    /// Deployment class.
+    deployment: Deployment,
+    /// The name.
+    #[config(required)]
+    name: String,
+}
+
+#[test]
+fn a_root_without_a_log_section_loads_and_its_log_type_is_unit() {
+    let out = common_config::load_from::<Sealed>(&strings(&["--name=x"]), &pairs(&[])).expect("load");
+    match out {
+        Outcome::Config(sealed) => {
+            assert_eq!(sealed.name, "x");
+            assert_eq!(sealed.deployment, Deployment::Dev);
+            let unit: &() = common_config::Root::log(&sealed);
+            assert_eq!(unit, &());
+        }
+        other => panic!("expected a config: {other:?}"),
+    }
+}

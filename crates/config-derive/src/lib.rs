@@ -168,12 +168,15 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             "#[config(app = …)] needs a `deployment: common_config::Deployment` field",
         ));
     }
-    let Some(log_type) = log_type.or_else(|| root.app.is_none().then(|| parse_quote!(()))) else {
-        return Err(Error::new_spanned(
-            &input.ident,
-            "#[config(app = …)] needs a `#[config(nested)] log: …` field: the section \
-             common_logging::boot initialises logging from",
-        ));
+    // A root MAY omit `log` (config.6): the two log variables are common-logging's
+    // own and `boot_sealed` reads them from the environment. A root that still
+    // nests `[log]` keeps `boot`, and the section still wins.
+    let has_log = log_type.is_some();
+    let log_type: syn::Type = log_type.unwrap_or_else(|| parse_quote!(()));
+    let log_body = if has_log {
+        quote!(&self.log)
+    } else {
+        quote!(&())
     };
     let root_impl = root.app.as_ref().map(|app| {
         let bin = root
@@ -189,7 +192,7 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
                     self.deployment
                 }
                 fn log(&self) -> &#log_type {
-                    &self.log
+                    #log_body
                 }
             }
         }

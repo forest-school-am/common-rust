@@ -65,6 +65,25 @@ pub struct Log {
     pub designators: Option<String>,
 }
 
+impl Log {
+    /// SEALED (config.6, user 2026-09-25): these two variables are the
+    /// library's own, so a root need not nest `[log]` at all — `boot_sealed`
+    /// reads them here. A nested section still wins wherever one is declared.
+    pub fn parse(format: Option<&str>, designators: Option<&str>) -> Result<Self, Refusal> {
+        Ok(Self {
+            format: Format::parse(format)?,
+            designators: designators.map(str::to_owned),
+        })
+    }
+
+    pub fn from_env() -> Result<Self, Refusal> {
+        Self::parse(
+            std::env::var(LOG_FORMAT_VARIABLE).ok().as_deref(),
+            std::env::var(LOG_DESIGNATORS_VARIABLE).ok().as_deref(),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LogConfig {
     pub format: Format,
@@ -159,6 +178,20 @@ mod tests {
     ) -> LogConfig {
         LogConfig::resolve(format, deployment.or(Some("dev")), rust_log, designators)
             .expect("must resolve")
+    }
+
+    #[test]
+    fn the_sealed_log_reads_its_own_two_variables() {
+        let set = Log::parse(Some("human"), Some("auth=debug")).expect("parse");
+        assert_eq!(set.format, Format::Human);
+        assert_eq!(set.designators.as_deref(), Some("auth=debug"));
+
+        let unset = Log::parse(None, None).expect("parse");
+        assert_eq!(unset.format, Format::Json, "unset LOG_FORMAT is json");
+        assert!(unset.designators.is_none());
+
+        let refused = Log::parse(Some("xml"), None).expect_err("a bad format must refuse");
+        assert_refusal(&refused, LOG_FORMAT_VARIABLE, "xml", LOG_FORMAT_ACCEPTED);
     }
 
     fn assert_refusal(r: &Refusal, variable: &str, value: &str, accepted: &str) {
