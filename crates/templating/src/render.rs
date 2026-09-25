@@ -8,9 +8,6 @@ use serde::Serialize;
 
 use crate::{AssetsOrigin, RenderError};
 
-pub const ORIGIN_MARKER: &str = "{{assets_origin}}";
-pub const CONFIG_MARKER: &str = "{{config}}";
-
 const NAME: &str = "shell";
 
 /// Serialised JSON with `<`, `>` and `&` as `\u00XX`, so no value can close

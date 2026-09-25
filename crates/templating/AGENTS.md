@@ -11,8 +11,7 @@ nothing don't pull a template engine.
 - `src/lib.rs` — `Builder` (boot validation + pins), `AssetCache`
   (`static_file`), `RenderError`, `sha256`, and the cache/path tests.
 - `src/render.rs` — `Shell` (compile once, render per request), the total
-  `render(shell, origin, config)` convenience, the config-block escaping, and
-  the marker constants `ORIGIN_MARKER` / `CONFIG_MARKER`.
+  `render(shell, origin, config)` convenience and the config-block escaping.
 - `src/assets_origin.rs` — `AssetsOrigin` (§12.6): the `ASSETS_ORIGIN`
   option, its refusal shape, and its substitution into the shell's CSP.
 - `tests/consumer.rs` — an asset-serving service in miniature: shell compiled
