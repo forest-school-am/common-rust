@@ -243,14 +243,14 @@ fn root_attrs(input: &DeriveInput) -> syn::Result<RootAttrs> {
     }
     if let Some(app) = &out.app {
         let value = app.value();
-        let ok = !value.is_empty()
-            && value
-                .chars()
-                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+        // The CASE is not the author's to get right: `Path::env` uppercases the
+        // whole spelling once (config.8). What is still refused is a prefix that
+        // could not be part of an environment variable name at all.
+        let ok = !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric());
         if !ok {
             return Err(Error::new_spanned(
                 app,
-                "#[config(app = …)] is the env prefix: ASCII upper-case letters and digits only, such as \"CRON\"",
+                "#[config(app = …)] is the env prefix: ASCII letters and digits only, such as \"CRON\"",
             ));
         }
     }

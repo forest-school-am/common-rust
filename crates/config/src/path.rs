@@ -52,14 +52,13 @@ impl Path {
         format!("--{joined}")
     }
 
+    /// ONE uppercase, at the end. Uppercasing each segment as it was joined
+    /// meant every other producer of a spelling had to remember to do the same
+    /// — and the app prefix was held to it by a compile error instead. The
+    /// whole name is cased here, so nothing upstream can get it wrong.
     pub fn env(&self, app: &str) -> String {
-        let joined = self
-            .0
-            .iter()
-            .map(|s| s.to_ascii_uppercase())
-            .collect::<Vec<_>>()
-            .join("__");
-        format!("{app}_{joined}")
+        let joined = self.0.join("__");
+        format!("{app}_{joined}").to_ascii_uppercase()
     }
 }
 
@@ -90,6 +89,12 @@ mod tests {
     fn env_uses_single_underscore_inside_and_double_between() {
         assert_eq!(three_deep().env("CRON"), "CRON_SANDBOX__LIMITS__CPU_SECS");
         assert_eq!(Path::root().child("data_dir").env("CRON"), "CRON_DATA_DIR");
+    }
+
+    #[test]
+    fn the_whole_name_is_uppercased_here_whatever_case_reaches_it() {
+        assert_eq!(three_deep().env("cron"), "CRON_SANDBOX__LIMITS__CPU_SECS");
+        assert_eq!(Path::root().child("Data_Dir").env("Cron"), "CRON_DATA_DIR");
     }
 
     #[test]
