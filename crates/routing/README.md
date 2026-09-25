@@ -112,6 +112,52 @@ generator with its options. All three files are committed and diff-checked
 like the ts-rs output. `tsc` then checks ordinary function signatures: a
 renamed handler fails at the import, a changed param at the call.
 
+## ts-rs and `#[serde(…)]` — read this before adding a serde attribute
+
+During export ts-rs prints `failed to parse serde attribute … will be ignored`
+for attributes it does not understand. It is noise most of the time and an
+alarm some of the time, so the warnings stay ON: this crate does NOT enable
+ts-rs's `no-serde-warnings` feature, and should not. ts-rs 11 behaves
+identically here — bumping the pin does not remove the message.
+
+What ts-rs understands on a field: `rename`, `skip`, `flatten`, `default`
+(absorbed, but it does NOT make the field optional — it is accepted only to
+avoid this warning) and `with`. On a container: `rename`, `rename_all`,
+`rename_all_fields`, `tag`, `content`, `untagged`, `deny_unknown_fields`,
+`bound`, `crate`. Anything else — `transparent`, `skip_serializing_if`,
+`serialize_with`, `alias`, `borrow`, `other` — it does not.
+
+THE TRAP, and the reason this section exists: an unknown key does not merely
+get skipped. ts-rs parses the attribute as a whole and the first unknown key
+aborts it, so the WHOLE `#[serde(…)]` is discarded — including keys it does
+support that happen to sit in the same attribute. So this is safe:
+
+```rust
+#[serde(default, skip_serializing_if = "Option::is_none")]   // only `default`
+                                                             // is lost, and it
+                                                             // did nothing
+```
+
+and this silently generates the WRONG FIELD NAME, because the rename goes down
+with the attribute that carried it:
+
+```rust
+#[serde(rename = "displayName", skip_serializing_if = "Option::is_none")]
+```
+
+The fix is to split them, since each `#[serde(…)]` is parsed on its own:
+
+```rust
+#[serde(rename = "displayName")]
+#[serde(skip_serializing_if = "Option::is_none")]   // warns; nothing is lost
+```
+
+The same applies to `#[serde(transparent)]` on a container: a newtype's
+TypeScript happens to come out right anyway, because ts-rs inlines a newtype
+regardless — but any `rename_all` sharing that attribute is gone. When the
+shape still disagrees, state it outright with `#[ts(as = "…")]` or
+`#[ts(type = "…")]` rather than hoping the serde attribute carried.
+
 ## Tests
 
 `nix develop --impure -c cargo test -p common-routing -p common-routing-macros`
