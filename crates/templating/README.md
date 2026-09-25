@@ -6,7 +6,7 @@ over a validated asset directory. Depended on only by services that actually
 serve assets — deliberately separate from `common-logging` (§9.7), which stays
 dependency-light for every binary.
 
-- **Version:** `0.3.0` · **Toolchain:** Rust 1.98.0.
+- **Version:** `0.4.0` · **Toolchain:** Rust 1.98.0.
 - Member of the `common-rust` workspace (`crates/templating`), alongside
   `common-logging` and `common-oidc`.
 
@@ -18,7 +18,7 @@ name:
 
 ```toml
 [dependencies]
-common-templating = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.3.0" }
+common-templating = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.4.0" }
 ```
 
 Stand builds do not go to the network. The single shared cargo patch at

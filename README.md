@@ -4,7 +4,7 @@ The shared Rust crates behind the Les stand: configuration, logging, identity,
 routing, and the server half of the common UI. One cargo workspace, twelve
 crates, versioned together.
 
-- **Version:** `0.3.0` (workspace-wide) · **Edition:** 2021 · **Toolchain:** Rust 1.98.0 · **License:** MIT
+- **Version:** `0.4.0` (workspace-wide) · **Edition:** 2021 · **Toolchain:** Rust 1.98.0 · **License:** MIT
 
 These crates are built for one deployment rather than for general use. They
 assume [authentik](https://goauthentik.io/) as the identity provider, a
@@ -39,8 +39,8 @@ cargo selects the member by package name:
 
 ```toml
 [dependencies]
-common-logging = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.3.0" }
-common-config  = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.3.0" }
+common-logging = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.4.0" }
+common-config  = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.4.0" }
 ```
 
 ## Build and test

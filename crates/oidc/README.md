@@ -7,7 +7,7 @@ re-login, a downward-closure group gate, and a served browser shim for the
 401→re-auth contract. No app login/logout buttons — logout lives only at
 authentik.
 
-- **Version:** `0.3.0`
+- **Version:** `0.4.0`
 - **Toolchain:** Rust 1.98.0 (workspace standard).
 - Member of the `common-rust` workspace (`crates/oidc`); `common-logging` is a
   workspace sibling, not a git dep, as of 0.3.0.
@@ -22,7 +22,7 @@ points at the repository and cargo selects the member by package name:
 
 ```toml
 [dependencies]
-common-oidc = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.3.0" }
+common-oidc = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.4.0" }
 ```
 
 Stand builds do not go to the network. The single shared cargo patch at

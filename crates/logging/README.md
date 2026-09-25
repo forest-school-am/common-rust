@@ -4,7 +4,7 @@ The Les stand's shared logging crate — the single owner of CODESTYLE.md §8
 mechanics, so nothing drifts per repo. Every Les binary and library depends on
 it, `common-oidc` included (which logs through here, not raw `tracing`).
 
-- **Version:** `0.3.0` · **Toolchain:** Rust 1.98.0.
+- **Version:** `0.4.0` · **Toolchain:** Rust 1.98.0.
 - Member of the `common-rust` workspace (`crates/logging`), alongside
   `common-templating` and `common-oidc`.
 
@@ -15,7 +15,7 @@ points at the repository and cargo selects the member by package name:
 
 ```toml
 [dependencies]
-common-logging = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.3.0" }
+common-logging = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.4.0" }
 ```
 
 Stand builds do not go to the network. The single shared cargo patch at

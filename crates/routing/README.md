@@ -3,7 +3,7 @@
 Every HTTP path written once, in Rust; the browser client compiled from it.
 R114 cron item 4 (the review file, "Is the wire protocol maintained manually").
 
-- **Version:** `0.3.0` · **Toolchain:** Rust 1.98.0 · axum 0.8 · ts-rs 10.
+- **Version:** `0.4.0` · **Toolchain:** Rust 1.98.0 · axum 0.8 · ts-rs 10.
 - Members of the `common-rust` workspace: `crates/routing` (this crate) and
   `crates/routing-macros` (the proc macro, re-exported as
   `common_routing::client`). Consumers take both through ONE path dependency
