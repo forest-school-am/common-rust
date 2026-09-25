@@ -1,4 +1,5 @@
-//! The route table a [`crate::Router`] records, and its file form.
+//! The [`Registration`] route-table entry and its on-disk form. The recording
+//! that produces it belongs in `router`.
 
 use std::path::Path;
 
@@ -6,16 +7,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Registration {
-    /// `std::any::type_name` of the handler: for a plain `async fn` its full
-    /// path (`cron::web::run`), which is also what `#[client]` records.
+    /// The join key: must equal the handler's `#[client]`-recorded fqname
+    /// (`module_path!()::name`), which for a plain `async fn` is its `type_name`.
     pub fqname: String,
     pub method: String,
     pub path: String,
     pub path_params: Vec<String>,
 }
 
-/// `/api/tasks/{id}/runs/{number}` → `["id", "number"]`. A doubled brace is
-/// axum's escape for a literal one and is not a param.
+/// A doubled brace is axum's escape for a literal `{` and is not a param.
 pub fn parse_path_params(path: &str) -> Vec<String> {
     path.split('/')
         .filter_map(|seg| {

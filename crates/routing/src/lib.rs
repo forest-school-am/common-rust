@@ -1,8 +1,7 @@
-//! Every HTTP path written once, in Rust, and the browser client compiled from
-//! it. Three parts joined by a handler's fully-qualified name: [`Router`] records
-//! each registration into the manifest; the [`client`] attribute emits a
-//! descriptor from each handler's signature; [`generate_client`] joins the two
-//! tables into `client.ts`. Nothing is joined at run time.
+//! Write each HTTP path once in Rust and compile the browser client from it.
+//! Handler signature analysis belongs in `common-routing-macros`; the wire DTOs
+//! and the transport the generated client imports belong in the consumer, not
+//! here.
 
 pub mod export;
 pub mod generate;
@@ -16,6 +15,6 @@ pub use manifest::{parse_path_params, write_manifest, Registration};
 pub use router::Router;
 pub use static_files::{content_type_for, safe_asset_path, serve_static, AssetSet, CachePolicy};
 
-/// Re-exported for the code `#[client]` generates: the consumer's DTOs and
-/// this crate must agree on ONE ts-rs, and this is how the macro names it.
+/// The consumer's DTOs and this crate must resolve to ONE ts-rs; re-exported so
+/// both can bind to the same one.
 pub use ts_rs;

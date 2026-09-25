@@ -1,7 +1,6 @@
-//! `client.ts` from `routes.json` + `handlers.json`, joined by fqname: one plain
-//! function per handler. Path params come first in TEMPLATE order, then `query`,
-//! then `body`; a `Link` handler gets `<name>Url(...)` only. Nothing is joined at
-//! run time — the browser gets this file plus the transport it imports.
+//! The `routes.json` × `handlers.json` join and the `client.ts` it renders. The
+//! descriptor data types belong in `export`; the recording that produces
+//! `routes.json` belongs in `router`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -36,8 +35,6 @@ pub enum Error {
 pub struct Options {
     pub transport: String,
     pub types: String,
-    /// Which routes must have a client function. A route this rejects is
-    /// left out silently; a route it accepts without a descriptor is an error.
     pub include: Box<dyn Fn(&Registration) -> bool>,
 }
 
@@ -106,9 +103,8 @@ pub fn camel(snake: &str) -> String {
     out
 }
 
-/// The exported type names a TS type expression refers to: capitalised
-/// identifiers that are not TypeScript's own generics. ts-rs spells
-/// primitives in lower case, so this is exactly its named types.
+/// ts-rs spells primitives in lower case, so an upper-cased leading identifier
+/// that is not a TS builtin is exactly a named type needing an import.
 fn named_types(ts: &str, into: &mut BTreeSet<String>) {
     const BUILTIN: &[&str] = &[
         "Array", "Record", "Partial", "Map", "Set", "Promise", "Date",

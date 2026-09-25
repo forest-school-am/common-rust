@@ -1,17 +1,12 @@
-//! Serving embedded static files in one place: the `name -> Content-Type` map,
-//! the traversal guard, and the bytes+type+cache response every service's
-//! embedded client (`app.js`/`app.css`, a served shim, a launcher bundle) needs.
-//! [`serve_static`] is the one response constructor; each caller keeps only the
-//! part that genuinely differs — its auth guard.
+//! Serving already-embedded static bytes: content-type by extension, the
+//! traversal guard, and the response constructor. Embedding the bytes and
+//! guarding access belong to the caller; recording the routes belongs in
+//! `router`.
 
 use axum::body::Body;
 use axum::http::{header, HeaderValue};
 use axum::response::Response;
 
-/// How a static response tells caches to treat it. There is no "unset": a
-/// caller picks one deliberately, because an unversioned URL served
-/// `immutable` hands back stale bytes after a deploy, and a content-hashed URL
-/// served `no-cache` throws away the one cache win it was named for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CachePolicy {
     Immutable,
@@ -53,19 +48,9 @@ pub fn content_type_for(name: &str) -> &'static str {
     }
 }
 
-/// The traversal guard for an asset path, single-segment OR nested. `Some(path)`
-/// if every `/`-separated segment is safe — non-empty and not starting with a
-/// dot — and the whole path is at most 512 bytes; `None` otherwise.
-///
-/// This admits a LEGITIMATE nested path (`sub/dir/app.js`, which role-ui's
-/// `/assets/{*path}` and a nested [`crate::Router::static_dir`] serve) while
-/// refusing every climb: a `..` segment (`../x`, `a/../b` — a `..` starts with
-/// a dot), an absolute path or a `//` (a leading or doubled `/` makes an empty
-/// segment), a trailing `/`, and a dotfile (`.hidden`, `.git/config`). It is a
-/// syntactic guard over the name only: the bytes it protects are always an
-/// exact key lookup in an EMBEDDED set (an [`AssetSet`] or a caller's own map),
-/// never a filesystem join, so this refusing a climb is defence in depth over a
-/// lookup that already cannot escape.
+/// Defence in depth only: the name this admits is always used as an exact key
+/// lookup in an embedded set (an [`AssetSet`] or a caller's own map), never a
+/// filesystem join, so a rejected climb could not have escaped in any case.
 pub fn safe_asset_path(path: &str) -> Option<&str> {
     let ok = !path.is_empty()
         && path.len() <= 512
@@ -84,7 +69,7 @@ impl AssetSet {
         Self { files }
     }
 
-    /// The bytes for an EXACT name, or `None`. No traversal decision here —
+    /// Exact-name lookup with no traversal guard of its own —
     /// [`crate::Router::static_dir`] runs [`safe_asset_path`] first.
     pub fn get(&self, name: &str) -> Option<&'static [u8]> {
         self.files

@@ -1,5 +1,5 @@
-//! The recording router, driven as a consumer would: register, nest, merge,
-//! layer, serve one request, read the manifest.
+//! End-to-end tests of the recording [`Router`] against real axum. The
+//! `#[client]` generation pipeline is tested in `client_macro.rs`.
 
 use std::sync::Arc;
 

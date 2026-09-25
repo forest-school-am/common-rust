@@ -1,8 +1,7 @@
-//! The handler descriptors `#[client]` exports, and the file they go to. The
-//! macro emits a `#[test]` per handler that builds a [`Handler`] and calls
-//! [`append`]; the TypeScript type names resolve HERE, at test run time, through
-//! ts-rs. Gated on [`EXPORT_DIR`] like ts-rs's own `TS_RS_EXPORT_DIR`: unset,
-//! every export test is a no-op.
+//! The handler descriptor data types and their `handlers.json` file. TS type
+//! names are resolved here, through ts-rs, at export-test run time. Joining these
+//! descriptors to the route table belongs in `generate`; extracting them from a
+//! signature belongs in `common-routing-macros`.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, Write};
@@ -49,14 +48,12 @@ pub struct Arg {
 pub enum Response {
     Json(String),
     NoContent,
-    /// Navigated to, not fetched: only a URL builder is generated.
     Link,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Handler {
-    /// `module_path!()::name` — equal to `type_name` of the fn item, which is
-    /// what the router recorded.
+    /// The join key: must equal the router-recorded [`crate::Registration::fqname`].
     pub fqname: String,
     pub name: String,
     pub args: Vec<Arg>,
@@ -92,8 +89,6 @@ fn split_top_level(s: &str) -> Vec<String> {
     out
 }
 
-/// `{ id: string, number?: number, }` → the fields. Optional markers are
-/// dropped: a path param is never optional.
 pub(crate) fn parse_object_fields(inline: &str) -> Option<Vec<Field>> {
     let body = inline.trim().strip_prefix('{')?.strip_suffix('}')?;
     let mut fields = Vec::new();
@@ -108,9 +103,6 @@ pub(crate) fn parse_object_fields(inline: &str) -> Option<Vec<Field>> {
 }
 
 impl Arg {
-    /// A `Path<T>` payload: its shape from ts-rs. `String` → `string`; a
-    /// tuple → positions; a struct → fields; a newtype (`TaskId(String)`) is
-    /// its own name, bound as one positional param.
     pub fn path<T: TS>(name: &str) -> Self {
         let ts_type = T::name();
         let (positions, fields) =
@@ -119,8 +111,8 @@ impl Arg {
             } else if TS_PRIMITIVES.contains(&ts_type.as_str()) {
                 (None, None)
             } else {
-                // A struct inlines to `{ … }`; a newtype inlines to its inner
-                // primitive and stays a single positional param under its name.
+                // ts-rs inlines a struct to `{ … }` and a newtype to its inner
+                // primitive, which parse_object_fields returns None for.
                 (None, parse_object_fields(&T::inline()))
             };
         Self {
@@ -169,9 +161,8 @@ impl Response {
     }
 }
 
-/// Reads `<dir>/handlers.json` (or nothing), replaces-or-inserts `handler`
-/// by fqname, sorts by fqname, writes it back. Under an exclusive file lock:
-/// the export tests run in parallel and each appends its own handler.
+/// Under an exclusive file lock: the export tests run in parallel and each
+/// appends its own handler to the shared `handlers.json`.
 pub fn append(dir: &Path, handler: Handler) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     let mut file = OpenOptions::new()

@@ -1,5 +1,5 @@
-//! The signature analysis behind `#[client]`, as plain syn over an `ItemFn`
-//! so it can be unit-tested without a compiler in the loop.
+//! Signature analysis behind `#[client]`: plain syn over an `ItemFn`. The
+//! attribute shell and token emission belong in `lib.rs`.
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
@@ -14,8 +14,7 @@ pub enum Kind {
     Multipart,
 }
 
-/// One extractor the client has to supply. `ty` is the payload type (the `T`
-/// of `Path<T>`); `None` only for `Multipart`, which has no Rust type to name.
+/// `ty` is `None` only for `Multipart`, which has no Rust payload type to name.
 #[derive(Debug)]
 pub struct Arg {
     pub name: String,
@@ -27,7 +26,6 @@ pub struct Arg {
 pub enum Response {
     Json(Type),
     NoContent,
-    /// `#[client(link)]`: not inspected; only a URL builder is generated.
     Link,
 }
 
@@ -38,10 +36,6 @@ pub struct Descriptor {
     pub response: Response,
 }
 
-/// Extractor idents recognised by their LAST path segment, so `axum::Json`,
-/// `Json` and an app's `ApiJson` wrapper all count. The `Api*` names are the
-/// wrappers Les apps use to answer a malformed request with the contract's
-/// rejection rather than axum's plain text; they carry the same payload.
 const PATH: &[&str] = &["Path", "ApiPath"];
 const QUERY: &[&str] = &["Query", "ApiQuery"];
 const BODY: &[&str] = &["Json", "ApiJson"];
@@ -132,8 +126,7 @@ fn response_of(name: &str, ty: &Type) -> syn::Result<Response> {
     };
     match ty {
         Type::Tuple(t) if t.elems.is_empty() => Ok(Response::NoContent),
-        // `(StatusCode, Json<T>)`, `(StatusCode, HeaderMap, Json<T>)`: the
-        // payload is the LAST element, as axum's IntoResponse tuples require.
+        // axum's IntoResponse tuples carry the payload as the last element.
         Type::Tuple(t) => match t.elems.last() {
             Some(last) => match last_segment(last) {
                 Some((seg, Some(inner))) if BODY.contains(&seg.ident.to_string().as_str()) => {
@@ -184,8 +177,6 @@ pub fn describe(item: &ItemFn, link: bool) -> syn::Result<Descriptor> {
                 ty,
             });
         }
-        // Anything else — State, guards, HeaderMap, custom extractors without
-        // a client-visible payload — is the server's business.
     }
     let response = if link {
         Response::Link
@@ -225,9 +216,6 @@ pub fn expand(attr: TokenStream, item: &ItemFn) -> syn::Result<TokenStream> {
     Ok(quote! {
         #item
 
-        // The descriptor's export, on the ts-rs pattern: a test that does
-        // nothing unless COMMON_ROUTING_EXPORT_DIR is set, so `cargo test`
-        // stays silent and the codegen recipe runs it with the variable set.
         #[cfg(test)]
         #[test]
         fn #test_name() {

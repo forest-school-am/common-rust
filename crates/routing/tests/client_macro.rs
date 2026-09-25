@@ -1,8 +1,6 @@
-//! `#[client]` end to end: annotate handlers, mount them, export both tables
-//! into a scratch directory, generate the client, read it back. The generated
-//! `export_client_*` tests are run in-process by calling the export helpers
-//! directly, because a test binary cannot re-run its own tests with an
-//! environment variable set.
+//! `#[client]` end to end: annotate handlers, mount them, generate the client.
+//! The macro-generated `export_client_*` tests are driven in-process here,
+//! because a test binary cannot re-run its own tests with an env var set.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;

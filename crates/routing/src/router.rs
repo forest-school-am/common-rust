@@ -1,4 +1,5 @@
-//! The recording router: axum's shape, plus a manifest.
+//! The recording [`Router`] wrapper over `axum::Router`. The manifest data type
+//! belongs in `manifest`; embedded-asset serving belongs in `static_files`.
 
 use std::any::type_name;
 use std::convert::Infallible;
@@ -15,13 +16,6 @@ use tower_service::Service;
 use crate::manifest::{parse_path_params, write_manifest, Registration};
 use crate::static_files::{content_type_for, safe_asset_path, serve_static, AssetSet, CachePolicy};
 
-/// An `axum::Router<S>` that remembers what was registered on it.
-///
-/// `.get(path, handler)` and its siblings are the RECORDING form: they take
-/// the handler itself, so its `type_name` can be captured. [`Router::route`]
-/// with a ready-made `MethodRouter` (axum's `get(handler)`) is passed through
-/// unrecorded — the name is gone by then. Register through the method calls
-/// and nothing is missing from the manifest.
 pub struct Router<S = ()> {
     inner: axum::Router<S>,
     manifest: Vec<Registration>,
@@ -54,13 +48,10 @@ where
         self.record_raw(type_name::<H>().to_owned(), method, path, method_router)
     }
 
-    /// Record a route with an EXPLICIT fqname, for handlers whose Rust type name
-    /// is not a useful (or unique) join key. The static-file helpers share one
-    /// closure type across every call site, so `type_name` would collide two
-    /// `static_file` mounts into one fqname (`HandlerMountedTwice`); they pass a
-    /// path-unique synthetic name here instead. Such a name never matches a real
-    /// `#[client]` handler fqname, so these routes are simply never joined to a
-    /// client function.
+    /// Takes an explicit fqname because the static-file helpers all share one
+    /// closure type, whose `type_name` would collide their mounts; a synthetic
+    /// per-path name never matches a `#[client]` fqname, so such routes never
+    /// join to a client function.
     fn record_raw(
         mut self,
         fqname: String,
@@ -152,8 +143,7 @@ where
         )
     }
 
-    /// axum's own `route`: NOT recorded (see the type docs). For routes that
-    /// must not appear in the manifest, or a `MethodRouter` built elsewhere.
+    /// axum's own `route`, NOT recorded into the manifest.
     pub fn route(mut self, path: &str, method_router: MethodRouter<S>) -> Self {
         self.inner = self.inner.route(path, method_router);
         self
