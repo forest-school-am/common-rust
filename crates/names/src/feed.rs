@@ -92,7 +92,19 @@ mod tests {
         )
         .unwrap();
         assert!(!full.is_empty());
-        assert_eq!(full.users, vec![Rename { old: "bob".into(), current: "bob2".into() }]);
-        assert_eq!(full.groups, vec![Rename { old: "dev".into(), current: "devs".into() }]);
+        assert_eq!(
+            full.users,
+            vec![Rename {
+                old: "bob".into(),
+                current: "bob2".into()
+            }]
+        );
+        assert_eq!(
+            full.groups,
+            vec![Rename {
+                old: "dev".into(),
+                current: "devs".into()
+            }]
+        );
     }
 }

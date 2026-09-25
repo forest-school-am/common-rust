@@ -12,7 +12,7 @@ mod sync;
 pub use apply::apply_column_renames;
 pub use common_names_derive::NameColumns;
 pub use feed::{NameDeltas, NameFeed, Rename};
-pub use sync::{spawn, BoxFuture, CursorStore, FileCursorStore, SqliteCursorStore, SyncConfig};
+pub use sync::{spawn, Apply, BoxFuture, SyncConfig, OVERLAP};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameKind {
@@ -47,7 +47,12 @@ mod tests {
         }
         let feed = NameFeed::new("http://127.0.0.1:8000", "a-bearer-token");
         let deltas = feed.changes_since(None).await?;
-        apply_column_renames(pool, FormRow::name_targets(), &deltas).await?;
+        apply_column_renames(
+            &mut *pool.acquire().await?,
+            FormRow::name_targets(),
+            &deltas,
+        )
+        .await?;
         Ok(())
     }
 }

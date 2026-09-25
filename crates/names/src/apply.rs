@@ -2,7 +2,7 @@
 //! blob, say) are the consumer's own shape and belong in a consumer-supplied
 //! apply closure, not here.
 
-use sqlx::SqlitePool;
+use sqlx::SqliteConnection;
 
 use crate::{NameDeltas, NameKind, NameTarget, Rename};
 
@@ -10,7 +10,7 @@ use crate::{NameDeltas, NameKind, NameTarget, Rename};
 /// safe only because [`NameTarget`]'s strings are compile-time literals from the
 /// derive, never input. Values are always bound. Returns the rows changed.
 pub async fn apply_column_renames(
-    pool: &SqlitePool,
+    conn: &mut SqliteConnection,
     targets: &[NameTarget],
     deltas: &NameDeltas,
 ) -> anyhow::Result<u64> {
@@ -32,7 +32,7 @@ pub async fn apply_column_renames(
             let result = sqlx::query(&sql)
                 .bind(&rename.current)
                 .bind(&rename.old)
-                .execute(pool)
+                .execute(&mut *conn)
                 .await
                 .map_err(|e| {
                     anyhow::anyhow!(
@@ -54,7 +54,7 @@ mod tests {
     use super::*;
     use crate::{NameColumns, Rename};
     use sqlx::sqlite::SqlitePoolOptions;
-    use sqlx::Row;
+    use sqlx::{Row, SqlitePool};
 
     #[derive(NameColumns)]
     #[names(table = "forms")]
@@ -146,9 +146,13 @@ mod tests {
         }
 
         let d = deltas(&[("bob", "bob2")], &[("dev", "devs")]);
-        let changed = apply_column_renames(&pool, AclRow::name_targets(), &d)
-            .await
-            .unwrap();
+        let changed = apply_column_renames(
+            &mut *pool.acquire().await.unwrap(),
+            AclRow::name_targets(),
+            &d,
+        )
+        .await
+        .unwrap();
         assert_eq!(changed, 4);
 
         let rows = sqlx::query("SELECT member, team FROM acl ORDER BY member, team")
@@ -182,9 +186,13 @@ mod tests {
             .unwrap();
 
         let d = deltas(&[("bob", "bob2")], &[]);
-        let changed = apply_column_renames(&pool, FormRow::name_targets(), &d)
-            .await
-            .unwrap();
+        let changed = apply_column_renames(
+            &mut *pool.acquire().await.unwrap(),
+            FormRow::name_targets(),
+            &d,
+        )
+        .await
+        .unwrap();
         assert_eq!(changed, 0);
         let owner: String = sqlx::query("SELECT owner FROM forms")
             .fetch_one(&pool)
@@ -202,9 +210,13 @@ mod tests {
             .await
             .unwrap();
         let d = deltas(&[], &[]);
-        let changed = apply_column_renames(&pool, FormRow::name_targets(), &d)
-            .await
-            .unwrap();
+        let changed = apply_column_renames(
+            &mut *pool.acquire().await.unwrap(),
+            FormRow::name_targets(),
+            &d,
+        )
+        .await
+        .unwrap();
         assert_eq!(changed, 0);
     }
 }

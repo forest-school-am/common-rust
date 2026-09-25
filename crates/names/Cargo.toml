@@ -17,6 +17,7 @@ serde_json.workspace = true
 # Same features the stand's sqlite services declare, so cargo unifies to one sqlx.
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
 tokio = { workspace = true, features = ["time", "rt"] }
+time = { version = "0.3", default-features = false, features = ["std", "parsing", "formatting"] }
 # The feed/apply surface returns anyhow::Result (task contract); the loop only
 # logs the error and retries.
 anyhow = "1"
