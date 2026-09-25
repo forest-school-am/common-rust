@@ -21,8 +21,10 @@ mod client;
 mod config;
 mod error;
 mod page_config;
+mod predicate;
 mod principal;
 mod retry;
+mod section;
 mod store;
 mod web;
 
@@ -36,16 +38,17 @@ pub const SHIM_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/common-oidc.js
 pub const SHIM_DTS: &str = include_str!("common-oidc.public.d.ts");
 
 pub use auth::{
-    deny, set_auth_context, unauthorized, And, AuthContext, AuthProviders, AuthVia, Authenticated,
-    Denial, GatedBy, Group, HasGroup, MaybeAuthenticated, Not, Or, Predicate, Refusals,
-    ServiceAccount,
+    deny, set_auth_context, unauthorized, AuthContext, AuthProviders, AuthVia, Authenticated,
+    GatedBy, MaybeAuthenticated, Refusals, ServiceAccount,
 };
 pub use bearer::{BearerValidator, ValidationError};
 pub use client::{OidcClient, TokenBundle};
 pub use config::OidcConfig;
 pub use error::{OidcError, Upstream};
 pub use page_config::{PageConfig, PageUser};
-pub use principal::{GateDenied, Principal};
+pub use predicate::{And, Denial, Group, HasGroup, Not, Or, Predicate};
+pub use principal::{MissingGroup, Principal};
+pub use section::OidcSection;
 pub use store::{
     BoxFuture, FlowState, FlowStore, MemoryFlowStore, MemoryStore, Session, SessionStore,
 };

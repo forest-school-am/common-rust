@@ -1,5 +1,5 @@
-//! The authenticated caller and the group-membership gate. Pure data and
-//! predicates — no IO, no HTTP, no storage.
+//! The authenticated caller and its one-group gate. Pure data — no IO, no
+//! HTTP, no storage. Composable gates (and/or/not over groups) are predicate.rs.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -7,7 +7,6 @@ use axum::response::{IntoResponse, Response};
 #[derive(Debug, Clone)]
 pub struct Principal {
     pub username: String,
-    pub email: Option<String>,
     pub effective_groups: Vec<String>,
 }
 
@@ -15,12 +14,10 @@ impl Principal {
     pub(crate) fn from_userinfo(
         sub: &str,
         username: Option<String>,
-        email: Option<String>,
         effective_groups: &[String],
     ) -> Result<Self, String> {
         Ok(Self {
             username: username.unwrap_or_else(|| sub.to_owned()),
-            email,
             effective_groups: effective_groups.to_vec(),
         })
     }
@@ -29,19 +26,20 @@ impl Principal {
         self.effective_groups.iter().any(|g| g == group)
     }
 
-    pub fn require_group(&self, group: &str) -> Result<(), GateDenied> {
+    pub fn require_group(&self, group: &str) -> Result<(), MissingGroup> {
         if self.in_group(group) {
             Ok(())
         } else {
-            Err(GateDenied)
+            Err(MissingGroup)
         }
     }
 }
 
+/// 403: the caller is authenticated but not in the required group.
 #[derive(Debug)]
-pub struct GateDenied;
+pub struct MissingGroup;
 
-impl IntoResponse for GateDenied {
+impl IntoResponse for MissingGroup {
     fn into_response(self) -> Response {
         (StatusCode::FORBIDDEN, "forbidden: missing required group").into_response()
     }
@@ -54,7 +52,6 @@ mod tests {
     fn p(groups: &[&str]) -> Principal {
         Principal {
             username: "alice".into(),
-            email: None,
             effective_groups: groups.iter().map(|g| (*g).to_owned()).collect(),
         }
     }

@@ -21,8 +21,6 @@ struct UserInfoResponse {
     #[serde(default)]
     preferred_username: Option<String>,
     #[serde(default)]
-    email: Option<String>,
-    #[serde(default)]
     effective_groups: Vec<String>,
 }
 
@@ -54,13 +52,8 @@ impl BearerValidator {
                 let body: UserInfoResponse = resp.json().await.map_err(|e| {
                     ValidationError::Upstream(format!("userinfo returned invalid payload: {e}"))
                 })?;
-                Principal::from_userinfo(
-                    &body.sub,
-                    body.preferred_username,
-                    body.email,
-                    &body.effective_groups,
-                )
-                .map_err(ValidationError::Upstream)
+                Principal::from_userinfo(&body.sub, body.preferred_username, &body.effective_groups)
+                    .map_err(ValidationError::Upstream)
             }
             reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
                 Err(ValidationError::Rejected)

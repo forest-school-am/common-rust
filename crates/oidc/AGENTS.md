@@ -14,8 +14,14 @@ contract. No login/logout UI — logout lives only at authentik.
   block a service serialises into its shell (paths from `OidcConfig`, the
   display name from the service, portrait always null on this stand).
 - `src/client.rs` — `OidcClient`: discovery, PKCE, exchange, refresh, userinfo.
+- `src/section.rs` — `OidcSection`, the `[oidc]` `#[derive(Config)]` section
+  a consumer nests; `to_config(deployment)` yields the `OidcConfig`.
 - `src/bearer.rs` — `BearerValidator` for bearer-API services (no discovery).
 - `src/principal.rs` — `Principal` + the single identity-contract enforcer.
+- `src/predicate.rs` — the access-control algebra: `Predicate`, `Group`,
+  `HasGroup`, `And`/`Or`/`Not`, `Denial`.
+- `src/auth.rs` — `set_auth_context` middleware and the typed extractors
+  (`Authenticated`, `ServiceAccount`, `MaybeAuthenticated`, `GatedBy<P>`).
 - `src/store.rs` — server-side state the browser holds only an id for:
   `SessionStore`/`MemoryStore` for established sessions, `FlowStore`/
   `MemoryFlowStore` for logins in flight.
@@ -33,7 +39,7 @@ contract. No login/logout UI — logout lives only at authentik.
   `OidcConfig::request_refresh_tokens()`, and only once the live canary is
   green (DECISIONS.md R2). The canary is the go/no-go — keep it.
 - `Principal::from_userinfo` is the ONLY place `sub`/`effective_groups` are
-  parsed (UUIDs, fail-closed). Both the BFF and bearer paths route through it.
+  read. Both the BFF and bearer paths route through it.
 - `resolve_session` is the mechanism; the extractor is thin policy on top.
 - **The browser never holds flow data.** The CSRF `state`, the PKCE verifier
   and the post-login `next` live in the `FlowStore`; the `oidc_flow` cookie
@@ -43,7 +49,7 @@ contract. No login/logout UI — logout lives only at authentik.
   move any of it back into the cookie; if it ever must live client-side it
   needs a signed or encrypted jar, never a plain one.
 - Identity is resolved in exactly one place; gates read the downward-closure
-  `effective_groups` by UUID, never names.
+  `effective_groups` of group names (R123).
 - Explicit rustls, default-features off (openssl-free); feature-trimmed deps.
 
 ## Run / test

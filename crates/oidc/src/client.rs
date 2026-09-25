@@ -10,9 +10,8 @@ use openidconnect::core::{
 use openidconnect::{
     AccessToken, AdditionalClaims, AuthUrl, AuthorizationCode, Client, ClientId, ClientSecret,
     CsrfToken, EmptyExtraTokenFields, EndpointNotSet, EndpointSet, IdTokenFields, IssuerUrl,
-    JsonWebKeySet,
-    Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
-    RequestTokenError, Scope, StandardErrorResponse, StandardTokenResponse, TokenUrl,
+    JsonWebKeySet, Nonce, OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl,
+    RefreshToken, RequestTokenError, Scope, StandardErrorResponse, StandardTokenResponse, TokenUrl,
     UserInfoClaims, UserInfoError, UserInfoUrl,
 };
 use serde::{Deserialize, Serialize};
@@ -264,7 +263,6 @@ impl OidcClient {
         Principal::from_userinfo(
             claims.subject().as_str(),
             claims.preferred_username().map(|u| u.as_str().to_owned()),
-            claims.email().map(|e| e.as_str().to_owned()),
             &claims.additional_claims().effective_groups,
         )
         .map_err(Upstream::Rejected)

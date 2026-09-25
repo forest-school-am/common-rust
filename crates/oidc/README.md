@@ -114,30 +114,29 @@ is enabled (Track B) it first tries a server-side refresh, once.
 
 ```rust
 use common_oidc::Principal;
-use uuid::Uuid;
 
 async fn index(user: Principal) -> String {
     format!("hello {}", user.username) // logged-in-as indicator
 }
 
 // downward-closure gate (parents inherit children): 403 on failure
-async fn admin(user: Principal) -> Result<String, common_oidc::GateDenied> {
-    let cron_admins: Uuid = "d427f013-3bef-45e7-96aa-32545b58f845".parse().unwrap();
-    user.require_group(&cron_admins)?;
+async fn admin(user: Principal) -> Result<String, common_oidc::MissingGroup> {
+    user.require_group("cron-admins")?;
     Ok("secret".into())
 }
 ```
 
-`Principal { uuid, username, email, effective_groups }` — `effective_groups`
-is the downward closure of group **UUIDs** (never names); gate on UUIDs, which
-the stand publishes in `Les/state.json` (R10: stand config lives in common
-scope under no repo).
+`Principal { username, effective_groups }` — `effective_groups` is the
+downward closure of group **names** (R123).
 
 `require_group` (above) gates one handler and returns 403 on failure. Most
-apps instead gate once in **middleware** with `principal.in_group(&uuid)` —
-extract the `Principal`, check `in_group`, and reject the whole route group in
-one place rather than per handler. Both read the same downward-closure
-`effective_groups`.
+apps instead gate once with the typed extractors — `Authenticated`,
+`GatedBy<P>` over the predicate algebra (`HasGroup`, `And`, `Or`, `Not` in
+`src/predicate.rs`) — so a compiling handler is a checked handler. Both read
+the same downward-closure `effective_groups`.
+
+`OidcSection` is the `[oidc]` section for a consumer's `#[derive(Config)]`
+root: nest it, then `section.to_config(deployment)` yields the `OidcConfig`.
 
 ### Frontend: the 401 shim
 

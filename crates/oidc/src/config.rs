@@ -46,7 +46,7 @@ impl OidcConfig {
             client_id: client_id.into(),
             client_secret: None,
             redirect_url,
-            scopes: ["openid", "profile", "email", "effective_groups"]
+            scopes: ["openid", "profile", "effective_groups"]
                 .map(String::from)
                 .to_vec(),
             login_path: LOGIN_PATH.into(),

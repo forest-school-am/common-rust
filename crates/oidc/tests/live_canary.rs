@@ -267,7 +267,7 @@ async fn effective_groups_is_a_downward_closure_never_an_upward_one() {
     let Some(mut e) = env() else { return };
 
     let admin = reqwest::Client::new();
-    let pk = |name: &'static str, ak: String, tok: String, c: reqwest::Client| async move {
+    let exists = |name: &'static str, ak: String, tok: String, c: reqwest::Client| async move {
         let v: Value = c
             .get(format!("{ak}/api/v3/core/groups/?name={name}"))
             .bearer_auth(tok)
@@ -277,12 +277,12 @@ async fn effective_groups_is_a_downward_closure_never_an_upward_one() {
             .json()
             .await
             .unwrap();
-        let pk = v["results"][0]["pk"]
+        v["results"][0]["pk"]
             .as_str()
             .unwrap_or_else(|| panic!("group {name} not in the stand — run stand/setup.py"));
-        uuid::Uuid::parse_str(pk).unwrap()
+        name.to_owned()
     };
-    let g = |n| pk(n, e.ak.clone(), e.token.clone(), admin.clone());
+    let g = |n| exists(n, e.ak.clone(), e.token.clone(), admin.clone());
     let (root, ops, dev, dev_junior, search_users) = (
         g("root").await,
         g("ops").await,
@@ -294,7 +294,7 @@ async fn effective_groups_is_a_downward_closure_never_an_upward_one() {
     e.user = "dave".into();
     let mut dave = groups_of(&e).await;
     dave.sort();
-    let mut want = vec![ops, dev_junior, search_users];
+    let mut want = vec![ops.clone(), dev_junior.clone(), search_users.clone()];
     want.sort();
     assert_eq!(
         dave, want,
@@ -305,7 +305,7 @@ async fn effective_groups_is_a_downward_closure_never_an_upward_one() {
     e.user = "carol".into();
     let mut carol = groups_of(&e).await;
     carol.sort();
-    let mut want = vec![dev_junior, search_users];
+    let mut want = vec![dev_junior.clone(), search_users.clone()];
     want.sort();
     assert_eq!(
         carol, want,
@@ -315,7 +315,7 @@ async fn effective_groups_is_a_downward_closure_never_an_upward_one() {
     assert!(!carol.contains(&root) && !carol.contains(&dev) && !carol.contains(&ops));
 }
 
-async fn groups_of(e: &Env) -> Vec<uuid::Uuid> {
+async fn groups_of(e: &Env) -> Vec<String> {
     let jar = std::sync::Arc::new(reqwest::cookie::Jar::default());
     let browser = reqwest::Client::builder()
         .cookie_provider(jar.clone())

@@ -1,7 +1,7 @@
-//! Authorization orchestration, shared by the stand's apps. The two validated
-//! identities are never re-implemented here: the browser OIDC session
-//! ([`OidcState`]) and the bearer service-account token ([`BearerValidator`])
-//! are resolved by their own modules and only consumed here.
+//! The middleware that resolves identity once per request, and the extractors
+//! that turn it into typed handler arguments and refusal responses. Identity
+//! itself is resolved by web.rs (session) and bearer.rs (token); the gate
+//! algebra a `GatedBy` evaluates is predicate.rs.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -18,6 +18,7 @@ use tracing::Instrument;
 use common_logging as log;
 
 use crate::bearer::BearerValidator;
+use crate::predicate::{Denial, Predicate};
 use crate::principal::Principal;
 use crate::web::OidcState;
 
@@ -219,7 +220,6 @@ fn disabled_principal(parts: &Parts) -> Arc<Principal> {
         .unwrap_or_else(|| {
             Arc::new(Principal {
                 username: "-".to_owned(),
-                email: None,
                 effective_groups: Vec::new(),
             })
         })
@@ -279,84 +279,6 @@ pub fn deny(parts: &Parts, denial: Denial) -> Response {
 
 pub fn unauthorized(parts: &Parts) -> Response {
     unauthorized_wire(parts)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Denial {
-    pub gate: String,
-}
-
-impl Denial {
-    pub fn new(gate: impl Into<String>) -> Self {
-        Self { gate: gate.into() }
-    }
-
-    pub fn group(group: Option<String>) -> Self {
-        Self {
-            gate: match group {
-                Some(g) => format!("{g} (effective membership)"),
-                None => "-".to_owned(),
-            },
-        }
-    }
-}
-
-pub trait Predicate<S>: 'static {
-    fn check(principal: &Principal, state: &S) -> Result<(), Denial>;
-}
-
-pub trait Group<S>: 'static {
-    fn group(state: &S) -> Option<String>;
-}
-
-pub struct HasGroup<G>(PhantomData<G>);
-
-impl<S, G: Group<S>> Predicate<S> for HasGroup<G> {
-    fn check(principal: &Principal, state: &S) -> Result<(), Denial> {
-        let group = G::group(state);
-        match &group {
-            Some(g) if principal.in_group(g) => Ok(()),
-            _ => Err(Denial::group(group)),
-        }
-    }
-}
-
-pub struct Or<A, B>(PhantomData<(A, B)>);
-
-impl<S, A: Predicate<S>, B: Predicate<S>> Predicate<S> for Or<A, B> {
-    fn check(principal: &Principal, state: &S) -> Result<(), Denial> {
-        match A::check(principal, state) {
-            Ok(()) => Ok(()),
-            Err(a) => match B::check(principal, state) {
-                Ok(()) => Ok(()),
-                Err(b) => Err(Denial {
-                    gate: format!("{} or {}", a.gate, b.gate),
-                }),
-            },
-        }
-    }
-}
-
-pub struct And<A, B>(PhantomData<(A, B)>);
-
-impl<S, A: Predicate<S>, B: Predicate<S>> Predicate<S> for And<A, B> {
-    fn check(principal: &Principal, state: &S) -> Result<(), Denial> {
-        A::check(principal, state)?;
-        B::check(principal, state)
-    }
-}
-
-pub struct Not<A>(PhantomData<A>);
-
-impl<S, A: Predicate<S>> Predicate<S> for Not<A> {
-    fn check(principal: &Principal, state: &S) -> Result<(), Denial> {
-        match A::check(principal, state) {
-            Ok(()) => Err(Denial {
-                gate: "must not satisfy the excluded rule".to_owned(),
-            }),
-            Err(_) => Ok(()),
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -434,13 +356,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::predicate::{Group, HasGroup};
     use axum::body::Body;
     use axum::http::Request as HttpRequest;
 
     fn principal(name: &str, groups: &[&str]) -> Arc<Principal> {
         Arc::new(Principal {
             username: name.to_owned(),
-            email: None,
             effective_groups: groups.iter().map(|g| (*g).to_owned()).collect(),
         })
     }
@@ -472,23 +394,15 @@ mod tests {
     }
 
     const GATE: &str = "gate-group";
-    const INDEX: &str = "index-group";
 
     struct TestState {
         gate: Option<String>,
-        index: Option<String>,
     }
 
     struct GateGroup;
-    struct IndexGroup;
     impl Group<TestState> for GateGroup {
         fn group(s: &TestState) -> Option<String> {
             s.gate.clone()
-        }
-    }
-    impl Group<TestState> for IndexGroup {
-        fn group(s: &TestState) -> Option<String> {
-            s.index.clone()
         }
     }
 
@@ -611,7 +525,6 @@ mod tests {
     async fn gated_by_passes_denies_and_bypasses_when_disabled() {
         let state = TestState {
             gate: Some(GATE.into()),
-            index: Some(INDEX.into()),
         };
         let member = AuthContext::Authenticated {
             principal: principal("alice", &[GATE]),
@@ -638,10 +551,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unconfigured_group_never_passes() {
-        let state = TestState {
-            gate: None,
-            index: None,
-        };
+        let state = TestState { gate: None };
         let anyone = AuthContext::Authenticated {
             principal: principal("alice", &[GATE]),
             via: AuthVia::Session,
@@ -650,60 +560,6 @@ mod tests {
             gate_status::<HasGroup<GateGroup>>(anyone, &state).await,
             StatusCode::FORBIDDEN
         );
-    }
-
-    fn check<P: Predicate<TestState>>(groups: &[&str], state: &TestState) -> bool {
-        P::check(
-            &Principal {
-                username: "t".into(),
-                email: None,
-                effective_groups: groups.iter().map(|g| (*g).to_owned()).collect(),
-            },
-            state,
-        )
-        .is_ok()
-    }
-
-    #[test]
-    fn combinator_truth_table() {
-        let state = TestState {
-            gate: Some(GATE.into()),
-            index: Some(INDEX.into()),
-        };
-        type G = HasGroup<GateGroup>;
-        type I = HasGroup<IndexGroup>;
-
-        assert!(check::<Or<G, I>>(&[GATE], &state));
-        assert!(check::<Or<G, I>>(&[INDEX], &state));
-        assert!(check::<Or<G, I>>(&[GATE, INDEX], &state));
-        assert!(!check::<Or<G, I>>(&["random-group"], &state));
-
-        assert!(check::<And<G, I>>(&[GATE, INDEX], &state));
-        assert!(!check::<And<G, I>>(&[GATE], &state));
-        assert!(!check::<And<G, I>>(&[INDEX], &state));
-
-        assert!(check::<Not<G>>(&[INDEX], &state));
-        assert!(!check::<Not<G>>(&[GATE], &state));
-    }
-
-    #[test]
-    fn or_denial_names_both_required_groups() {
-        let state = TestState {
-            gate: Some(GATE.into()),
-            index: Some(INDEX.into()),
-        };
-        let denial = <Or<HasGroup<GateGroup>, HasGroup<IndexGroup>>>::check(
-            &Principal {
-                username: "t".into(),
-                email: None,
-                effective_groups: vec![],
-            },
-            &state,
-        )
-        .expect_err("no group -> denied");
-        assert!(denial.gate.contains(GATE), "{}", denial.gate);
-        assert!(denial.gate.contains(INDEX), "{}", denial.gate);
-        assert!(denial.gate.contains(" or "), "{}", denial.gate);
     }
 
     #[tokio::test]

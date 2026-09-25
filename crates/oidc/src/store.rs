@@ -5,9 +5,8 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
-
-use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -45,125 +44,117 @@ pub trait FlowStore: Send + Sync + 'static {
     fn remove(&self, id: &str) -> BoxFuture<'_, ()>;
 }
 
-pub struct MemoryFlowStore {
-    flows: Mutex<HashMap<String, FlowState>>,
-    max_age: Duration,
-}
-
-impl Default for MemoryFlowStore {
-    fn default() -> Self {
-        Self {
-            flows: Mutex::new(HashMap::new()),
-            max_age: Duration::from_secs(10 * 60),
-        }
-    }
-}
-
-impl MemoryFlowStore {
-    pub fn with_max_age(max_age: Duration) -> Self {
-        Self {
-            flows: Mutex::new(HashMap::new()),
-            max_age,
-        }
-    }
-
-    fn sweep(&self, flows: &mut HashMap<String, FlowState>) {
-        let now = SystemTime::now();
-        flows.retain(|_, f| {
-            now.duration_since(f.created)
-                .map(|age| age < self.max_age)
-                .unwrap_or(true)
-        });
-    }
-}
-
-impl FlowStore for MemoryFlowStore {
-    fn get(&self, id: &str) -> BoxFuture<'_, Option<FlowState>> {
-        let id = id.to_owned();
-        Box::pin(async move {
-            let mut flows = self.flows.lock().await;
-            self.sweep(&mut flows);
-            flows.get(&id).cloned()
-        })
-    }
-
-    fn put(&self, id: String, flow: FlowState) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            let mut flows = self.flows.lock().await;
-            self.sweep(&mut flows);
-            flows.insert(id, flow);
-        })
-    }
-
-    fn remove(&self, id: &str) -> BoxFuture<'_, ()> {
-        let id = id.to_owned();
-        Box::pin(async move {
-            self.flows.lock().await.remove(&id);
-        })
-    }
-}
-
 pub trait SessionStore: Send + Sync + 'static {
     fn get(&self, id: &str) -> BoxFuture<'_, Option<Session>>;
     fn put(&self, id: String, session: Session) -> BoxFuture<'_, ()>;
     fn remove(&self, id: &str) -> BoxFuture<'_, ()>;
 }
 
-pub struct MemoryStore {
-    sessions: Mutex<HashMap<String, Session>>,
+/// Readers share the lock; a `put` takes it exclusively and sweeps expired
+/// entries. The lock is never held across an await.
+struct Expiring<T> {
+    entries: RwLock<HashMap<String, T>>,
     max_age: Duration,
+    created: fn(&T) -> SystemTime,
 }
+
+impl<T: Clone> Expiring<T> {
+    fn new(max_age: Duration, created: fn(&T) -> SystemTime) -> Self {
+        Self {
+            entries: RwLock::new(HashMap::new()),
+            max_age,
+            created,
+        }
+    }
+
+    fn live(&self, value: &T, now: SystemTime) -> bool {
+        now.duration_since((self.created)(value))
+            .map(|age| age < self.max_age)
+            .unwrap_or(true)
+    }
+
+    fn get(&self, id: &str) -> Option<T> {
+        let entries = self.entries.read().unwrap_or_else(|e| e.into_inner());
+        entries
+            .get(id)
+            .filter(|value| self.live(value, SystemTime::now()))
+            .cloned()
+    }
+
+    fn put(&self, id: String, value: T) {
+        let now = SystemTime::now();
+        let mut entries = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        entries.retain(|_, value| self.live(value, now));
+        entries.insert(id, value);
+    }
+
+    fn remove(&self, id: &str) {
+        self.entries
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+    }
+}
+
+pub struct MemoryFlowStore(Expiring<FlowState>);
+
+impl Default for MemoryFlowStore {
+    fn default() -> Self {
+        Self::with_max_age(Duration::from_secs(10 * 60))
+    }
+}
+
+impl MemoryFlowStore {
+    pub fn with_max_age(max_age: Duration) -> Self {
+        Self(Expiring::new(max_age, |f| f.created))
+    }
+}
+
+impl FlowStore for MemoryFlowStore {
+    fn get(&self, id: &str) -> BoxFuture<'_, Option<FlowState>> {
+        let found = self.0.get(id);
+        Box::pin(async move { found })
+    }
+
+    fn put(&self, id: String, flow: FlowState) -> BoxFuture<'_, ()> {
+        self.0.put(id, flow);
+        Box::pin(async {})
+    }
+
+    fn remove(&self, id: &str) -> BoxFuture<'_, ()> {
+        self.0.remove(id);
+        Box::pin(async {})
+    }
+}
+
+pub struct MemoryStore(Expiring<Session>);
 
 impl Default for MemoryStore {
     fn default() -> Self {
-        Self {
-            sessions: Mutex::new(HashMap::new()),
-            max_age: Duration::from_secs(12 * 3600),
-        }
+        Self::with_max_age(Duration::from_secs(12 * 3600))
     }
 }
 
 impl MemoryStore {
     pub fn with_max_age(max_age: Duration) -> Self {
-        Self {
-            sessions: Mutex::new(HashMap::new()),
-            max_age,
-        }
-    }
-
-    fn sweep(&self, sessions: &mut HashMap<String, Session>) {
-        let now = SystemTime::now();
-        sessions.retain(|_, s| {
-            now.duration_since(s.created)
-                .map(|age| age < self.max_age)
-                .unwrap_or(true)
-        });
+        Self(Expiring::new(max_age, |s| s.created))
     }
 }
 
 impl SessionStore for MemoryStore {
     fn get(&self, id: &str) -> BoxFuture<'_, Option<Session>> {
-        let id = id.to_owned();
-        Box::pin(async move {
-            let mut sessions = self.sessions.lock().await;
-            self.sweep(&mut sessions);
-            sessions.get(&id).cloned()
-        })
+        let found = self.0.get(id);
+        Box::pin(async move { found })
     }
 
     fn put(&self, id: String, session: Session) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            let mut sessions = self.sessions.lock().await;
-            self.sweep(&mut sessions);
-            sessions.insert(id, session);
-        })
+        self.0.put(id, session);
+        Box::pin(async {})
     }
 
     fn remove(&self, id: &str) -> BoxFuture<'_, ()> {
-        let id = id.to_owned();
-        Box::pin(async move {
-            self.sessions.lock().await.remove(&id);
-        })
+        self.0.remove(id);
+        Box::pin(async {})
     }
 }
 
@@ -253,5 +244,29 @@ mod tests {
             "expired session must be swept"
         );
         assert!(s.get("new").await.is_some());
+    }
+
+    #[tokio::test]
+    async fn an_entry_that_expires_between_put_and_get_is_gone_without_a_sweep() {
+        let s = MemoryStore::with_max_age(Duration::from_millis(1));
+        s.put("a".into(), session(SystemTime::now())).await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert!(s.get("a").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn concurrent_readers_do_not_serialise() {
+        let s = std::sync::Arc::new(MemoryStore::default());
+        s.put("a".into(), session(SystemTime::now())).await;
+        let held = s.0.entries.read().unwrap();
+        let reader = s.clone();
+        let got = tokio::task::spawn_blocking(move || reader.0.get("a").is_some())
+            .await
+            .unwrap();
+        drop(held);
+        assert!(
+            got,
+            "a get must complete while another reader holds the lock"
+        );
     }
 }
