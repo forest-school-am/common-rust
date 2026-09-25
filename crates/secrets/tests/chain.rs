@@ -221,7 +221,10 @@ async fn doc_handle(stream: &mut TcpStream, seen: &Mutex<Vec<Req>>) -> std::io::
     let (method, path) = (req.method.as_str(), req.path.as_str());
 
     let (code, body) = if path.contains("/application/o/token/") {
-        (200, r#"{"access_token":"jwt-xyz","expires_in":300}"#.to_string())
+        (
+            200,
+            r#"{"access_token":"jwt-xyz","expires_in":300}"#.to_string(),
+        )
     } else if path == "/v1/auth/jwt/login" {
         (
             200,
@@ -250,7 +253,9 @@ fn kv_requests(seen: &Mutex<Vec<Req>>) -> Vec<(String, String, String)> {
     seen.lock()
         .unwrap()
         .iter()
-        .filter(|r| r.path.starts_with("/v1/kv/data/tasks") || r.path.starts_with("/v1/kv/metadata/tasks"))
+        .filter(|r| {
+            r.path.starts_with("/v1/kv/data/tasks") || r.path.starts_with("/v1/kv/metadata/tasks")
+        })
         .map(|r| (r.method.clone(), r.path.clone(), r.body.clone()))
         .collect()
 }
@@ -324,6 +329,9 @@ async fn leading_slash_in_a_doc_path_is_normalised() {
     let (addr, _seen) = spawn_doc_server().await;
     let client = make_client(addr);
 
-    let doc = client.read_doc("/tasks/connector-principals").await.unwrap();
+    let doc = client
+        .read_doc("/tasks/connector-principals")
+        .await
+        .unwrap();
     assert_eq!(doc.len(), 2);
 }

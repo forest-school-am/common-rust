@@ -104,16 +104,18 @@ impl SecretClient {
     /// document is `Error::NotFound`, not an empty map — the caller distinguishes
     /// "no secrets set" from "set but empty" by catching NotFound.
     pub async fn read_doc(&self, path: &str) -> Result<BTreeMap<String, Secret>, Error> {
-        self.with_reauth(move |token| async move {
-            collect(&self.get(&token, path).await?)
-        })
-        .await
+        self.with_reauth(move |token| async move { collect(&self.get(&token, path).await?) })
+            .await
     }
 
     /// Replace the kv-v2 document at `path` with exactly `data` (kv-v2 write
     /// semantics: fields absent from `data` are gone after this). Values are the
     /// plaintext to store; they are never logged or Displayed.
-    pub async fn write_doc(&self, path: &str, data: &BTreeMap<String, String>) -> Result<(), Error> {
+    pub async fn write_doc(
+        &self,
+        path: &str,
+        data: &BTreeMap<String, String>,
+    ) -> Result<(), Error> {
         self.with_reauth(move |token| async move { self.put(&token, path, data).await })
             .await
     }
@@ -202,9 +204,9 @@ impl SecretClient {
                     stage: Stage::AuthentikToken,
                     detail: format!("token endpoint returned {status}"),
                 })
-            }
+            };
         }
-        
+
         let body: TokenResponse = resp.json().await.map_err(|e| Error::Upstream {
             stage: Stage::AuthentikToken,
             detail: format!("invalid token payload: {e}"),
@@ -234,7 +236,7 @@ impl SecretClient {
                     stage: Stage::VaultLogin,
                     detail: format!("jwt login returned {status}"),
                 })
-            }
+            };
         }
         let body: VaultLoginResponse = resp.json().await.map_err(|e| Error::Upstream {
             stage: Stage::VaultLogin,
@@ -270,7 +272,7 @@ impl SecretClient {
                     stage: Stage::VaultRead,
                     detail: format!("kv read returned {status}"),
                 })
-            }
+            };
         }
         let body: KvRead = resp.json().await.map_err(|e| Error::Upstream {
             stage: Stage::VaultRead,
@@ -307,7 +309,7 @@ impl SecretClient {
                     stage: Stage::VaultRead,
                     detail: format!("kv write returned {status}"),
                 })
-            }
+            };
         }
         Ok(())
     }
@@ -325,7 +327,7 @@ impl SecretClient {
                 detail: e.to_string(),
             })?;
         let status = resp.status();
-        if status.is_success() || status == StatusCode::NOT_FOUND {
+        if !status.is_success() && status != StatusCode::NOT_FOUND {
             return if AUTH_REJECT.contains(&status) {
                 Err(Error::AuthRejected(Stage::VaultRead))
             } else {
@@ -333,7 +335,7 @@ impl SecretClient {
                     stage: Stage::VaultRead,
                     detail: format!("kv delete returned {status}"),
                 })
-            }
+            };
         }
         Ok(())
     }
