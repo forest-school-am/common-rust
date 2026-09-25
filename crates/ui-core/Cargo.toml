@@ -5,7 +5,19 @@ edition.workspace = true
 license.workspace = true
 description = "The BUILT common-ui core carried in a crate (R117): base.css, elements.css, common-ui.js, the shell and the d.ts as committed consts, plus their SRI and the CSP. No Garage fetch — the Cargo version is the pin."
 
-# No dependencies: this crate is nothing but bytes. common-ui-e's build.sh
-# emits the assets under src/assets/ (committed) and this crate include_str!s
-# them, exactly the "built assets in a crate" model the oidc shim uses.
+# Bytes by default: nothing here is linked into a runtime binary but the assets.
+# The `build` feature adds the build-time glue a consumer's build.rs calls (the
+# old common-ui-build, ui-build.1), and only then are `upon` and the theme's SRI
+# pulled in. common-ui-e's build.sh emits the assets under src/assets/
+# (committed) and this crate include_str!s them.
 [dependencies]
+common-theme = { workspace = true, optional = true }
+# Same version and features as common-templating's, so the workspace keeps one
+# `upon`; it is a leaf, so there is no cycle.
+upon = { version = "0.11", default-features = false, features = [
+    "serde",
+    "syntax",
+], optional = true }
+
+[features]
+build = ["dep:common-theme", "dep:upon"]

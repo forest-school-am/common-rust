@@ -394,12 +394,15 @@ version = "0.3.0"
 dependencies = [
  "common-theme",
  "common-ui-core",
- "upon",
 ]
 
 [[package]]
 name = "common-ui-core"
 version = "0.3.0"
+dependencies = [
+ "common-theme",
+ "upon",
+]
 
 [[package]]
 name = "const-oid"

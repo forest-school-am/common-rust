@@ -9,10 +9,6 @@ description = "Build-script helper for common-ui consumers (R117): stamp the she
 # The assets themselves: this crate is the build-time glue around them, so the
 # SRIs, the d.ts and the CSP are read straight from the crates that carry the
 # bytes — no fetch, no manifest, no pin machinery.
-common-ui-core.workspace = true
+common-ui-core = { workspace = true, features = ["build"] }
 common-theme.workspace = true
-# The stamp engine: `[[name]]` BUILD markers filled here, `{{name}}` RUNTIME
-# markers left for common-templating's render. Same version/features as that
-# crate so the workspace keeps one `upon` — and no dep cycle: `upon` is a leaf
-# and common-templating does not depend on this crate.
-upon = { version = "0.11", default-features = false, features = ["serde", "syntax"] }
+# The stamp engine moved with the glue: common-ui-core's `build` feature pulls it.

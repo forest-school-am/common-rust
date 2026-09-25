@@ -84,3 +84,8 @@ mod tests {
         );
     }
 }
+
+/// The build-time glue a consumer's `build.rs` calls (ui-build.1). Behind the
+/// `build` feature: a runtime binary links the bytes and nothing else.
+#[cfg(feature = "build")]
+pub mod build;
