@@ -39,6 +39,18 @@ hiding one) is a compile error naming the handler. `#[client(link)]` is for
 a handler the browser NAVIGATES to (a download): the return is not inspected
 and the client gets `<name>Url(...)` only.
 
+`#[client(path = "/api/groups/{group_name}")]` is for a handler whose path
+params are read INSIDE a guard extractor — an auth check that does its own
+`Path<…>` and hands the handler an already-authorized value. Such a handler
+has no `Path<T>` in its signature, so the generator has nothing to bind the
+route's params to and refuses. Declaring the template gives it the names
+without a second, redundant extraction of the same segments. A bare `{param}`
+is a `string`, which is what a URL segment is; `{id: number}` says otherwise
+(`string`, `number`, `boolean`, `bigint`). Declaring a path on a handler that
+already takes a `Path<T>` is an error — two sources for one thing can only
+disagree — and a declared name that the mounted route does not have is caught
+by the generator, naming both spellings. It composes with `link`.
+
 The attribute emits, beside the untouched handler, `#[cfg(test)] #[test] fn
 export_client_<name>()` — the ts-rs pattern: inert unless
 `COMMON_ROUTING_EXPORT_DIR` is set, then it appends the descriptor to

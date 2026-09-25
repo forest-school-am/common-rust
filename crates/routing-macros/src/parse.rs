@@ -3,8 +3,12 @@
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
+use syn::parse::Parser;
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{Error, FnArg, GenericArgument, ItemFn, Pat, PathArguments, ReturnType, Type};
+use syn::{
+    Error, FnArg, GenericArgument, ItemFn, Meta, Pat, PathArguments, ReturnType, Token, Type,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -41,16 +45,119 @@ const QUERY: &[&str] = &["Query", "ApiQuery"];
 const BODY: &[&str] = &["Json", "ApiJson"];
 const MULTIPART: &[&str] = &["Multipart"];
 
-pub fn parse_attr(attr: TokenStream) -> syn::Result<bool> {
-    let text = attr.to_string();
-    match text.trim() {
-        "" => Ok(false),
-        "link" => Ok(true),
-        other => Err(Error::new(
-            attr.span(),
-            format!("#[client]: unknown option `{other}` — accepted: nothing, or `link`"),
-        )),
+/// What `#[client(…)]` carried. `path` is the DECLARED route template, for a
+/// handler whose params are read inside a guard extractor and so never appear
+/// as a `Path<T>` in the signature.
+#[derive(Debug, Default)]
+pub struct Attr {
+    pub link: bool,
+    pub path: Option<(String, Span)>,
+}
+
+/// TypeScript types a path segment may be given. `null` is deliberately absent:
+/// a URL segment is always present, so it cannot be one.
+const DECLARABLE: &[&str] = &["string", "number", "boolean", "bigint"];
+
+pub fn parse_attr(attr: TokenStream) -> syn::Result<Attr> {
+    let mut out = Attr::default();
+    if attr.is_empty() {
+        return Ok(out);
     }
+    let span = attr.span();
+    let metas = Punctuated::<Meta, Token![,]>::parse_terminated.parse2(attr)?;
+    for meta in metas {
+        match &meta {
+            Meta::Path(p) if p.is_ident("link") => out.link = true,
+            Meta::NameValue(nv) if nv.path.is_ident("path") => {
+                let syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(s),
+                    ..
+                }) = &nv.value
+                else {
+                    return Err(Error::new(
+                        nv.value.span(),
+                        "#[client(path = …)]: expected a string literal, the route template",
+                    ));
+                };
+                out.path = Some((s.value(), s.span()));
+            }
+            other => {
+                return Err(Error::new(
+                    other.span(),
+                    "#[client]: unknown option — accepted: `link`, `path = \"/a/{param}\"`",
+                ))
+            }
+        }
+    }
+    if let Some((template, tspan)) = &out.path {
+        // Parsed here so a bad template is a compile error on the attribute
+        // rather than a generator error much later, in another process.
+        let params = declared_params(template, *tspan)?;
+        if params.is_empty() {
+            return Err(Error::new(
+                *tspan,
+                format!(
+                    "#[client(path = \"{template}\")]: the template declares no `{{param}}` — \
+                     a handler with no path params does not need it"
+                ),
+            ));
+        }
+    }
+    let _ = span;
+    Ok(out)
+}
+
+/// The `{name}` / `{name: ts_type}` segments of a declared template, in order.
+/// Defaults to `string`, which is what a URL segment is unless the handler
+/// parses it into something else.
+pub fn declared_params(template: &str, span: Span) -> syn::Result<Vec<(String, String)>> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else {
+            return Err(Error::new(
+                span,
+                format!("#[client(path = \"{template}\")]: unclosed `{{` in the template"),
+            ));
+        };
+        let body = &after[..close];
+        rest = &after[close + 1..];
+
+        let (name, ts) = match body.split_once(':') {
+            Some((n, t)) => (n.trim(), t.trim()),
+            None => (body.trim(), "string"),
+        };
+        if name.is_empty()
+            || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            || name.chars().next().is_some_and(|c| c.is_ascii_digit())
+        {
+            return Err(Error::new(
+                span,
+                format!(
+                    "#[client(path = \"{template}\")]: `{{{body}}}` is not a usable parameter name"
+                ),
+            ));
+        }
+        if !DECLARABLE.contains(&ts) {
+            return Err(Error::new(
+                span,
+                format!(
+                    "#[client(path = \"{template}\")]: `{{{body}}}` asks for TypeScript type \
+                     `{ts}` — accepted: {}",
+                    DECLARABLE.join(", ")
+                ),
+            ));
+        }
+        if out.iter().any(|(n, _)| n == name) {
+            return Err(Error::new(
+                span,
+                format!("#[client(path = \"{template}\")]: `{{{name}}}` is declared twice"),
+            ));
+        }
+        out.push((name.to_string(), ts.to_string()));
+    }
+    Ok(out)
 }
 
 fn last_segment(ty: &Type) -> Option<(&syn::PathSegment, Option<&Type>)> {
@@ -194,20 +301,53 @@ pub fn describe(item: &ItemFn, link: bool) -> syn::Result<Descriptor> {
 }
 
 pub fn expand(attr: TokenStream, item: &ItemFn) -> syn::Result<TokenStream> {
-    let link = parse_attr(attr)?;
-    let d = describe(item, link)?;
+    let attr = parse_attr(attr)?;
+    let d = describe(item, attr.link)?;
     let name = &d.name;
     let test_name = format_ident!("export_client_{}", name, span = Span::call_site());
-    let args = d.args.iter().map(|a| {
-        let arg_name = &a.name;
-        let ty = &a.ty;
-        match a.kind {
-            Kind::Path => quote!(::common_routing::export::Arg::path::<#ty>(#arg_name)),
-            Kind::Query => quote!(::common_routing::export::Arg::query::<#ty>(#arg_name)),
-            Kind::Body => quote!(::common_routing::export::Arg::body::<#ty>(#arg_name)),
-            Kind::Multipart => quote!(::common_routing::export::Arg::multipart(#arg_name)),
+
+    // Two sources for one thing is worse than neither: if the signature already
+    // carries the params, the declaration can only disagree with it.
+    if let Some((template, tspan)) = &attr.path {
+        if d.args.iter().any(|a| a.kind == Kind::Path) {
+            return Err(Error::new(
+                *tspan,
+                format!(
+                    "#[client(path = \"{template}\")] on `{name}`, which already takes a Path<T> \
+                     — the declaration is for a handler whose params are read inside a guard, \
+                     so drop whichever of the two is redundant"
+                ),
+            ));
         }
-    });
+    }
+
+    let mut args: Vec<TokenStream> = d
+        .args
+        .iter()
+        .map(|a| {
+            let arg_name = &a.name;
+            let ty = &a.ty;
+            match a.kind {
+                Kind::Path => quote!(::common_routing::export::Arg::path::<#ty>(#arg_name)),
+                Kind::Query => quote!(::common_routing::export::Arg::query::<#ty>(#arg_name)),
+                Kind::Body => quote!(::common_routing::export::Arg::body::<#ty>(#arg_name)),
+                Kind::Multipart => quote!(::common_routing::export::Arg::multipart(#arg_name)),
+            }
+        })
+        .collect();
+
+    // A declared template stands in for the Path<T> the handler does not take.
+    // The descriptor it produces is the struct-payload shape, so the generator
+    // binds it by field name exactly as it binds a real `Path<SomeStruct>`.
+    if let Some((template, tspan)) = &attr.path {
+        let pairs = declared_params(template, *tspan)?
+            .into_iter()
+            .map(|(n, t)| quote!((#n, #t)));
+        args.push(quote!(
+            ::common_routing::export::Arg::declared_path(#template, &[#(#pairs),*])
+        ));
+    }
+
     let response = match &d.response {
         Response::Json(ty) => quote!(::common_routing::export::Response::json::<#ty>()),
         Response::NoContent => quote!(::common_routing::export::Response::NoContent),
@@ -375,9 +515,13 @@ mod tests {
 
     #[test]
     fn attr_grammar() {
-        assert!(!parse_attr(quote!()).unwrap());
-        assert!(parse_attr(quote!(link)).unwrap());
+        assert!(!parse_attr(quote!()).unwrap().link);
+        assert!(parse_attr(quote!(link)).unwrap().link);
         assert!(parse_attr(quote!(links)).is_err());
+        assert_eq!(
+            parse_attr(quote!(path = "/a/{x}")).unwrap().path.unwrap().0,
+            "/a/{x}"
+        );
     }
 
     #[test]
@@ -391,5 +535,110 @@ mod tests {
         assert!(out.contains("Arg :: path :: < String >"));
         assert!(out.contains("Response :: json :: < TaskDetail >"));
         assert!(out.contains("COMMON_ROUTING") || out.contains("export :: dir"));
+    }
+
+    // --- #[client(path = …)]: params declared, because a guard extractor ate them ---
+
+    fn guarded() -> ItemFn {
+        parse_quote! {
+            async fn group(_g: GroupAccess) -> Json<Group> { todo!() }
+        }
+    }
+
+    #[test]
+    fn a_declared_template_stands_in_for_the_path_the_handler_never_takes() {
+        let out = expand(quote!(path = "/api/groups/{group_name}"), &guarded())
+            .expect("expands")
+            .to_string();
+        assert!(out.contains("declared_path"), "{out}");
+        assert!(out.contains(r#""/api/groups/{group_name}""#), "{out}");
+        assert!(out.contains(r#""group_name""#), "{out}");
+        // A bare {param} is a string: that is what a URL segment is.
+        assert!(out.contains(r#""string""#), "{out}");
+    }
+
+    #[test]
+    fn a_declared_param_may_name_its_typescript_type() {
+        let out = expand(
+            quote!(path = "/api/groups/{name}/members/{id: number}"),
+            &guarded(),
+        )
+        .expect("expands")
+        .to_string();
+        assert!(out.contains(r#""number""#), "{out}");
+        assert!(out.contains(r#""id""#), "{out}");
+    }
+
+    #[test]
+    fn link_and_a_declared_path_compose() {
+        let item: ItemFn = parse_quote! {
+            async fn download(_g: GroupAccess) -> axum::response::Response { todo!() }
+        };
+        let out = expand(
+            quote!(link, path = "/api/groups/{group_name}/export"),
+            &item,
+        )
+        .expect("expands")
+        .to_string();
+        assert!(out.contains("Response :: Link"), "{out}");
+        assert!(out.contains("declared_path"), "{out}");
+    }
+
+    #[test]
+    fn declaring_a_path_a_handler_already_takes_is_two_sources_for_one_thing() {
+        let item: ItemFn = parse_quote! {
+            async fn group(ApiPath(id): ApiPath<String>) -> Json<Group> { todo!() }
+        };
+        let err = expand(quote!(path = "/api/groups/{group_name}"), &item)
+            .expect_err("refuses")
+            .to_string();
+        assert!(err.contains("already takes a Path<T>"), "{err}");
+    }
+
+    #[test]
+    fn a_template_with_no_params_does_not_need_declaring() {
+        let err = expand(quote!(path = "/api/groups"), &guarded())
+            .expect_err("refuses")
+            .to_string();
+        assert!(err.contains("declares no"), "{err}");
+    }
+
+    #[test]
+    fn a_declared_param_may_not_ask_for_an_arbitrary_typescript_type() {
+        let err = expand(quote!(path = "/api/groups/{g: Group}"), &guarded())
+            .expect_err("refuses")
+            .to_string();
+        assert!(
+            err.contains("accepted: string, number, boolean, bigint"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn the_same_param_twice_is_a_mistake_not_a_merge() {
+        let err = expand(quote!(path = "/a/{x}/b/{x}"), &guarded())
+            .expect_err("refuses")
+            .to_string();
+        assert!(err.contains("declared twice"), "{err}");
+    }
+
+    #[test]
+    fn an_unclosed_brace_is_caught_on_the_attribute_not_much_later() {
+        let err = expand(quote!(path = "/a/{x"), &guarded())
+            .expect_err("refuses")
+            .to_string();
+        assert!(err.contains("unclosed"), "{err}");
+    }
+
+    #[test]
+    fn declared_params_reads_names_and_types_in_order() {
+        let got = declared_params("/a/{one}/b/{two: number}/c", Span::call_site()).unwrap();
+        assert_eq!(
+            got,
+            vec![
+                ("one".to_string(), "string".to_string()),
+                ("two".to_string(), "number".to_string()),
+            ]
+        );
     }
 }

@@ -124,6 +124,34 @@ impl Arg {
         }
     }
 
+    /// The path payload a handler does NOT take: its params are read inside a
+    /// guard extractor (an auth check that does its own `Path<…>`), so the
+    /// signature has no `Path<T>` to describe and `#[client(path = …)]`
+    /// declares the template instead.
+    ///
+    /// This is the struct-payload shape — params carried as named fields — so
+    /// the generator binds it by name exactly as it binds a real
+    /// `Path<SomeStruct>`, and needs no branch of its own. `ts_type` holds the
+    /// declared template, so a disagreement with the mounted route names both
+    /// the declared and the actual spelling.
+    pub fn declared_path(template: &str, fields: &[(&str, &str)]) -> Self {
+        Self {
+            name: "path".to_owned(),
+            kind: Kind::Path,
+            ts_type: template.to_owned(),
+            positions: None,
+            fields: Some(
+                fields
+                    .iter()
+                    .map(|(name, ts_type)| Field {
+                        name: (*name).to_owned(),
+                        ts_type: (*ts_type).to_owned(),
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
     pub fn query<T: TS>(name: &str) -> Self {
         Self {
             name: name.to_owned(),
