@@ -27,14 +27,8 @@ pub fn shared_markers() -> Vec<(&'static str, String)> {
             "sri_palette_css",
             common_theme::SRI_DEFAULT_PALETTE.to_owned(),
         ),
-        (
-            "sri_elements_css",
-            crate::SRI_ELEMENTS_CSS.to_owned(),
-        ),
-        (
-            "sri_common_ui_js",
-            crate::SRI_COMMON_UI_JS.to_owned(),
-        ),
+        ("sri_elements_css", crate::SRI_ELEMENTS_CSS.to_owned()),
+        ("sri_common_ui_js", crate::SRI_COMMON_UI_JS.to_owned()),
     ]
 }
 

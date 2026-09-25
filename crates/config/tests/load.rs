@@ -823,7 +823,8 @@ struct Sealed {
 
 #[test]
 fn a_root_without_a_log_section_loads_and_its_log_type_is_unit() {
-    let out = common_config::load_from::<Sealed>(&strings(&["--name=x"]), &pairs(&[])).expect("load");
+    let out =
+        common_config::load_from::<Sealed>(&strings(&["--name=x"]), &pairs(&[])).expect("load");
     match out {
         Outcome::Config(sealed) => {
             assert_eq!(sealed.name, "x");

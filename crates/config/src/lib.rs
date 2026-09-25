@@ -102,7 +102,10 @@ pub fn load_from_with_notices<T: Root>(
     let fields = T::schema(&Path::root());
     let parsed = args::parse(&fields, args)?;
     if parsed.help {
-        return Ok((Outcome::Help(help::help(T::APP, T::BIN, &fields)), Vec::new()));
+        return Ok((
+            Outcome::Help(help::help(T::APP, T::BIN, &fields)),
+            Vec::new(),
+        ));
     }
     let print_config = parsed.print_config;
     let values = layers::merge(T::APP, fields, parsed, env)?;
