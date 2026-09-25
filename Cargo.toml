@@ -6,7 +6,6 @@ members = [
     "crates/theme",
     "crates/ui-core",
     "crates/oidc",
-    "crates/ui-build",
     "crates/config",
     "crates/config-derive",
     "crates/routing",
@@ -26,7 +25,6 @@ common-logging = { path = "crates/logging", version = "0.3.0" }
 common-templating = { path = "crates/templating", version = "0.3.0" }
 common-theme = { path = "crates/theme", version = "0.3.0" }
 common-ui-core = { path = "crates/ui-core", version = "0.3.0" }
-common-ui-build = { path = "crates/ui-build", version = "0.3.0" }
 common-config = { path = "crates/config", version = "0.3.0" }
 common-config-derive = { path = "crates/config-derive", version = "0.3.0" }
 common-routing = { path = "crates/routing", version = "0.3.0" }

@@ -389,14 +389,6 @@ name = "common-theme"
 version = "0.3.0"
 
 [[package]]
-name = "common-ui-build"
-version = "0.3.0"
-dependencies = [
- "common-theme",
- "common-ui-core",
-]
-
-[[package]]
 name = "common-ui-core"
 version = "0.3.0"
 dependencies = [

@@ -1,7 +1,7 @@
 # common-rust
 
 The shared Rust crates behind the Les stand: configuration, logging, identity,
-routing, and the server half of the common UI. One cargo workspace, thirteen
+routing, and the server half of the common UI. One cargo workspace, twelve
 crates, versioned together.
 
 - **Version:** `0.3.0` (workspace-wide) · **Edition:** 2021 · **Toolchain:** Rust 1.98.0 · **License:** MIT
@@ -27,7 +27,6 @@ described in each crate's README. Nothing here is published to crates.io.
 | `common-templating` | `crates/templating` | Static file serving from a validated directory, with caching and path safety, plus shell stamping. |
 | `common-theme` | `crates/theme` | Theme palettes and the browser theme loader, carried as committed consts. The loader owns the `les_theme` cookie contract. |
 | `common-ui-core` | `crates/ui-core` | The common-ui assets as committed consts — sheets, component module, shell template, SRIs. No dependencies unless the `build` feature is on. |
-| `common-ui-build` | `crates/ui-build` | **Deprecated.** A re-export of `common_ui_core::build`, kept so existing `build.rs` files compile. Scheduled for deletion. |
 
 Several crates carry a README of their own with the detail that matters when
 you adopt them: `config`, `logging`, `oidc`, `routing`, `routing-macros`,
