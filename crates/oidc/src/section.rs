@@ -71,8 +71,6 @@ mod tests {
         #[config(nested)]
         oidc: OidcSection,
         deployment: Deployment,
-        #[config(nested)]
-        log: common_logging::Log,
     }
 
     fn load(env: &[(&str, &str)]) -> Result<Demo, common_config::Refusal> {

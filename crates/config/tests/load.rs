@@ -38,9 +38,6 @@ struct Top {
     /// A pin.
     #[config(secret, default = "1234")]
     pin: u32,
-    /// Legacy names.
-    #[config(env = "LEGACY_MODE", flag = "mode")]
-    mode: Option<String>,
     /// Class.
     #[config(default = "dev", accepted = "prod or dev")]
     class: Class,
@@ -56,8 +53,6 @@ struct Top {
     #[config(nested)]
     mid: Mid,
     deployment: Deployment,
-    #[config(nested)]
-    log: Log,
 }
 
 #[derive(Debug, Config)]
@@ -76,25 +71,12 @@ struct Deep {
     level: u8,
 }
 
-/// Stands in for the logging crate's section, which this crate cannot see.
-#[derive(Debug, Config)]
-struct Log {
-    /// Format.
-    #[config(default = "json", env = "LOG_FORMAT")]
-    format: String,
-    /// Filter.
-    #[config(env = "LOG_DESIGNATORS")]
-    designators: Option<String>,
-}
-
 #[derive(Debug, Config)]
 #[config(app = "STRICT")]
 struct Strict {
     #[config(nested)]
     inner: StrictInner,
     deployment: Deployment,
-    #[config(nested)]
-    log: Log,
 }
 
 #[derive(Debug, Config)]
@@ -243,7 +225,6 @@ fn schema_spells_every_field_three_ways() {
         ("--maybe", "APP_MAYBE", "maybe"),
         ("--token", "APP_TOKEN", "token"),
         ("--pin", "APP_PIN", "pin"),
-        ("--mode", "LEGACY_MODE", "mode"),
         ("--class", "APP_CLASS", "class"),
         ("--upstream", "APP_UPSTREAM", "upstream"),
         ("--stub-user", "APP_STUB_USER", "stub_user"),
@@ -255,8 +236,6 @@ fn schema_spells_every_field_three_ways() {
             "mid.deep.level",
         ),
         ("--deployment", "DEPLOYMENT_TYPE", "deployment"),
-        ("--log--format", "LOG_FORMAT", "log.format"),
-        ("--log--designators", "LOG_DESIGNATORS", "log.designators"),
     ]
     .iter()
     .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
@@ -272,28 +251,6 @@ fn schema_help_comes_from_doc_comments() {
         .find(|f| f.toml() == "mid.deep.level")
         .unwrap();
     assert_eq!(level.help, "Level.");
-}
-
-#[test]
-fn legacy_env_override_reads_the_bare_name() {
-    let top = ok(&["--name=x"], &[("LEGACY_MODE", "fast")]);
-    assert_eq!(top.mode.as_deref(), Some("fast"));
-}
-
-#[test]
-fn legacy_env_override_ignores_the_generated_name() {
-    let top = ok(&["--name=x"], &[("APP_MODE", "fast")]);
-    assert_eq!(top.mode, None);
-}
-
-#[test]
-fn legacy_flag_override_replaces_the_generated_flag() {
-    assert_eq!(
-        ok(&["--name=x", "--mode=slow"], &[]).mode.as_deref(),
-        Some("slow")
-    );
-    let refusal = err(&["--name=x", "--mode-x=slow"], &[]);
-    assert!(refusal.detail.unwrap().contains("--mode-x"));
 }
 
 #[test]
@@ -458,21 +415,33 @@ fn strum_enum_parses_and_refuses_with_declared_accepted() {
 }
 
 #[test]
-fn deployment_and_log_load_under_their_bare_env_names_and_the_root_exposes_them() {
+fn deployment_keeps_its_unprefixed_name_and_the_root_exposes_it() {
     let top = ok(
         &["--name=x"],
-        &[
-            ("DEPLOYMENT_TYPE", "prod"),
-            ("APP_UPSTREAM", "https://up"),
-            ("LOG_FORMAT", "human"),
-            ("LOG_DESIGNATORS", "auth=debug"),
-        ],
+        &[("DEPLOYMENT_TYPE", "prod"), ("APP_UPSTREAM", "https://up")],
     );
     assert_eq!(top.deployment, Deployment::Prod);
-    assert_eq!(top.log.format, "human");
-    assert_eq!(top.log.designators.as_deref(), Some("auth=debug"));
     assert_eq!(top.deployment(), Deployment::Prod);
-    assert_eq!(top.log().format, "human");
+}
+
+/// The escape is gone, so this is the ONLY spelling the derive still overrides.
+/// If it ever regressed to `APP_DEPLOYMENT_TYPE`, every service in the fleet
+/// would need its own variable.
+#[test]
+fn deployment_is_the_one_spelling_left_that_is_not_app_prefixed() {
+    let fields = Top::schema(&Path::root());
+    for field in &fields {
+        let env = field.env("APP");
+        if field.toml() == "deployment" {
+            assert_eq!(env, "DEPLOYMENT_TYPE");
+        } else {
+            assert!(
+                env.starts_with("APP_"),
+                "{} escaped the app prefix as {env}",
+                field.toml()
+            );
+        }
+    }
 }
 
 #[test]
@@ -489,8 +458,8 @@ fn deployment_unset_refuses_naming_every_spelling() {
 }
 
 #[test]
-fn deployment_and_log_are_also_reachable_by_flag_and_file() {
-    let f = file("[log]\nformat = \"human\"\n");
+fn deployment_is_also_reachable_by_flag_and_file() {
+    let f = file("[mid]\nsize = 20\n");
     let top = ok(
         &[
             "--name=x",
@@ -501,7 +470,7 @@ fn deployment_and_log_are_also_reachable_by_flag_and_file() {
         &[],
     );
     assert_eq!(top.deployment, Deployment::Prod);
-    assert_eq!(top.log.format, "human");
+    assert_eq!(top.mid.size, 20);
 }
 
 #[test]
@@ -580,8 +549,11 @@ fn help_lists_every_field_grouped_by_table() {
     let top = out.find("top level").unwrap();
     let mid = out.find("[mid]").unwrap();
     let deep = out.find("[mid.deep]").unwrap();
-    let log = out.find("[log]").unwrap();
-    assert!(top < mid && mid < deep && deep < log);
+    assert!(top < mid && mid < deep);
+    assert!(
+        !out.contains("[log]"),
+        "the log section is sealed, not rendered"
+    );
     assert!(out.contains("APP_CONFIG"));
     assert!(out.contains("default s3cret, secret"));
     assert!(out.contains("  required"));
@@ -756,82 +728,4 @@ fn under_prod_a_dev_only_value_must_not_be_set() {
     let refusal = err(&["--name=x", "--no-auth"], &prod);
     assert_eq!(refusal.variable, "APP_NO_AUTH");
     assert!(!ok(&["--name=x", "--no-auth=false"], &prod).no_auth);
-}
-
-// config.6 (user 2026-09-25): a bare spelling still works and says it will go.
-// The line rides out of the load because config is read before logging exists.
-
-#[test]
-fn a_bare_env_spelling_works_and_says_it_will_be_removed() {
-    let (outcome, notices) = common_config::load_from_with_notices::<Top>(
-        &strings(&["--name=x"]),
-        &pairs(&[("LEGACY_MODE", "fast")]),
-    )
-    .expect("load");
-    match outcome {
-        Outcome::Config(top) => assert_eq!(top.mode.as_deref(), Some("fast")),
-        other => panic!("expected a config: {other:?}"),
-    }
-    assert_eq!(notices.len(), 1, "{notices:?}");
-    assert!(
-        notices[0].contains("LEGACY_MODE") && notices[0].contains("APP_MODE"),
-        "the line must name both spellings: {}",
-        notices[0]
-    );
-}
-
-#[test]
-fn the_pattern_spelling_says_nothing() {
-    let (_, notices) = common_config::load_from_with_notices::<Top>(
-        &strings(&["--name=x"]),
-        &pairs(&[("APP_MODE", "fast")]),
-    )
-    .expect("load");
-    assert!(notices.is_empty(), "{notices:?}");
-}
-
-#[test]
-fn a_bare_spelling_that_supplied_nothing_says_nothing() {
-    let (_, notices) =
-        common_config::load_from_with_notices::<Top>(&strings(&["--name=x"]), &pairs(&[]))
-            .expect("load");
-    assert!(notices.is_empty(), "{notices:?}");
-}
-
-#[test]
-fn a_bare_flag_already_spelled_like_the_generated_one_says_nothing() {
-    let (_, notices) = common_config::load_from_with_notices::<Top>(
-        &strings(&["--name=x", "--mode=fast"]),
-        &pairs(&[]),
-    )
-    .expect("load");
-    assert!(notices.is_empty(), "{notices:?}");
-}
-
-/// config.6: a root MAY omit the `[log]` section. common-logging reads
-/// LOG_FORMAT and LOG_DESIGNATORS itself there (`boot_sealed`), so the root's
-/// `Log` type is `()` and there is nothing for an app to declare.
-#[derive(Debug, Config)]
-#[config(app = "SEALED", bin = "sealed")]
-struct Sealed {
-    /// Deployment class.
-    deployment: Deployment,
-    /// The name.
-    #[config(required)]
-    name: String,
-}
-
-#[test]
-fn a_root_without_a_log_section_loads_and_its_log_type_is_unit() {
-    let out =
-        common_config::load_from::<Sealed>(&strings(&["--name=x"]), &pairs(&[])).expect("load");
-    match out {
-        Outcome::Config(sealed) => {
-            assert_eq!(sealed.name, "x");
-            assert_eq!(sealed.deployment, Deployment::Dev);
-            let unit: &() = common_config::Root::log(&sealed);
-            assert_eq!(unit, &());
-        }
-        other => panic!("expected a config: {other:?}"),
-    }
 }

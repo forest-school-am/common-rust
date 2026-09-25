@@ -23,8 +23,6 @@ struct Cron {
     #[config(nested)]
     sandbox: Sandbox,
     deployment: Deployment,
-    #[config(nested)]
-    log: Log,
 }
 
 #[derive(Debug, Config)]
@@ -58,17 +56,6 @@ struct Limits {
     memory_mb: u64,
 }
 
-/// Stands in for `common_logging::Log`, which this crate cannot depend on.
-#[derive(Debug, Config)]
-struct Log {
-    /// Log line format: json (one object per line) or human.
-    #[config(default = "json", env = "LOG_FORMAT")]
-    format: String,
-    /// Per-designator level filter such as "auth=debug"; unset passes every designator.
-    #[config(env = "LOG_DESIGNATORS")]
-    designators: Option<String>,
-}
-
 fn main() {
     let cron = match common_config::load::<Cron>() {
         Ok(cron) => cron,
@@ -91,10 +78,5 @@ fn main() {
         cron.sandbox.limits.cpu_secs,
         cron.sandbox.limits.memory_mb
     );
-    println!(
-        "deployment={} log.format={} log.designators={}",
-        cron.deployment,
-        cron.log.format,
-        cron.log.designators.as_deref().unwrap_or("-")
-    );
+    println!("deployment={}", cron.deployment);
 }

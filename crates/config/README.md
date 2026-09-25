@@ -11,8 +11,8 @@ apart. R114 item 9.
   `common_config::Config`).
 - Depends on NOTHING else in the workspace. `Refusal` and `Deployment` live
   here; `common-logging` depends on this crate, re-exports both under their
-  old paths, owns the `Log` section, and owns the one call a binary makes:
-  `common_logging::boot::<T>()`.
+  old paths, reads its own two log variables from the environment, and owns the
+  one call a binary makes: `common_logging::boot_sealed::<T>()`.
 
 ## Design
 
@@ -21,21 +21,21 @@ the help text; `#[config(default = "…")]` (a string, parsed at load like any
 other source); `#[config(required)]`; `Option<T>` fields are optional; a `bool`
 defaults to `false`; `#[config(secret)]` masks the value in `--print-config`
 and in a wrong-type refusal; `#[config(nested)]` for a field whose type also
-derives `Config`; `#[config(env = "NAME")]` / `#[config(flag = "name")]`
-replace ONE generated spelling with a bare name shared across the fleet
-(`DEPLOYMENT_TYPE`, `ASSETS_ORIGIN`); `#[config(accepted = "…")]` names the
+derives `Config`; `#[config(accepted = "…")]` names the
 accepted values in a refusal (for strum enums and anything whose `FromStr`
 error is not self-explanatory). The root carries `#[config(app = "CRON", bin =
-"cron")]` — env prefix and help title — plus two fields the derive reads by
+"cron")]` — env prefix and help title — plus ONE field the derive reads by
 NAME:
 
 - `deployment: Deployment` — spelled `DEPLOYMENT_TYPE` / `--deployment` /
   `deployment`, REQUIRED (there is no default class), help text and accepted
-  values supplied by this crate;
-- `#[config(nested)] log: common_logging::Log` — the section
-  `common_logging::boot` initialises logging from (`[log]`, `LOG_FORMAT`,
-  `LOG_DESIGNATORS`). `RUST_LOG` is not a field: it is tracing's own variable
-  and logging reads it.
+  values supplied by this crate. It is the one spelling that keeps its bare
+  name instead of taking the app prefix, because one variable across every
+  service is the point of it; no field attribute can ask for the same.
+
+There is NO `log` section. `LOG_FORMAT` and `LOG_DESIGNATORS` are
+common-logging's own and it reads them from the environment itself, so no app
+declares or threads them. `RUST_LOG` is likewise tracing's own.
 
 **Deployment classes (§4.4).** An optional value is classified in code:
 `#[config(prod_required)]` on an `Option<T>` — unset under `prod` refuses,
@@ -82,10 +82,10 @@ lay out, and the renderer is shorter than the customisation would be.
 names the SOURCE that set it (`--sandbox--timeout-secs`, `CRON_BIND`,
 `cron.toml: sandbox.timeout_secs`) and the offending text. Printing one is a
 log line, so it is `common_logging::refuse!` (one `startup` ERROR JSON line,
-exit 1) — which is what `boot` does. `--help` and `--print-config` print and
+exit 1) — which is what `boot_sealed` does. `--help` and `--print-config` print and
 exit 0.
 
-**API.** `common_logging::boot::<T>()` for `main` (load, refuse, init
+**API.** `common_logging::boot_sealed::<T>()` for `main` (load, refuse, init
 logging, return `T`); `common_config::load::<T>() -> Result<T, Refusal>`
 underneath it (prints help / print-config and exits 0, RETURNS a refusal);
 `load_from::<T>(args, env) -> Result<Outcome<T>, Refusal>` is the pure
@@ -148,7 +148,7 @@ struct Limits {
 }
 
 fn main() {
-    let cron: Cron = common_logging::boot(); // in a real binary
+    let cron: Cron = common_logging::boot_sealed(); // in a real binary
     // …
 }
 ```
@@ -195,11 +195,6 @@ top level
   --sandbox--limits--memory-mb <value>  CRON_SANDBOX__LIMITS__MEMORY_MB  memory_mb     default 512
       Resident memory one run may hold, in MiB.
 
-[log]
-  --log--format <value>                 LOG_FORMAT                       format        default json
-      Log line format: json (one object per line) or human.
-  --log--designators <value>            LOG_DESIGNATORS                  designators   optional
-      Per-designator level filter such as "auth=debug"; unset passes every designator.
 [exit 0]
 ```
 
@@ -256,7 +251,7 @@ $ DEPLOYMENT_TYPE=dev CRON_AUTH__GROUP_UUID=… cronlike --data-dir=/srv/cron --
 [exit 1]
 ```
 
-### The same refusal through `common_logging::boot` (the real cron binary)
+### The same refusal through `common_logging::boot_sealed` (the real cron binary)
 
 The four parts are FIELDS of one `startup` ERROR line, written through the
 unfiltered subscriber so no `RUST_LOG` / `LOG_DESIGNATORS` can silence it;

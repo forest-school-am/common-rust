@@ -45,7 +45,7 @@ the environment) and returns the config:
 
 ```rust
 fn main() {
-    let config: MyConfig = common_logging::boot();
+    let config: MyConfig = common_logging::boot_sealed();
     // …
 }
 ```
@@ -222,7 +222,7 @@ which is what stamps the service's own target on the line:
 
 ```rust
 fn main() {
-    let config: Registry = common_logging::boot();
+    let config: Registry = common_logging::boot_sealed();
     let listener = match std::net::TcpListener::bind(&config.bind) {
         Ok(listener) => listener,
         Err(e) => common_logging::refuse!(

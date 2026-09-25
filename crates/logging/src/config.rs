@@ -5,7 +5,7 @@
 
 use std::str::FromStr;
 
-use common_config::{Config, Deployment, Refusal};
+use common_config::{Deployment, Refusal};
 use strum::{AsRefStr, Display, EnumString, VariantNames};
 use tracing_subscriber::EnvFilter;
 
@@ -48,27 +48,20 @@ impl Format {
     }
 }
 
-/// Nested as `log` in every root (`[log]` in the file, `--log--…` flags); the
-/// env spellings are the bare names every operator already sets.
-#[derive(Debug, Clone, Config)]
+/// SEALED from config (config.6): LOG_FORMAT and LOG_DESIGNATORS are this
+/// library's own and are read from the environment by [`Log::from_env`]. This
+/// is deliberately NOT a `Config` section — no root nests it, no app is asked
+/// to thread it through, and there is no per-app spelling of either name.
+#[derive(Debug, Clone)]
 pub struct Log {
-    /// Log line format: json (one object per line) or human.
-    #[config(
-        default = "json",
-        env = "LOG_FORMAT",
-        accepted = "one of [\"human\", \"json\"] (unset means json)"
-    )]
+    /// Log line format: json (one object per line) or human. Unset means json.
     pub format: Format,
     /// Per-designator level filter such as "auth=debug,c-scheduler=info";
     /// unset passes every designator. ANDed with RUST_LOG.
-    #[config(env = "LOG_DESIGNATORS")]
     pub designators: Option<String>,
 }
 
 impl Log {
-    /// SEALED (config.6, user 2026-09-25): these two variables are the
-    /// library's own, so a root need not nest `[log]` at all — `boot_sealed`
-    /// reads them here. A nested section still wins wherever one is declared.
     pub fn parse(format: Option<&str>, designators: Option<&str>) -> Result<Self, Refusal> {
         Ok(Self {
             format: Format::parse(format)?,
@@ -168,7 +161,6 @@ impl Default for LogConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common_config::Path;
 
     fn ok(
         format: Option<&str>,
@@ -345,49 +337,21 @@ mod tests {
         d.env_filter().expect("the default filter must be valid");
     }
 
+    /// The section is SEALED: there is no `[log]` table, no `--log--…` flag and
+    /// no `<APP>_LOG_…` spelling for an app to declare. These two names, read
+    /// from the environment here, are the whole surface.
     #[test]
-    fn the_log_section_keeps_the_bare_env_names_under_a_log_table() {
-        let spelled: Vec<(String, String, String)> = Log::schema(&Path::root().child("log"))
-            .iter()
-            .map(|f| (f.flag(), f.env("APP"), f.toml()))
-            .collect();
-        assert_eq!(
-            spelled,
-            [
-                ("--log--format", "LOG_FORMAT", "log.format"),
-                ("--log--designators", "LOG_DESIGNATORS", "log.designators"),
-            ]
-            .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
-        );
-    }
-
-    #[derive(Debug, Config)]
-    #[config(app = "DEMO")]
-    struct Demo {
-        deployment: Deployment,
-        #[config(nested)]
-        log: Log,
-    }
-
-    fn loaded(env: &[(&str, &str)]) -> Result<Demo, Refusal> {
-        let env: Vec<(String, String)> = env
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-        match common_config::load_from::<Demo>(&[], &env)? {
-            common_config::Outcome::Config(demo) => Ok(demo),
-            other => panic!("expected a config, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn the_derived_log_section_refuses_in_the_same_words_as_the_env_parse() {
-        let r = loaded(&[("DEPLOYMENT_TYPE", "dev"), ("LOG_FORMAT", "xml")]).unwrap_err();
+    fn the_sealed_log_refuses_in_the_same_words_the_section_used_to() {
+        let r = Log::parse(Some("xml"), None).unwrap_err();
         assert_eq!(r.variable, "LOG_FORMAT");
         assert_eq!(r.accepted, LOG_FORMAT_ACCEPTED);
-        let demo = loaded(&[("DEPLOYMENT_TYPE", "prod")]).unwrap();
-        assert_eq!(demo.log.format, Format::Json);
-        assert_eq!(demo.log.designators, None);
+    }
+
+    #[test]
+    fn unset_means_json_and_no_designator_filter() {
+        let log = Log::parse(None, None).expect("the default must resolve");
+        assert_eq!(log.format, Format::Json);
+        assert_eq!(log.designators, None);
     }
 
     #[test]

@@ -42,32 +42,18 @@ use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
-/// Refusals raised here carry this crate's target; the binary's own post-load
-/// checks go through `refuse!` at their site and carry the binary's.
-pub fn boot<T: common_config::Root<Log = Log>>() -> T {
-    let (config, notices) = match common_config::load_with_notices::<T>() {
-        Ok(pair) => pair,
-        Err(refusal) => crate::refuse!(refusal),
-    };
-    let rust_log = std::env::var(RUST_LOG_VARIABLE).ok();
-    match LogConfig::from_log(config.log(), config.deployment(), rust_log.as_deref()) {
-        Ok(cfg) => init_with(cfg),
-        Err(refusal) => crate::refuse!(refusal),
-    }
-    // AFTER the subscriber: config is loaded before logging exists, so a bare
-    // spelling's deprecation line rides out of the load and is said here.
-    for notice in notices {
-        tracing::warn!(target: "common_config", "{notice}");
-    }
-    config
-}
-
-/// `boot` for a root that does NOT nest `[log]`: the two log variables are the
-/// library's own (config.6) and are read from the environment here. Everything
-/// else — the load, the refusals, the deprecation lines — is `boot`.
+/// The one call at the top of `main`: load the binary's config tree, bring the
+/// subscriber up, hand the config back. Refusals raised here carry this crate's
+/// target; the binary's own post-load checks go through `refuse!` at their site
+/// and carry the binary's.
+///
+/// The log settings are NOT part of the config tree. LOG_FORMAT and
+/// LOG_DESIGNATORS are this library's own and are read from the environment
+/// here (config.6), so a root declares no `[log]` section and no app can be
+/// asked to thread one through.
 pub fn boot_sealed<T: common_config::Root>() -> T {
-    let (config, notices) = match common_config::load_with_notices::<T>() {
-        Ok(pair) => pair,
+    let config = match common_config::load::<T>() {
+        Ok(config) => config,
         Err(refusal) => crate::refuse!(refusal),
     };
     let rust_log = std::env::var(RUST_LOG_VARIABLE).ok();
@@ -78,9 +64,6 @@ pub fn boot_sealed<T: common_config::Root>() -> T {
     match LogConfig::from_log(&log, config.deployment(), rust_log.as_deref()) {
         Ok(cfg) => init_with(cfg),
         Err(refusal) => crate::refuse!(refusal),
-    }
-    for notice in notices {
-        tracing::warn!(target: "common_config", "{notice}");
     }
     config
 }

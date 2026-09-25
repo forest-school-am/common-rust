@@ -17,10 +17,11 @@ pub struct Field {
     pub class: Class,
     pub secret: bool,
     pub kind: Kind,
-    /// Bare env name (a fleet-wide spelling) used INSTEAD of the generated one.
+    /// Set INSTEAD of the generated spelling. Not an author's to choose: the
+    /// derive sets it for the root's `deployment` field and nothing else, so
+    /// `DEPLOYMENT_TYPE` is one name across every service rather than a
+    /// per-app `<APP>_DEPLOYMENT_TYPE`.
     pub env: Option<&'static str>,
-    /// Bare flag name (no dashes) used INSTEAD of the generated one.
-    pub flag: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,19 +48,9 @@ pub enum Kind {
     Text,
 }
 
-/// The spellings the FRAMEWORK owns, not an app's own bare names: one variable
-/// across every service is the point of them, so they are not deprecated by
-/// config.6. `DEPLOYMENT_TYPE` is the deployment class every binary must carry
-/// (the derive spells it for the root field); the two log names move into
-/// common-logging itself, which reads them from the environment.
-pub const FLEET_WIDE_SPELLINGS: &[&str] = &["DEPLOYMENT_TYPE", "LOG_FORMAT", "LOG_DESIGNATORS"];
-
 impl Field {
     pub fn flag(&self) -> String {
-        match self.flag {
-            Some(name) => format!("--{name}"),
-            None => self.path.flag(),
-        }
+        self.path.flag()
     }
 
     pub fn env(&self, app: &str) -> String {

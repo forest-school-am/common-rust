@@ -66,15 +66,13 @@ pub trait Config: Sized {
 
 /// The struct carrying `#[config(app = "…")]`: the env prefix and the binary
 /// name shown by `--help`. Only a `Root` can be loaded. The derive reads the
-/// root's `deployment: Deployment` field (spelled `DEPLOYMENT_TYPE`, required)
-/// and its `#[config(nested)] log` field, whose type is whatever the logging
-/// crate asks for.
+/// root's `deployment: Deployment` field (spelled `DEPLOYMENT_TYPE`, required).
+/// There is no `log` section: the two log variables are common-logging's own
+/// and it reads them from the environment itself.
 pub trait Root: Config {
     const APP: &'static str;
     const BIN: &'static str;
-    type Log;
     fn deployment(&self) -> Deployment;
-    fn log(&self) -> &Self::Log;
 }
 
 #[derive(Debug)]
@@ -89,41 +87,22 @@ pub fn load_from<T: Root>(
     args: &[String],
     env: &[(String, String)],
 ) -> Result<Outcome<T>, Refusal> {
-    load_from_with_notices(args, env).map(|(outcome, _)| outcome)
-}
-
-/// `load_from`, plus the deprecation lines this load produced (config.6). They
-/// are returned rather than logged because config is loaded BEFORE the
-/// subscriber exists: `common_logging::boot` emits them once it does.
-pub fn load_from_with_notices<T: Root>(
-    args: &[String],
-    env: &[(String, String)],
-) -> Result<(Outcome<T>, Vec<String>), Refusal> {
     let fields = T::schema(&Path::root());
     let parsed = args::parse(&fields, args)?;
     if parsed.help {
-        return Ok((
-            Outcome::Help(help::help(T::APP, T::BIN, &fields)),
-            Vec::new(),
-        ));
+        return Ok(Outcome::Help(help::help(T::APP, T::BIN, &fields)));
     }
     let print_config = parsed.print_config;
     let values = layers::merge(T::APP, fields, parsed, env)?;
-    let notices = values.deprecations();
     if print_config {
-        return Ok((Outcome::PrintConfig(help::print_config(&values)), notices));
+        return Ok(Outcome::PrintConfig(help::print_config(&values)));
     }
     let config = T::from_values(&values, &Path::root())?;
     class::enforce(&values, config.deployment())?;
-    Ok((Outcome::Config(config), notices))
+    Ok(Outcome::Config(config))
 }
 
 pub fn load<T: Root>() -> Result<T, Refusal> {
-    load_with_notices().map(|(config, _)| config)
-}
-
-/// `load`, plus the deprecation lines (config.6); see `load_from_with_notices`.
-pub fn load_with_notices<T: Root>() -> Result<(T, Vec<String>), Refusal> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env: Vec<(String, String)> = std::env::vars_os()
         .map(|(k, v)| {
@@ -133,9 +112,9 @@ pub fn load_with_notices<T: Root>() -> Result<(T, Vec<String>), Refusal> {
             )
         })
         .collect();
-    match load_from_with_notices::<T>(&args, &env)? {
-        (Outcome::Config(config), notices) => Ok((config, notices)),
-        (Outcome::Help(text) | Outcome::PrintConfig(text), _) => {
+    match load_from::<T>(&args, &env)? {
+        Outcome::Config(config) => Ok(config),
+        Outcome::Help(text) | Outcome::PrintConfig(text) => {
             print!("{text}");
             let _ = std::io::Write::flush(&mut std::io::stdout());
             std::process::exit(0)

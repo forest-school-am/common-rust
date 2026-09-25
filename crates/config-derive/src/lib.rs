@@ -2,14 +2,14 @@
 //! impl. How values are merged, spelled or rendered belongs in common-config —
 //! this macro never sees another struct's fields and must stay that way: a
 //! `nested` field is a CALL into the inner type's impl, not an expansion. A root
-//! (`#[config(app = …)]`) also gets `Root`, reading only its own `deployment` and `log` fields.
+//! (`#[config(app = …)]`) also gets `Root`, reading only its own `deployment` field.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;
 use quote::quote;
 use syn::{
-    parse_macro_input, parse_quote, Data, DeriveInput, Error, Expr, ExprLit, Fields,
-    GenericArgument, Lit, LitStr, Meta, PathArguments, Type,
+    parse_macro_input, Data, DeriveInput, Error, Expr, ExprLit, Fields, GenericArgument, Lit,
+    LitStr, Meta, PathArguments, Type,
 };
 
 #[proc_macro_derive(Config, attributes(config))]
@@ -34,7 +34,6 @@ struct FieldAttrs {
     prod_required: bool,
     dev_only: bool,
     env: Option<LitStr>,
-    flag: Option<LitStr>,
     accepted: Option<LitStr>,
 }
 
@@ -67,23 +66,17 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
 
     let mut schema = Vec::new();
     let mut build = Vec::new();
-    let mut log_type: Option<Type> = None;
     let mut has_deployment = false;
     for field in fields {
         let ident = field.ident.as_ref().expect("named field");
         let name = LitStr::new(&ident.to_string(), ident.span());
         let mut attrs = field_attrs(field)?;
         if attrs.nested {
-            if root.app.is_some() && ident == "log" {
-                log_type = Some(field.ty.clone());
-            }
             if attrs.default.is_some()
                 || attrs.required
                 || attrs.secret
                 || attrs.prod_required
                 || attrs.dev_only
-                || attrs.env.is_some()
-                || attrs.flag.is_some()
                 || attrs.accepted.is_some()
             {
                 return Err(Error::new_spanned(
@@ -104,18 +97,17 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
         let is_deployment = root.app.is_some() && ident == "deployment";
         if is_deployment {
             has_deployment = true;
-            if attrs.default.is_some()
-                || attrs.env.is_some()
-                || attrs.flag.is_some()
-                || attrs.accepted.is_some()
-            {
+            if attrs.default.is_some() || attrs.accepted.is_some() {
                 return Err(Error::new_spanned(
                     field,
                     "a root's `deployment` field is spelled by common-config (DEPLOYMENT_TYPE, \
-                     required): it takes no default, env, flag or accepted",
+                     required): it takes no default or accepted",
                 ));
             }
             attrs.required = true;
+            // The ONE place an env spelling is overridden, and not the author's
+            // to reach: DEPLOYMENT_TYPE is one name across every service, not a
+            // per-app `<APP>_DEPLOYMENT_TYPE`.
             attrs.env = Some(LitStr::new("DEPLOYMENT_TYPE", ident.span()));
         }
         let shape = shape(&field.ty);
@@ -131,7 +123,6 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             _ => quote!(::common_config::Kind::Text),
         };
         let env = option_lit(&attrs.env);
-        let flag = option_lit(&attrs.flag);
         let accepted = if is_deployment {
             quote!(::core::option::Option::Some(
                 ::common_config::DEPLOYMENT_ACCEPTED
@@ -148,7 +139,6 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
                 secret: #secret,
                 kind: #kind,
                 env: #env,
-                flag: #flag,
             });
         });
         let read = match &shape {
@@ -168,16 +158,6 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             "#[config(app = …)] needs a `deployment: common_config::Deployment` field",
         ));
     }
-    // A root MAY omit `log` (config.6): the two log variables are common-logging's
-    // own and `boot_sealed` reads them from the environment. A root that still
-    // nests `[log]` keeps `boot`, and the section still wins.
-    let has_log = log_type.is_some();
-    let log_type: syn::Type = log_type.unwrap_or_else(|| parse_quote!(()));
-    let log_body = if has_log {
-        quote!(&self.log)
-    } else {
-        quote!(&())
-    };
     let root_impl = root.app.as_ref().map(|app| {
         let bin = root
             .bin
@@ -187,12 +167,8 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             impl #impl_generics ::common_config::Root for #ident #ty_generics #where_clause {
                 const APP: &'static str = #app;
                 const BIN: &'static str = #bin;
-                type Log = #log_type;
                 fn deployment(&self) -> ::common_config::Deployment {
                     self.deployment
-                }
-                fn log(&self) -> &#log_type {
-                    #log_body
                 }
             }
         }
@@ -279,28 +255,15 @@ fn field_attrs(field: &syn::Field) -> syn::Result<FieldAttrs> {
                 out.prod_required = true;
             } else if meta.path.is_ident("dev_only") {
                 out.dev_only = true;
-            } else if meta.path.is_ident("env") {
-                out.env = Some(meta.value()?.parse()?);
-            } else if meta.path.is_ident("flag") {
-                out.flag = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("accepted") {
                 out.accepted = Some(meta.value()?.parse()?);
             } else {
                 return Err(meta.error(
-                    "unknown #[config] key on a field: expected default, required, secret, nested, prod_required, dev_only, env, flag or accepted",
+                    "unknown #[config] key on a field: expected default, required, secret, nested, prod_required, dev_only or accepted",
                 ));
             }
             Ok(())
         })?;
-    }
-    if let Some(flag) = &out.flag {
-        let value = flag.value();
-        if value.starts_with('-') || value.is_empty() {
-            return Err(Error::new_spanned(
-                flag,
-                "#[config(flag = …)] is the bare name without the leading dashes, such as \"data-dir\"",
-            ));
-        }
     }
     Ok(out)
 }

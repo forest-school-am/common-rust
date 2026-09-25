@@ -8,7 +8,7 @@ the merge, refusal on anything set-but-invalid. Also the home of `Refusal`
 and `Deployment`, so that this crate depends on NOTHING else in the workspace
 and common-logging depends on it (its `Log` section is a `#[derive(Config)]`
 struct like any consumer's). Every Les binary boots through
-`common_logging::boot::<T>()`.
+`common_logging::boot_sealed::<T>()`.
 
 ## Layout
 - `crates/config-derive/src/lib.rs` — `#[derive(Config)]`: attribute grammar,
@@ -75,6 +75,8 @@ fixtures under `std::env::temp_dir()`; no network.
 
 ## Stand context
 Implements the REVISED answer under "lets use a cli argument parsing library"
-in the R114 review file. Consumers declare this crate by PATH
-(`../common-rust/crates/config`), like common-ui-build, until push day: a
-patched git source needs its original remote and none exists.
+in the R114 review file. Consumers declared this crate by PATH
+(`../common-rust/crates/config`) while the workspace had no remote, because a
+patched git source needs an original remote to patch. It has one now
+(`github.com/forest-school-am/common-rust`), so the path deps give way to a
+pinned git dependency; the root README carries the spelling.
