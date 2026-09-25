@@ -17,38 +17,31 @@ authentik.
 
 ## Depend on it
 
+`common-oidc` is a member of the `common-rust` workspace, so the dependency
+points at the repository and cargo selects the member by package name:
+
 ```toml
 [dependencies]
-common-oidc = { git = "https://github.com/forest-school-am/common-rust-oidc.git", tag = "v0.2.2" }
+common-oidc = { git = "https://github.com/forest-school-am/common-rust.git", tag = "v0.3.0" }
 ```
 
-**That URL and tag are documentation, not a pin, and no such remote exists** —
-nothing in this fleet is pushed (R21), and `common-rust` has no remote at all.
-The tag predates the workspace merge; do not reason about behaviour from it.
-
-What actually resolves the dependency is the single shared cargo patch at
-`/mnt/host/workspace/Les/.cargo/config.toml` (R22a/R22b), which redirects the
-URL above to `common-rust/crates/oidc`. Cargo walks up from the build directory
-and MERGES that file, so it already applies to every repo under `Les/`: there is
-nothing to symlink, and no repo may keep a `.cargo/config.toml` of its own. You
-therefore always build whatever `common-rust` currently is.
+Stand builds do not go to the network. The single shared cargo patch at
+`Les/.cargo/config.toml` redirects this dependency to the local working copy, so
+every repo under `Les/` builds against whatever `common-rust` currently is.
+Cargo walks up from the build directory and MERGES that file: it applies to
+every sibling, there is nothing to symlink, and no repo may keep a
+`.cargo/config.toml` of its own.
 
 A missing or wrong path in that file does not fail — cargo silently falls back
 to the published crate and rewrites your lockfile to say so. Run
-`sh stand/check-cargo-patch.sh` if a build behaves oddly. Note also that
-`cargo ... --locked` is unusable fleet-wide under this patch (unused-record
-ordering is non-deterministic); that is a lock-check failure, not a build
-failure, and is not to be "fixed".
+`sh stand/check-cargo-patch.sh` if a build behaves oddly. Note also that `cargo … --locked`
+is unusable fleet-wide under this patch (unused-record ordering is
+non-deterministic); that is a lock-check failure, not a build failure.
 
-This crate's own stand dependency (`common-logging`) is a workspace sibling by
-path, not a git dep — the crates share one workspace, so a member cannot drift
-from a sibling's transitive pick.
-
-**Building:** `cargo build` is the build path (R11(a)); `nix build` is not used
-for these crates, and the flake provides the dev shell only. Build inside
-`nix develop --impure`.
-
-Push-day dependency-URL requirements live in `PUSH-MIGRATION.md`.
+**Migration in progress:** the patch still keys on `common-rust-oidc.git`, a URL
+that predates the merge of these crates into one workspace and was never a real
+remote. Consumer manifests and the patch move to the repository URL above
+together; until they do, a stand manifest keeps the per-crate spelling.
 
 ## 1. Backends with browser users (BFF)
 
