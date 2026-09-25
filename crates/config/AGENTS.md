@@ -22,6 +22,8 @@ struct like any consumer's). Every Les binary boots through
   `Display`. Printing one is logging's `refuse!`.
 - `src/deployment.rs` — `Deployment` (strum), `parse`/`from_env` (unset
   refuses), `DEPLOYMENT_VARIABLE` / `DEPLOYMENT_ACCEPTED` / `DEPLOYMENT_HELP`.
+- `src/class.rs` — the §4.4 check after the merge: `prod_required` set and
+  `dev_only` unset under a prod deployment; the class is data on `Field`.
 - `src/path.rs` — `Path` and the spelling rules (`flag`, `env`, `dotted`).
 - `src/schema.rs` — `Field`, `Presence`, `Kind`, `Origin`, `Entry`,
   `FileStatus`: data the derive registers and the merge stamps.

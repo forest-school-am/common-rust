@@ -31,6 +31,8 @@ struct FieldAttrs {
     required: bool,
     secret: bool,
     nested: bool,
+    prod_required: bool,
+    dev_only: bool,
     env: Option<LitStr>,
     flag: Option<LitStr>,
     accepted: Option<LitStr>,
@@ -78,6 +80,8 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             if attrs.default.is_some()
                 || attrs.required
                 || attrs.secret
+                || attrs.prod_required
+                || attrs.dev_only
                 || attrs.env.is_some()
                 || attrs.flag.is_some()
                 || attrs.accepted.is_some()
@@ -120,6 +124,7 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
             text if text.is_empty() && is_deployment => quote!(::common_config::DEPLOYMENT_HELP),
             text => quote!(#text),
         };
+        let class = class(field, &shape, &attrs)?;
         let secret = attrs.secret;
         let kind = match shape {
             Shape::Bool | Shape::OptBool => quote!(::common_config::Kind::Bool),
@@ -139,6 +144,7 @@ fn expand(input: &DeriveInput) -> syn::Result<Tokens> {
                 path: prefix.child(#name),
                 help: #help,
                 presence: #presence,
+                class: #class,
                 secret: #secret,
                 kind: #kind,
                 env: #env,
@@ -266,6 +272,10 @@ fn field_attrs(field: &syn::Field) -> syn::Result<FieldAttrs> {
                 out.secret = true;
             } else if meta.path.is_ident("nested") {
                 out.nested = true;
+            } else if meta.path.is_ident("prod_required") {
+                out.prod_required = true;
+            } else if meta.path.is_ident("dev_only") {
+                out.dev_only = true;
             } else if meta.path.is_ident("env") {
                 out.env = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("flag") {
@@ -274,7 +284,7 @@ fn field_attrs(field: &syn::Field) -> syn::Result<FieldAttrs> {
                 out.accepted = Some(meta.value()?.parse()?);
             } else {
                 return Err(meta.error(
-                    "unknown #[config] key on a field: expected default, required, secret, nested, env, flag or accepted",
+                    "unknown #[config] key on a field: expected default, required, secret, nested, prod_required, dev_only, env, flag or accepted",
                 ));
             }
             Ok(())
@@ -290,6 +300,39 @@ fn field_attrs(field: &syn::Field) -> syn::Result<FieldAttrs> {
         }
     }
     Ok(out)
+}
+
+fn class(field: &syn::Field, shape: &Shape, attrs: &FieldAttrs) -> syn::Result<Tokens> {
+    match (attrs.prod_required, attrs.dev_only) {
+        (false, false) => Ok(quote!(::common_config::Class::Neutral)),
+        (true, true) => Err(Error::new_spanned(
+            field,
+            "a field is #[config(prod_required)] or #[config(dev_only)], not both",
+        )),
+        (true, false) => match shape {
+            Shape::Opt(_) | Shape::OptBool if attrs.default.is_none() && !attrs.required => {
+                Ok(quote!(::common_config::Class::ProdRequired))
+            }
+            _ => Err(Error::new_spanned(
+                field,
+                "#[config(prod_required)] needs an Option<T> field with no default: \
+                 unset is legal under dev and refused under prod",
+            )),
+        },
+        (false, true) => match shape {
+            Shape::Opt(_) | Shape::OptBool | Shape::Bool
+                if attrs.default.as_ref().is_none_or(|d| d.value() == "false")
+                    && !attrs.required =>
+            {
+                Ok(quote!(::common_config::Class::DevOnly))
+            }
+            _ => Err(Error::new_spanned(
+                field,
+                "#[config(dev_only)] needs an Option<T> or bool field with no default: \
+                 set under prod is refused",
+            )),
+        },
+    }
 }
 
 fn presence(field: &syn::Field, shape: &Shape, attrs: &FieldAttrs) -> syn::Result<Tokens> {

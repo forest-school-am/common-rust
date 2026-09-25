@@ -70,8 +70,9 @@ mod tests {
     struct Demo {
         #[config(nested)]
         oidc: OidcSection,
+        deployment: Deployment,
         #[config(nested)]
-        common: common_config::Common,
+        log: common_logging::Log,
     }
 
     fn load(env: &[(&str, &str)]) -> Result<Demo, common_config::Refusal> {
@@ -85,7 +86,8 @@ mod tests {
         }
     }
 
-    const REQUIRED: [(&str, &str); 4] = [
+    const REQUIRED: [(&str, &str); 5] = [
+        ("DEPLOYMENT_TYPE", "dev"),
         (
             "DEMO_OIDC__ISSUER",
             "https://auth.dev.local/application/o/x/",
@@ -163,7 +165,7 @@ mod tests {
     #[test]
     fn a_malformed_issuer_refuses_naming_the_variable() {
         let mut env = REQUIRED.to_vec();
-        env[0] = ("DEMO_OIDC__ISSUER", "not a url");
+        env[1] = ("DEMO_OIDC__ISSUER", "not a url");
         let refusal = load(&env).unwrap_err();
         assert_eq!(refusal.variable, "DEMO_OIDC__ISSUER");
         assert_eq!(refusal.value, "not a url");

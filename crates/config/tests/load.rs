@@ -44,6 +44,15 @@ struct Top {
     /// Class.
     #[config(default = "dev", accepted = "prod or dev")]
     class: Class,
+    /// Upstream.
+    #[config(prod_required)]
+    upstream: Option<String>,
+    /// Stub identity.
+    #[config(dev_only)]
+    stub_user: Option<String>,
+    /// Debug auth.
+    #[config(dev_only)]
+    no_auth: bool,
     #[config(nested)]
     mid: Mid,
     deployment: Deployment,
@@ -236,6 +245,9 @@ fn schema_spells_every_field_three_ways() {
         ("--pin", "APP_PIN", "pin"),
         ("--mode", "LEGACY_MODE", "mode"),
         ("--class", "APP_CLASS", "class"),
+        ("--upstream", "APP_UPSTREAM", "upstream"),
+        ("--stub-user", "APP_STUB_USER", "stub_user"),
+        ("--no-auth", "APP_NO_AUTH", "no_auth"),
         ("--mid--size", "APP_MID__SIZE", "mid.size"),
         (
             "--mid--deep--level",
@@ -451,6 +463,7 @@ fn deployment_and_log_load_under_their_bare_env_names_and_the_root_exposes_them(
         &["--name=x"],
         &[
             ("DEPLOYMENT_TYPE", "prod"),
+            ("APP_UPSTREAM", "https://up"),
             ("LOG_FORMAT", "human"),
             ("LOG_DESIGNATORS", "auth=debug"),
         ],
@@ -478,7 +491,15 @@ fn deployment_unset_refuses_naming_every_spelling() {
 #[test]
 fn deployment_and_log_are_also_reachable_by_flag_and_file() {
     let f = file("[log]\nformat = \"human\"\n");
-    let top = ok(&["--name=x", &config_arg(&f), "--deployment=prod"], &[]);
+    let top = ok(
+        &[
+            "--name=x",
+            &config_arg(&f),
+            "--deployment=prod",
+            "--upstream=u",
+        ],
+        &[],
+    );
     assert_eq!(top.deployment, Deployment::Prod);
     assert_eq!(top.log.format, "human");
 }
@@ -671,4 +692,68 @@ fn toml_scalars_of_any_type_become_text() {
 fn print_config_names_the_env_var_when_no_file_is_configured() {
     let out = text(&["--name=x", "--print-config"], &[]);
     assert!(out.starts_with("config file: none (--config or APP_CONFIG to set one)"));
+}
+
+#[test]
+fn classes_are_data_on_the_schema_and_print_in_help() {
+    let fields = Top::schema(&Path::root());
+    let class_of = |key: &str| fields.iter().find(|f| f.toml() == key).unwrap().class;
+    assert_eq!(class_of("upstream"), common_config::Class::ProdRequired);
+    assert_eq!(class_of("stub_user"), common_config::Class::DevOnly);
+    assert_eq!(class_of("no_auth"), common_config::Class::DevOnly);
+    assert_eq!(class_of("name"), common_config::Class::Neutral);
+    let out = text(&["--help"], &[]);
+    let tail = |flag: &str| {
+        out.lines()
+            .find(|l| l.trim_start().starts_with(flag))
+            .unwrap_or_else(|| panic!("no help line for {flag}:\n{out}"))
+            .trim_end()
+            .to_owned()
+    };
+    assert!(tail("--upstream").ends_with("prod-required"), "{out}");
+    assert!(tail("--stub-user").ends_with("dev-only"), "{out}");
+    assert!(tail("--no-auth").ends_with("dev-only"), "{out}");
+}
+
+#[test]
+fn under_dev_the_classes_do_not_bite() {
+    let top = ok(
+        &["--name=x", "--stub-user=alice", "--no-auth"],
+        &[("DEPLOYMENT_TYPE", "dev")],
+    );
+    assert_eq!(top.upstream, None);
+    assert_eq!(top.stub_user.as_deref(), Some("alice"));
+    assert!(top.no_auth);
+}
+
+#[test]
+fn under_prod_a_prod_required_value_must_be_set() {
+    let refusal = err(&["--name=x"], &[("DEPLOYMENT_TYPE", "prod")]);
+    assert_eq!(refusal.variable, "APP_UPSTREAM");
+    assert_eq!(refusal.value, "unset");
+    assert!(refusal.accepted.contains("--upstream"), "{refusal:?}");
+    assert_eq!(
+        refusal.detail.as_deref(),
+        Some("prod-required and unset under DEPLOYMENT_TYPE=prod")
+    );
+    let top = ok(
+        &["--name=x", "--upstream=https://up"],
+        &[("DEPLOYMENT_TYPE", "prod")],
+    );
+    assert_eq!(top.upstream.as_deref(), Some("https://up"));
+}
+
+#[test]
+fn under_prod_a_dev_only_value_must_not_be_set() {
+    let prod = [("DEPLOYMENT_TYPE", "prod"), ("APP_UPSTREAM", "https://up")];
+    let refusal = err(&["--name=x", "--stub-user=alice"], &prod);
+    assert_eq!(refusal.variable, "APP_STUB_USER");
+    assert_eq!(refusal.value, "alice");
+    assert_eq!(
+        refusal.detail.as_deref(),
+        Some("dev-only and set under DEPLOYMENT_TYPE=prod")
+    );
+    let refusal = err(&["--name=x", "--no-auth"], &prod);
+    assert_eq!(refusal.variable, "APP_NO_AUTH");
+    assert!(!ok(&["--name=x", "--no-auth=false"], &prod).no_auth);
 }

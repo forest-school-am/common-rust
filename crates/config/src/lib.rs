@@ -38,6 +38,7 @@
 extern crate self as common_config;
 
 mod args;
+mod class;
 mod deployment;
 mod file;
 mod help;
@@ -51,7 +52,7 @@ pub use common_config_derive::Config;
 pub use deployment::{Deployment, DEPLOYMENT_ACCEPTED, DEPLOYMENT_HELP, DEPLOYMENT_VARIABLE};
 pub use path::Path;
 pub use refusal::Refusal;
-pub use schema::{Entry, Field, FileStatus, Kind, Origin, Presence};
+pub use schema::{Class, Entry, Field, FileStatus, Kind, Origin, Presence};
 pub use values::Values;
 
 /// Implemented by `#[derive(Config)]`. `schema` registers this struct's leaves
@@ -98,7 +99,9 @@ pub fn load_from<T: Root>(
     if print_config {
         return Ok(Outcome::PrintConfig(help::print_config(&values)));
     }
-    T::from_values(&values, &Path::root()).map(Outcome::Config)
+    let config = T::from_values(&values, &Path::root())?;
+    class::enforce(&values, config.deployment())?;
+    Ok(Outcome::Config(config))
 }
 
 pub fn load<T: Root>() -> Result<T, Refusal> {

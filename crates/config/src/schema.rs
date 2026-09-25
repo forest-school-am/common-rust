@@ -14,11 +14,12 @@ pub struct Field {
     pub path: Path,
     pub help: &'static str,
     pub presence: Presence,
+    pub class: Class,
     pub secret: bool,
     pub kind: Kind,
-    /// Legacy bare env name used INSTEAD of the generated one.
+    /// Bare env name (a fleet-wide spelling) used INSTEAD of the generated one.
     pub env: Option<&'static str>,
-    /// Legacy flag name (no dashes) used INSTEAD of the generated one.
+    /// Bare flag name (no dashes) used INSTEAD of the generated one.
     pub flag: Option<&'static str>,
 }
 
@@ -27,6 +28,17 @@ pub enum Presence {
     Required,
     Default(&'static str),
     Optional,
+}
+
+/// CODESTYLE §4.4: what the deployment class demands of an OPTIONAL value.
+/// Checked once after the merge against the root's `deployment`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Class {
+    Neutral,
+    /// Unset under prod refuses; under dev it is simply absent.
+    ProdRequired,
+    /// Set (a bool: true) under prod refuses.
+    DevOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

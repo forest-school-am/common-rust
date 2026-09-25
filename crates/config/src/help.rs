@@ -5,7 +5,7 @@
 
 use crate::args::{CONFIG_FLAG, HELP_FLAG, PRINT_CONFIG_FLAG};
 use crate::layers::config_env;
-use crate::schema::{Field, FileStatus, Kind, Presence};
+use crate::schema::{Class, Field, FileStatus, Kind, Presence};
 use crate::values::{Values, MASK};
 
 struct Row {
@@ -47,10 +47,12 @@ pub(crate) fn help(app: &str, bin: &str, fields: &[Field]) -> String {
                 Kind::Bool => f.flag(),
                 Kind::Text => format!("{} <value>", f.flag()),
             };
-            let mut tail = match f.presence {
-                Presence::Required => "required".to_string(),
-                Presence::Default(d) => format!("default {d}"),
-                Presence::Optional => "optional".to_string(),
+            let mut tail = match (f.class, f.presence) {
+                (Class::ProdRequired, _) => "prod-required".to_string(),
+                (Class::DevOnly, _) => "dev-only".to_string(),
+                (_, Presence::Required) => "required".to_string(),
+                (_, Presence::Default(d)) => format!("default {d}"),
+                (_, Presence::Optional) => "optional".to_string(),
             };
             if f.secret {
                 tail.push_str(", secret");

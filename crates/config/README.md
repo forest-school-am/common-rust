@@ -37,6 +37,15 @@ NAME:
   `LOG_DESIGNATORS`). `RUST_LOG` is not a field: it is tracing's own variable
   and logging reads it.
 
+**Deployment classes (§4.4).** An optional value is classified in code:
+`#[config(prod_required)]` on an `Option<T>` — unset under `prod` refuses,
+under `dev` it is simply absent; `#[config(dev_only)]` on an `Option<T>` or
+`bool` — set (a bool: true) under `prod` refuses. Everything else is neutral.
+The class is data on the `Field` (`Class`), prints in `--help` as the tail
+(`prod-required` / `dev-only`), and is checked once after the merge against
+the root's `deployment`, so a consumer's own `validate` is left with cross-field
+rules only.
+
 **Composition is at runtime, not in the macro.** The derive emits
 `schema(prefix) -> Vec<Field>` and `from_values(values, prefix) -> Result<Self,
 Refusal>`; a nested field calls the inner type's impl with `prefix + name`. No
