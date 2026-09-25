@@ -3,12 +3,14 @@
 //! and the transport the generated client imports belong in the consumer, not
 //! here.
 
+pub mod barrel;
 pub mod export;
 pub mod generate;
 mod manifest;
 mod router;
 mod static_files;
 
+pub use barrel::Barrel;
 pub use common_routing_macros::client;
 pub use generate::{generate_client, Options as GenerateOptions};
 pub use manifest::{parse_path_params, write_manifest, Registration};
