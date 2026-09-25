@@ -45,14 +45,19 @@ use tracing_subscriber::{fmt, EnvFilter};
 /// Refusals raised here carry this crate's target; the binary's own post-load
 /// checks go through `refuse!` at their site and carry the binary's.
 pub fn boot<T: common_config::Root<Log = Log>>() -> T {
-    let config = match common_config::load::<T>() {
-        Ok(config) => config,
+    let (config, notices) = match common_config::load_with_notices::<T>() {
+        Ok(pair) => pair,
         Err(refusal) => crate::refuse!(refusal),
     };
     let rust_log = std::env::var(RUST_LOG_VARIABLE).ok();
     match LogConfig::from_log(config.log(), config.deployment(), rust_log.as_deref()) {
         Ok(cfg) => init_with(cfg),
         Err(refusal) => crate::refuse!(refusal),
+    }
+    // AFTER the subscriber: config is loaded before logging exists, so a bare
+    // spelling's deprecation line rides out of the load and is said here.
+    for notice in notices {
+        tracing::warn!(target: "common_config", "{notice}");
     }
     config
 }

@@ -89,22 +89,38 @@ pub fn load_from<T: Root>(
     args: &[String],
     env: &[(String, String)],
 ) -> Result<Outcome<T>, Refusal> {
+    load_from_with_notices(args, env).map(|(outcome, _)| outcome)
+}
+
+/// `load_from`, plus the deprecation lines this load produced (config.6). They
+/// are returned rather than logged because config is loaded BEFORE the
+/// subscriber exists: `common_logging::boot` emits them once it does.
+pub fn load_from_with_notices<T: Root>(
+    args: &[String],
+    env: &[(String, String)],
+) -> Result<(Outcome<T>, Vec<String>), Refusal> {
     let fields = T::schema(&Path::root());
     let parsed = args::parse(&fields, args)?;
     if parsed.help {
-        return Ok(Outcome::Help(help::help(T::APP, T::BIN, &fields)));
+        return Ok((Outcome::Help(help::help(T::APP, T::BIN, &fields)), Vec::new()));
     }
     let print_config = parsed.print_config;
     let values = layers::merge(T::APP, fields, parsed, env)?;
+    let notices = values.deprecations();
     if print_config {
-        return Ok(Outcome::PrintConfig(help::print_config(&values)));
+        return Ok((Outcome::PrintConfig(help::print_config(&values)), notices));
     }
     let config = T::from_values(&values, &Path::root())?;
     class::enforce(&values, config.deployment())?;
-    Ok(Outcome::Config(config))
+    Ok((Outcome::Config(config), notices))
 }
 
 pub fn load<T: Root>() -> Result<T, Refusal> {
+    load_with_notices().map(|(config, _)| config)
+}
+
+/// `load`, plus the deprecation lines (config.6); see `load_from_with_notices`.
+pub fn load_with_notices<T: Root>() -> Result<(T, Vec<String>), Refusal> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let env: Vec<(String, String)> = std::env::vars_os()
         .map(|(k, v)| {
@@ -114,9 +130,9 @@ pub fn load<T: Root>() -> Result<T, Refusal> {
             )
         })
         .collect();
-    match load_from::<T>(&args, &env)? {
-        Outcome::Config(config) => Ok(config),
-        Outcome::Help(text) | Outcome::PrintConfig(text) => {
+    match load_from_with_notices::<T>(&args, &env)? {
+        (Outcome::Config(config), notices) => Ok((config, notices)),
+        (Outcome::Help(text) | Outcome::PrintConfig(text), _) => {
             print!("{text}");
             let _ = std::io::Write::flush(&mut std::io::stdout());
             std::process::exit(0)

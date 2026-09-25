@@ -39,6 +39,47 @@ impl Values {
         }
     }
 
+    /// Values that arrived under a BARE spelling (`env = …` / `flag = …`), each
+    /// naming the pattern spelling it will move to (config.6, user 2026-09-25).
+    /// Both spellings work today; this is only what the boot log says about it,
+    /// and it is computed from the entries so it names what was ACTUALLY used —
+    /// a field with a bare spelling that took its value from the file or a
+    /// default says nothing.
+    pub fn deprecations(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for field in &self.fields {
+            let Some(entry) = self.entries.get(&field.path) else {
+                continue;
+            };
+            match &entry.origin {
+                crate::schema::Origin::Env(used)
+                    if field.env.is_some()
+                        && *used == field.env(self.app)
+                        && *used != field.path.env(self.app)
+                        && !crate::schema::FLEET_WIDE_SPELLINGS.contains(&used.as_str()) =>
+                {
+                    out.push(format!(
+                        "{used} is a bare env spelling and will be removed: use {} \
+                         (both work today)",
+                        field.path.env(self.app)
+                    ));
+                }
+                crate::schema::Origin::Arg(used)
+                    if field.flag.is_some()
+                        && *used == field.flag()
+                        && *used != field.path.flag() =>
+                {
+                    out.push(format!(
+                        "{used} is a bare flag and will be removed: use {} (both work today)",
+                        field.path.flag()
+                    ));
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
     pub fn app(&self) -> &'static str {
         self.app
     }

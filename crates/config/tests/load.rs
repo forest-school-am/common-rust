@@ -757,3 +757,53 @@ fn under_prod_a_dev_only_value_must_not_be_set() {
     assert_eq!(refusal.variable, "APP_NO_AUTH");
     assert!(!ok(&["--name=x", "--no-auth=false"], &prod).no_auth);
 }
+
+// config.6 (user 2026-09-25): a bare spelling still works and says it will go.
+// The line rides out of the load because config is read before logging exists.
+
+#[test]
+fn a_bare_env_spelling_works_and_says_it_will_be_removed() {
+    let (outcome, notices) = common_config::load_from_with_notices::<Top>(
+        &strings(&["--name=x"]),
+        &pairs(&[("LEGACY_MODE", "fast")]),
+    )
+    .expect("load");
+    match outcome {
+        Outcome::Config(top) => assert_eq!(top.mode.as_deref(), Some("fast")),
+        other => panic!("expected a config: {other:?}"),
+    }
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert!(
+        notices[0].contains("LEGACY_MODE") && notices[0].contains("APP_MODE"),
+        "the line must name both spellings: {}",
+        notices[0]
+    );
+}
+
+#[test]
+fn the_pattern_spelling_says_nothing() {
+    let (_, notices) = common_config::load_from_with_notices::<Top>(
+        &strings(&["--name=x"]),
+        &pairs(&[("APP_MODE", "fast")]),
+    )
+    .expect("load");
+    assert!(notices.is_empty(), "{notices:?}");
+}
+
+#[test]
+fn a_bare_spelling_that_supplied_nothing_says_nothing() {
+    let (_, notices) =
+        common_config::load_from_with_notices::<Top>(&strings(&["--name=x"]), &pairs(&[]))
+            .expect("load");
+    assert!(notices.is_empty(), "{notices:?}");
+}
+
+#[test]
+fn a_bare_flag_already_spelled_like_the_generated_one_says_nothing() {
+    let (_, notices) = common_config::load_from_with_notices::<Top>(
+        &strings(&["--name=x", "--mode=fast"]),
+        &pairs(&[]),
+    )
+    .expect("load");
+    assert!(notices.is_empty(), "{notices:?}");
+}

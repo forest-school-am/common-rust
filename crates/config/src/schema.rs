@@ -47,6 +47,13 @@ pub enum Kind {
     Text,
 }
 
+/// The spellings the FRAMEWORK owns, not an app's own bare names: one variable
+/// across every service is the point of them, so they are not deprecated by
+/// config.6. `DEPLOYMENT_TYPE` is the deployment class every binary must carry
+/// (the derive spells it for the root field); the two log names move into
+/// common-logging itself, which reads them from the environment.
+pub const FLEET_WIDE_SPELLINGS: &[&str] = &["DEPLOYMENT_TYPE", "LOG_FORMAT", "LOG_DESIGNATORS"];
+
 impl Field {
     pub fn flag(&self) -> String {
         match self.flag {
