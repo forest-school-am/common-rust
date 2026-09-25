@@ -12,5 +12,8 @@ proc-macro = true
 proc-macro2 = "1"
 quote = "1"
 # `full`: the attribute sits on an `async fn` item, which syn's default
-# feature set (derive input only) cannot parse.
-syn = { version = "2", features = ["full"] }
+# feature set (derive input only) cannot parse. `extra-traits`: `Arg` and
+# `Response` derive Debug over a `syn::Type`, which is only Debug under it —
+# without it `cargo build -p common-routing-macros` alone failed, and the crate
+# built only when something else in the graph happened to turn the feature on.
+syn = { version = "2", features = ["full", "extra-traits"] }
