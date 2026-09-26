@@ -5,7 +5,7 @@ Layered configuration for Les stand binaries (CODESTYLE.md §4.3/§4.4): ONE
 key, environment variable, command-line flag — are GENERATED, never parsed
 apart. R114 item 9.
 
-- **Version:** `0.4.0` · **Toolchain:** Rust 1.98.0.
+- **Version:** `0.1.0` · **Toolchain:** Rust 1.98.0.
 - Members of the `common-rust` workspace: `crates/config` (this crate) and
   `crates/config-derive` (the proc macro, re-exported as
   `common_config::Config`).

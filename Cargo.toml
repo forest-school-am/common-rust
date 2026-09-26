@@ -16,22 +16,22 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
 [workspace.dependencies]
-common-logging = { path = "crates/logging", version = "0.4.0" }
-common-templating = { path = "crates/templating", version = "0.4.0" }
-common-theme = { path = "crates/theme", version = "0.4.0" }
-common-ui-core = { path = "crates/ui-core", version = "0.4.0" }
-common-config = { path = "crates/config", version = "0.4.0" }
-common-config-derive = { path = "crates/config-derive", version = "0.4.0" }
-common-routing = { path = "crates/routing", version = "0.4.0" }
-common-routing-macros = { path = "crates/routing-macros", version = "0.4.0" }
-common-secrets = { path = "crates/secrets", version = "0.4.0" }
-common-names = { path = "crates/names", version = "0.4.0" }
-common-names-derive = { path = "crates/names-derive", version = "0.4.0" }
+common-logging = { path = "crates/logging", version = "0.1.0" }
+common-templating = { path = "crates/templating", version = "0.1.0" }
+common-theme = { path = "crates/theme", version = "0.1.0" }
+common-ui-core = { path = "crates/ui-core", version = "0.1.0" }
+common-config = { path = "crates/config", version = "0.1.0" }
+common-config-derive = { path = "crates/config-derive", version = "0.1.0" }
+common-routing = { path = "crates/routing", version = "0.1.0" }
+common-routing-macros = { path = "crates/routing-macros", version = "0.1.0" }
+common-secrets = { path = "crates/secrets", version = "0.1.0" }
+common-names = { path = "crates/names", version = "0.1.0" }
+common-names-derive = { path = "crates/names-derive", version = "0.1.0" }
 
 # Shared by two or more members.
 serde = "1"

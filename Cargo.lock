@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "common-config"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "common-config-derive",
  "strum",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "common-config-derive"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -271,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "common-logging"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "common-config",
  "serde_json",
@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "common-names"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "common-logging",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "common-names-derive"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "common-oidc"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -330,7 +330,7 @@ dependencies = [
 
 [[package]]
 name = "common-routing"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "common-routing-macros",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "common-routing-macros"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "common-secrets"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "reqwest",
  "serde",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "common-templating"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "common-logging",
@@ -386,11 +386,11 @@ dependencies = [
 
 [[package]]
 name = "common-theme"
-version = "0.4.0"
+version = "0.1.0"
 
 [[package]]
 name = "common-ui-core"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "common-theme",
  "upon",
@@ -3273,9 +3273,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[patch.unused]]
-name = "authentik-forest-school-attributes"
-version = "0.2.0"
-
-[[patch.unused]]
 name = "authentik_api"
 version = "2026.5.2"
+
+[[patch.unused]]
+name = "authentik-forest-school-attributes"
+version = "0.2.0"
